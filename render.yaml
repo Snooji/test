@@ -1,0 +1,22 @@
+# One-click deploy on Render: Dashboard → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: starside-movers
+    runtime: node
+    plan: starter            # a paid plan keeps the disk (your signup list); free works but loses signups on redeploy
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /data
+      - key: GATE_SECRET
+        generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
+    disk:
+      name: signups
+      mountPath: /data
+      sizeGB: 1

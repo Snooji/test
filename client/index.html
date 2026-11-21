@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0820" />
+  <title>Starside Movers</title>
+  <meta name="description" content="Load the truck. Don't crush the fragile box. Call out the crewmate who did. A 1–4 player moving-crew party game in your browser." />
+  <meta property="og:title" content="Starside Movers — load the truck with your crew" />
+  <meta property="og:description" content="A 3D multiplayer moving-day party game. Share a link, grab a box, don't get kicked off the truck." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚚</text></svg>" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- touch controls -->
+  <div id="joyzone" class="hidden"><div id="joybase"><div id="joyknob"></div></div></div>
+  <div id="controls" class="hidden">
+    <button id="btn-callout" class="hidden">📣<span>CALL OUT</span></button>
+    <button id="btn-rot" class="hidden">⟳<span>ROTATE</span></button>
+    <button id="btn-dash">🚀<span id="dash-label">DASH</span></button>
+    <button id="btn-action">✋<span id="action-label">ACTION</span></button>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="topbar">
+      <div class="pill" id="hud-timer">3:00</div>
+      <div class="pill" id="hud-score">0 pts</div>
+      <div class="pill" id="hud-strikes">♥♥</div>
+      <div class="pill" id="hud-truck">🚚 0/29</div>
+      <button class="pill danger hidden" id="hud-callout">📣 CALL OUT <kbd>Q</kbd></button>
+    </div>
+    <div id="scoreboard"></div>
+    <div id="toasts"></div>
+    <div id="prompt" class="hidden"></div>
+    <div id="keyhelp">WASD move · <kbd>E</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>Shift</kbd> dash/back · <kbd>R</kbd> rotate · <kbd>Q</kbd> call out · <kbd>Enter</kbd> chat</div>
+    <div id="flash"></div>
+  </div>
+
+  <!-- Email gate -->
+  <section id="gate" class="screen">
+    <div class="card">
+      <div class="logo"><span class="star">★</span> STARSIDE <b>MOVERS</b></div>
+      <p class="tag">Load the truck. Don't crush the fragile box.<br/>Call out the crewmate who did.</p>
+      <div class="crew-row" id="gate-crew"></div>
+      <form id="gate-form">
+        <input id="gate-name" maxlength="16" placeholder="Mover name" autocomplete="nickname" required />
+        <input id="gate-email" type="email" placeholder="Email" autocomplete="email" required />
+        <button class="big" type="submit">Clock in &amp; play ▶</button>
+        <p class="fine">We save your name + email to unlock play and send you Starside Movers news. No spam, unsubscribe anytime.</p>
+        <p class="err" id="gate-err"></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- Home -->
+  <section id="home" class="screen hidden">
+    <div class="card">
+      <div class="logo"><span class="star">★</span> STARSIDE <b>MOVERS</b></div>
+      <p class="tag" id="home-hi">Welcome back, mover!</p>
+      <button class="big" id="btn-create">🚚 Start a new crew</button>
+      <div class="or">or join a friend's crew</div>
+      <div class="row"><input id="join-code" placeholder="Paste invite link or crew code" /><button id="btn-join">Join</button></div>
+      <p class="err" id="home-err"></p>
+      <details class="how"><summary>How to play</summary>
+        <ul>
+          <li>📦 Grab boxes in the house, carry them to the <b>LOAD ZONE</b> at the truck.</li>
+          <li>🎯 On the ramp, <b>move to aim</b> a column, <b>ACTION</b> to drop it in — it stacks like Tetris.</li>
+          <li>⚠ Heavy boxes and furniture <b>crush fragile boxes</b> beneath them. Heavy on the bottom!</li>
+          <li>🧣 <b>Hold ACTION</b> to pad-wrap couches &amp; lamps, 🔧 disassemble desks &amp; tables.</li>
+          <li>💪 Couches, desks and tables are <b>two-mover lifts</b>.</li>
+          <li>📣 Heard a CRUNCH? <b>Call out</b> the culprit. Right = they get a strike. Wrong = you do. 2 strikes and you're off the truck.</li>
+        </ul>
+      </details>
+      <button class="link" id="btn-signout">Not you? Switch mover</button>
+    </div>
+  </section>
+
+  <!-- Lobby -->
+  <section id="lobby" class="screen hidden">
+    <div class="card wide">
+      <div class="logo small"><span class="star">★</span> CREW <b id="lobby-code"></b></div>
+      <div class="share">
+        <input id="share-link" readonly />
+        <button id="btn-copy">Copy invite</button>
+      </div>
+      <h3>Pick your mover</h3>
+      <div class="chars" id="chars"></div>
+      <h3>Round</h3>
+      <div class="modes" id="modes">
+        <button data-mode="3min">⏱ 3 min</button>
+        <button data-mode="5min">⏱ 5 min</button>
+        <button data-mode="load">🚚 Until loaded</button>
+      </div>
+      <div class="lobby-players" id="lobby-players"></div>
+      <button class="big" id="btn-start">Start the move ▶</button>
+      <p class="fine" id="lobby-wait"></p>
+      <p class="tip" id="lobby-tip"></p>
+    </div>
+  </section>
+
+  <!-- Meeting -->
+  <section id="meeting" class="screen hidden">
+    <div class="card wide meeting">
+      <div class="siren">📣 CREW MEETING</div>
+      <p id="meeting-sub"></p>
+      <div class="vote-grid" id="vote-grid"></div>
+      <button id="btn-skip" class="ghost">Skip vote</button>
+      <div class="timer" id="meeting-timer">25</div>
+    </div>
+  </section>
+
+  <!-- Chat (lobby + meeting) -->
+  <div id="chat" class="hidden">
+    <div id="chat-log"></div>
+    <form id="chat-form"><input id="chat-input" maxlength="120" placeholder="Say something… (Enter)" autocomplete="off" /></form>
+  </div>
+
+  <div id="verdict" class="hidden"></div>
+
+  <!-- Results -->
+  <section id="results" class="screen hidden">
+    <div class="card wide">
+      <div class="logo small" id="res-reason">Time's up!</div>
+      <div id="res-winner"></div>
+      <div id="res-table"></div>
+      <div id="res-truth"></div>
+      <button class="big" id="btn-again">Play again ▶</button>
+      <button class="ghost" id="btn-tolobby">Back to crew lobby</button>
+      <p class="fine" id="res-wait"></p>
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
