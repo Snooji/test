@@ -34,7 +34,7 @@ It's a single Node service that serves both the game and the WebSocket, so any N
 
 **Render (easiest):** push this folder to a GitHub repo, then go to Render → **New → Blueprint** → pick the repo.
 `render.yaml` sets up the build, a health check, a persistent disk for signups, and secrets.
-You'll get a `https://starside-movers.onrender.com`-style URL to post.
+You'll get a `https://starside-movers-game.onrender.com`-style URL to post.
 
 **Fly.io / Railway / any Docker host:** `docker build -t starside-movers . && docker run -p 2567:2567 -v $PWD/data:/data starside-movers`.
 

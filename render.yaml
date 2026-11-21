@@ -1,7 +1,7 @@
 # One-click deploy on Render: Dashboard → New → Blueprint → pick this repo.
 services:
   - type: web
-    name: starside-movers
+    name: starside-movers-game
     runtime: node
     plan: starter            # a paid plan keeps the disk (your signup list); free works but loses signups on redeploy
     buildCommand: npm ci --include=dev && npm run build
