@@ -664,3 +664,17 @@ test('browsers rebuild exactly the server house from the snapshot (every kind of
     }
   }
 });
+
+test('training: every step names a target to point at (item or the truck) and uses short text', () => {
+  const { room, join, send } = makeRoom({ tutorial: true });
+  const a = join('A', 'Ada');
+  send('A', 'start');
+  let snap = room.snapshot();
+  assert.ok(snap.tutorial.target && snap.tutorial.target !== 'ramp', 'step 1 points at the box');
+  assert.ok(snap.tutorial.text.length <= 60, `short: "${snap.tutorial.text}"`);
+  const std = [...room.items.values()].find(i => i.type === 'standard');
+  std.state = 'carried'; std.carriers = ['A']; a.carry = std.id;
+  room.tick(0.05);
+  snap = room.snapshot();
+  assert.equal(snap.tutorial.target, 'ramp', 'carrying → point at the truck');
+});

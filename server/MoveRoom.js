@@ -414,23 +414,29 @@ export class MoveRoom extends Room {
     const human = [...this.players.values()].find(p => !p.bot);
     if (!human) return;
     const it = (type) => [...this.items.values()].find(i => i.type === type);
+    // short lines; {ACT} {ROT} {HELP} become the right button for each device on the client
     const steps = [
-      { text: 'Walk to the glowing box and TAP ✋ (E) to pick it up.', target: 'standard', done: () => human.carry === it('standard').id || it('standard').state === 'loaded' },
-      { text: 'Carry it to the 🚚 LOAD ZONE on the truck ramp.', target: null, done: () => human.loadMode || it('standard').state === 'loaded' },
-      { text: 'Aim with move (or the D-pad), then TAP ✋ to drop it into the truck.', target: null, done: () => it('standard').state === 'loaded' },
-      { text: 'Heavy boxes go on the BOTTOM. Load the heavy box (it slows you down).', target: 'heavy', done: () => it('heavy').state === 'loaded' },
-      { text: 'Fragile goes on TOP. Set the fragile box on top of another box.', target: 'fragile', done: () => it('fragile').state === 'loaded' },
-      { text: 'HOLD ✋ next to the floor lamp to pad-wrap it. Unwrapped lamps shatter.', target: 'lamp', done: () => it('lamp').wrapped || it('lamp').state === 'loaded' },
-      { text: 'Load the wrapped lamp. Press R (⟳ ROTATE) to turn and flip it.', target: 'lamp', done: () => it('lamp').state === 'loaded' },
-      { text: 'Couches are a two-mover lift. Grab one end, then hit 🆘 HELP (H) to call the Coach.', target: 'couch', done: () => it('couch').carriers.length === 2 || it('couch').state === 'loaded' },
-      { text: 'Carry the couch together to the truck and load it.', target: 'couch', done: () => it('couch').state === 'loaded' },
+      { text: 'Walk to the box. Tap {ACT} to pick it up.', target: 'standard', done: () => human.carry === it('standard').id || it('standard').state === 'loaded' },
+      { text: 'Take it to the truck. Follow the arrow.', target: 'ramp', done: () => human.loadMode || it('standard').state === 'loaded' },
+      { text: 'Move to aim. Tap {ACT} to drop it in.', target: 'ramp', done: () => it('standard').state === 'loaded' },
+      { text: 'Heavy box next. Heavy goes on the bottom.', target: 'heavy', done: () => it('heavy').state === 'loaded' },
+      { text: 'Fragile box next. Put it on top of a box.', target: 'fragile', done: () => it('fragile').state === 'loaded' },
+      { text: 'Hold {ACT} next to the lamp to wrap it.', target: 'lamp', done: () => it('lamp').wrapped || it('lamp').state === 'loaded' },
+      { text: 'Load the lamp. Tap {ROT} to turn it.', target: 'lamp', done: () => it('lamp').state === 'loaded' },
+      { text: 'Grab the couch. Tap {HELP} to call the Coach.', target: 'couch', done: () => it('couch').carriers.length === 2 || it('couch').state === 'loaded' },
+      { text: 'Carry the couch to the truck together.', target: 'couch', done: () => it('couch').state === 'loaded' },
     ];
     let step = Math.max(0, T.step);
     while (step < steps.length && steps[step].done()) step++;
+    // point at the item, or at the truck once you're holding it
+    if (step < steps.length) {
+      const tt = steps[step].target, item = tt && tt !== 'ramp' ? it(tt) : null;
+      T.target = tt === 'ramp' || (item && (item.carriers.includes(human.id))) ? 'ramp' : item ? item.id : null;
+    }
     if (step !== T.step) {
       T.step = step;
       if (step >= steps.length) { this.event({ kind: 'tutorial', step, total: steps.length, done: true }); return this.endRound('Training complete! You’re ready for a real move.'); }
-      T.text = steps[step].text; T.target = steps[step].target ? it(steps[step].target).id : null; T.total = steps.length;
+      T.text = steps[step].text; T.targetType = steps[step].target; T.total = steps.length;
       this.event({ kind: 'tutorial', step, total: steps.length, text: T.text });
     }
   }

@@ -338,3 +338,10 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 @media (min-width: 1000px) {
   .res-promo .promo { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: 24px; margin: 0; width: 320px; }
 }
+@media (pointer: coarse) {
+  .pill.icon { padding: 4px 7px; }
+  #coach { left: 10px; transform: none; top: 108px; width: calc(100vw - 180px); padding: 8px 10px; }
+  #coach-text { font-size: 13.5px; }
+  #coach-dots i { width: 12px; }
+}
+@media (pointer: coarse) { #hud-music { display: none; } }

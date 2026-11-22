@@ -72,6 +72,14 @@ export class GameScene {
       this.scene.add(sp); this.colLabels.push(sp);
     }
     this.raycaster = new THREE.Raycaster();
+    // training objective: a bouncing arrow + pulsing ring over whatever the Coach wants next
+    this.objective = new THREE.Group();
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.8, 4), new THREE.MeshBasicMaterial({ color: 0x55ffcc }));
+    cone.rotation.x = Math.PI; cone.position.y = 2.9; this.objective.add(cone);
+    this.objRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.15, 40), new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    this.objRing.rotation.x = -Math.PI / 2; this.objRing.position.y = 0.07; this.objective.add(this.objRing);
+    this.objCone = cone; this.objective.visible = false;
+    this.scene.add(this.objective);
 
     addEventListener('resize', () => this.resize());
     this.resize();
@@ -354,6 +362,15 @@ export class GameScene {
   dropFx(x, y, z) { this.burst(x, y, z, [0xbfb8d6, 0x8f88aa], 10, 1.6, 0.6, 0.7); }
   confetti(x, z) { this.burst(x, 4, z, [0xff8a3d, 0x55ffcc, 0xffd166, 0xa66cff, 0x7bd84a], 80, 6, 2.6, 0.8); }
 
+  /** Where the training objective is right now: an item, or the truck ramp. */
+  objectivePos() {
+    const id = this.tutorialTarget;
+    if (!id || !this.snap) return null;
+    if (id === 'ramp') return { x: 11.2, z: 0 };
+    const it = this.snap.items.find(i => i.id === id);
+    return it && it.state !== 'loaded' ? { x: it.x, z: it.z } : null;
+  }
+
   /** 🆘 beacon: a pulsing ring + light pillar where someone needs a hand. */
   ping(x, z) {
     const g = new THREE.Group();
@@ -486,8 +503,8 @@ export class GameScene {
     this.arrow.visible = false;
     if (me && snap?.phase === 'playing' && !me.out && !me.spectator && !me.loadMode) {
       let tx = null, tz = null;
-      const tt = this.tutorialTarget && snap.items.find(i => i.id === this.tutorialTarget && i.state === 'floor');
-      if (tt && !me.carry) { tx = tt.x; tz = tt.z; }
+      const op = this.objectivePos();
+      if (op) { if (Math.hypot(op.x - me.x, op.z - me.z) > 1.8) { tx = op.x; tz = op.z; } }
       else if (me.carry) { tx = 11.2; tz = 0; }
       else {
         let bd = Infinity;
@@ -509,6 +526,16 @@ export class GameScene {
           this.arrow.visible = true;
         }
       }
+    }
+
+    // training objective marker
+    const op = this.objectivePos();
+    this.objective.visible = !!op && snap?.phase === 'playing' && !me?.loadMode;
+    if (op) {
+      this.objective.position.set(op.x, op.y || 0, op.z);
+      this.objCone.position.y = 2.9 + Math.abs(Math.sin(t * 4)) * 0.6;
+      this.objCone.rotation.y += dt * 2;
+      const k = (t * 1.2) % 1; this.objRing.scale.setScalar(0.8 + k * 0.9); this.objRing.material.opacity = 1 - k;
     }
 
     // column heights in load mode

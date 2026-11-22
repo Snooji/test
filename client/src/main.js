@@ -366,7 +366,8 @@ function renderHud(s, me) {
   const tut = s.tutorial;
   show('coach', !!tut && s.phase === 'playing');
   if (tut) {
-    $('coach-text').textContent = tut.text || '';
+    const keys = isTouch ? { ACT: '✋', ROT: '⟳', HELP: '🆘' } : { ACT: 'E', ROT: 'R', HELP: 'H' };
+    $('coach-text').textContent = (tut.text || '').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]);
     $('coach-dots').innerHTML = Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join('');
   }
   scene.tutorialTarget = tut?.target || null;
@@ -445,7 +446,7 @@ function renderPrompt(s, me) {
     }
   }
   $('prompt').textContent = text;
-  show('prompt', !!text);
+  show('prompt', !!text && !s.tutorial); // in training the Coach does the talking
   $('action-label').textContent = action;
 }
 
@@ -459,7 +460,7 @@ function toast(text, cls = '') {
   setTimeout(() => el.remove(), cls ? 7000 : 4500);
 }
 function onEvent(e) {
-  if (e.kind === 'toast') toast(e.text);
+  if (e.kind === 'toast') { if (!(e.private && snap?.tutorial)) toast(e.text); }
   else if (e.kind === 'emote') { scene.emote(e.id, e.e); if (e.e.startsWith('+')) sfx('coin'); else sfx('blip'); if (e.id === myId) buzz(e.e.startsWith('+') ? 25 : 12); }
   else if (e.kind === 'crunch') {
     toast(e.text, 'crunch'); scene.shake(); sfx('crunch'); scene.crunchFx(); buzz(200);
@@ -677,7 +678,7 @@ function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   scene.frame(dt);
-  if (snap && !$('hud').classList.contains('hidden')) drawMinimap($('minimap'), scene.level, snap, myId, helpPings);
+  if (snap && !$('hud').classList.contains('hidden')) drawMinimap($('minimap'), scene.level, snap, myId, helpPings, scene.objectivePos());
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

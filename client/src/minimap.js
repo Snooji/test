@@ -4,7 +4,7 @@ import { ITEM_TYPES } from '../../shared/logic.js';
 
 const COLORS = { nova: '#ff8a3d', cosmo: '#2ec4b6', glorp: '#7bd84a', zibble: '#a66cff' };
 
-export function drawMinimap(canvas, level, snap, myId, pings) {
+export function drawMinimap(canvas, level, snap, myId, pings, objective = null) {
   if (!level || !canvas) return;
   const g = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -35,6 +35,13 @@ export function drawMinimap(canvas, level, snap, myId, pings) {
     if (age > 7) { pings.splice(i, 1); continue; }
     g.strokeStyle = `rgba(255,68,102,${1 - age / 7})`; g.lineWidth = 2;
     g.beginPath(); g.arc(X(pings[i].x), Z(pings[i].z), 4 + (age * 8) % 10, 0, Math.PI * 2); g.stroke();
+  }
+  // training objective: a mint ping that keeps pulsing until it's done
+  if (objective) {
+    const k = (performance.now() / 900) % 1;
+    g.strokeStyle = `rgba(85,255,204,${1 - k})`; g.lineWidth = 2.5;
+    g.beginPath(); g.arc(X(objective.x), Z(objective.z), 4 + k * 12, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = '#55ffcc'; g.beginPath(); g.arc(X(objective.x), Z(objective.z), 3, 0, Math.PI * 2); g.fill();
   }
   // movers
   for (const p of snap.players) {
