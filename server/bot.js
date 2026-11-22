@@ -87,6 +87,7 @@ export class Bot {
     if (t.teamCarry && item.carriers.length === 1 && this.room.activePlayers().length > 1) {
       // waiting for a buddy; don't deadlock forever
       this.idle();
+      if (this.waitAlone === 0 || this.waitAlone > 5) this.room.helpPing?.(this.p); // call for a buddy
       this.waitAlone += dt;
       if (this.waitAlone > 10) { this.waitAlone = 0; this.giveUp(item); }
       return;

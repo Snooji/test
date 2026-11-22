@@ -88,6 +88,7 @@ export class MoveRoom extends Room {
       });
     }
     this.onMessage('callout', (c) => this.callMeeting(c.sessionId));
+    this.onMessage('help', (c) => this.helpPing(this.players.get(c.sessionId)));
     this.onMessage('vote', (c, m) => this.castVote(this.players.get(c.sessionId), m?.target));
     this.onMessage('chat', (c, m) => this.say(this.players.get(c.sessionId), m?.text));
     const hostInLobby = (c) => c.sessionId === this.hostId && (this.phase === 'lobby' || this.phase === 'results');
@@ -170,17 +171,36 @@ export class MoveRoom extends Room {
       // phones drop connections when switching apps: hold their mover for 30 s
       p.in.mx = 0; p.in.mz = 0; p.in.hold = false; p.away = true;
       this.releaseCarry(p); // never leave a crewmate holding the other end
+      this.system(`📡 ${p.name} lost connection. Holding their spot for 30 s…`);
       try {
         await this.allowReconnection(client, 30);
         p.away = false; p.resync = true;
-        this.event({ kind: 'toast', text: `${p.name} reconnected` });
+        this.system(`✅ ${p.name} is back!`);
         return;
       } catch { /* timed out */ }
     }
     this.releaseCarry(p);
     this.players.delete(p.id);
     if (this.hostId === p.id) this.hostId = [...this.players.values()].find(o => !o.bot)?.id || null;
-    this.event({ kind: 'toast', text: `${p.name} left the crew` });
+    this.system(`👋 ${p.name} left the game.`);
+    // multiplayer: if everyone else walked off, the last human standing wins
+    if (this.inRound() && this.roundHumans >= 2) {
+      const left = [...this.players.values()].filter(o => !o.bot && !o.spectator);
+      if (left.length === 1) this.endRound(`Everyone else left. ${left[0].name} wins by default!`, left[0].id);
+    }
+  }
+
+  system(text) { this.broadcast('chat', { from: 'Starside', text, system: true }); }
+
+  helpPing(p) {
+    const item = p?.carry ? this.items.get(p.carry) : null;
+    if (!item || !ITEM_TYPES[item.type].teamCarry || item.carriers.length !== 1 || this.phase !== 'playing') return false;
+    const now = this.clock?.currentTime ?? Date.now();
+    if (p.lastHelp && now - p.lastHelp < 5000) return false;
+    p.lastHelp = now;
+    const label = ITEM_TYPES[item.type].label.toLowerCase();
+    this.event({ kind: 'help', id: p.id, name: p.name, item: label, x: +item.x.toFixed(1), z: +item.z.toFixed(1), text: `🆘 ${p.name} needs a hand with the ${label}! Lift the other end and split the points.` });
+    return true;
   }
 
   // ---------- world ----------
@@ -225,6 +245,7 @@ export class MoveRoom extends Room {
     for (const b of this.bots.values()) b.reset();
     this.phase = 'countdown';
     this.countdown = 3;
+    this.roundHumans = [...this.players.values()].filter(p => !p.bot && !p.spectator).length;
     this.event({ kind: 'start' });
   }
 
@@ -584,12 +605,12 @@ export class MoveRoom extends Room {
     if (this.timeLeft <= 0 || done || noneLeft) this.endRound(done ? 'Truck loaded!' : noneLeft ? 'Everyone got kicked off the truck!' : "Time's up!");
   }
 
-  endRound(reason) {
+  endRound(reason, forcedWinnerId = null) {
     this.phase = 'results';
     const players = [...this.players.values()].filter(p => !p.spectator)
       .map(p => ({ id: p.id, name: p.name, char: p.char, score: p.score, strikes: p.strikes, out: p.out, loaded: p.loaded, breaks: p.breaks || 0, bot: !!p.bot }))
       .sort((a, b) => b.score - a.score);
-    const winner = players.find(p => !p.out) || null;
+    const winner = (forcedWinnerId && players.find(p => p.id === forcedWinnerId)) || players.find(p => !p.out) || null;
     const loaded = [...this.items.values()].filter(i => i.state === 'loaded');
     const teamTotal = loaded.reduce((s, i) => s + Object.values(i.earned || {}).reduce((a, b) => a + b, 0), 0);
     const unresolved = this.breaks.filter(b => !b.resolved).map(b => ({

@@ -8,7 +8,7 @@ function makeRoom(opts = { level: 'classic' }) {
   const events = [];
   room.onMessage = (type, fn) => { handlers[type] = fn; };
   room.setSimulationInterval = () => {};
-  room.broadcast = (type, msg) => { if (type === 'evt') events.push(msg); };
+  room.broadcast = (type, msg) => { if (type === 'evt') events.push(msg); if (type === 'chat') events.push({ kind: 'chat', ...msg }); };
   room.clients = [];
   room.onCreate(opts);
   const join = (id, name) => {
@@ -245,4 +245,47 @@ test('tapping to join a two-mover lift does not immediately drop it', () => {
   assert.deepEqual(couch.carriers, ['A', 'B'], 'B joined and the lift held');
   room.tick(0.05);
   assert.equal(couch.state, 'carried');
+});
+
+test('a player leaving posts a notice in chat', async () => {
+  const { room, join, events } = makeRoom();
+  join('A', 'Ada'); join('B', 'Bo');
+  await room.onLeave({ sessionId: 'B' }, true);
+  assert.ok(events.some(e => e.kind === 'chat' && e.system && /Bo left/.test(e.text)));
+});
+
+test('last human left in a multiplayer round wins by default', async () => {
+  const { room, join, send } = makeRoom();
+  join('A', 'Ada'); join('B', 'Bo'); join('C', 'Cy');
+  send('A', 'start');
+  room.players.get('B').score = 50; // even with a higher score, leaving forfeits
+  await room.onLeave({ sessionId: 'B' }, true);
+  assert.equal(room.phase, 'playing', 'two humans still playing');
+  await room.onLeave({ sessionId: 'C' }, true);
+  assert.equal(room.phase, 'results');
+  assert.equal(room.results.winnerId, 'A');
+  assert.match(room.results.reason, /wins by default/);
+});
+
+test('solo rounds do not auto-end when bots are the only others', async () => {
+  const { room, join, send } = makeRoom({ level: 'classic', solo: true });
+  join('A', 'Ada');
+  send('A', 'start');
+  room.tick(0.05);
+  assert.equal(room.phase, 'playing');
+});
+
+test('help ping: only when holding one end of a two-mover lift alone, with a cooldown', () => {
+  const { room, join, send, events } = makeRoom();
+  const a = join('A', 'Ada'); join('B', 'Bo');
+  send('A', 'start');
+  send('A', 'help');
+  assert.equal(events.filter(e => e.kind === 'help').length, 0, 'not holding anything');
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  couch.state = 'carried'; couch.carriers = ['A']; a.carry = couch.id;
+  send('A', 'help');
+  const ping = events.find(e => e.kind === 'help');
+  assert.ok(ping && ping.id === 'A' && typeof ping.x === 'number');
+  send('A', 'help');
+  assert.equal(events.filter(e => e.kind === 'help').length, 1, 'cooldown');
 });
