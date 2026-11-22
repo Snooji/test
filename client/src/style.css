@@ -345,3 +345,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
   #coach-dots i { width: 12px; }
 }
 @media (pointer: coarse) { #hud-music { display: none; } }
+
+#results { grid-auto-rows: auto; align-content: end; gap: 10px; }
+#results .res-promo { width: min(640px, 100%); }
+@media (max-width: 999px) { #results .res-promo .promo { margin: 0 auto 8px; } }
