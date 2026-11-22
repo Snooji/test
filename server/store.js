@@ -44,6 +44,7 @@ export class FileStore {
   async listSignups() { return Object.values(this.d.signups).sort((a, b) => a.created_at.localeCompare(b.created_at)); }
   async confirm(email) { const r = this.d.signups[email]; if (r) { r.confirmed = true; this.save(); } return !!r; }
   async unsubscribe(email) { const r = this.d.signups[email]; if (r) { r.unsubscribed = true; r.marketing = false; this.save(); } return !!r; }
+  async setMarketing(email, on) { const r = this.d.signups[email]; if (r) { r.marketing = !!on; r.unsubscribed = !on; this.save(); } return !!r; }
   async event(name, n = 1) { const k = today() + '|' + name; this.d.events[k] = (this.d.events[k] || 0) + n; this.save(); }
   async funnel(days) {
     const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
@@ -100,6 +101,7 @@ export class PgStore {
   async listSignups() { return (await this.q('select * from signups order by created_at')).rows; }
   async confirm(email) { return (await this.q('update signups set confirmed = true where email = $1', [email])).rowCount > 0; }
   async unsubscribe(email) { return (await this.q('update signups set unsubscribed = true, marketing = false where email = $1', [email])).rowCount > 0; }
+  async setMarketing(email, on) { return (await this.q('update signups set marketing = $2, unsubscribed = $3 where email = $1', [email, !!on, !on])).rowCount > 0; }
   async event(name, n = 1) {
     const day = today();
     const { rowCount } = await this.q('update events set n = n + $3 where day = $1 and name = $2', [day, name, n]);

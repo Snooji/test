@@ -310,7 +310,7 @@ export class Bot {
       if (Math.max(0, ...Object.values(this.sus)) >= 1.5 && this.rng() < this.cfg.callout) this.calloutAt = 2 + this.rng() * 4;
       return;
     }
-    if (this.rng() < this.cfg.callout) this.calloutAt = 2 + this.rng() * 5;
+    if (this.room.canCallOut?.() !== false && this.rng() < this.cfg.callout) this.calloutAt = 2 + this.rng() * 5;
   }
 
   meetingVote() {

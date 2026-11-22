@@ -318,6 +318,29 @@ export function driveOffCheck(grid) {
   return { damaged: [...damaged.values()], safety: total ? Math.round((100 * (total - damaged.size)) / total) : 100 };
 }
 
+/**
+ * How well a piece is packed, for the end-of-round tally: 1 = perfect.
+ * Partly resting on air ×0.75 · heavy sitting on a lighter box ×0.85 · fragile box with something on top ×0.8
+ */
+export function placementQuality(grid, id) {
+  const rec = grid.items.get(id);
+  if (!rec) return { q: 1, notes: [] };
+  const t = ITEM_TYPES[rec.type];
+  const notes = [];
+  let q = 1, sup = 0;
+  const below = new Set(), cols = columnsOf(rec.cells);
+  for (const [cx, cz, low] of cols) {
+    const y = rec.y + low;
+    if (y === 0) { sup++; continue; }
+    const b = grid.cells[rec.x + cx][rec.z + cz][y - 1];
+    if (b) { sup++; below.add(b); }
+  }
+  if (sup < cols.length) { q *= 0.75; notes.push('partly resting on air'); }
+  if (t.heavy && [...below].some(b => !ITEM_TYPES[grid.items.get(b).type].heavy)) { q *= 0.85; notes.push('heavy on a lighter box'); }
+  if (t.fragile && rec.cells.some(([cx, cy, cz]) => { const y = rec.y + cy + 1; const a = y < GRID.H ? grid.cells[rec.x + cx][rec.z + cz][y] : null; return a && a !== id; })) { q *= 0.8; notes.push('fragile box buried under something'); }
+  return { q: +q.toFixed(2), notes };
+}
+
 /** Plurality vote; ties broken by caller's own vote; no votes → 'skip'. */
 export function tallyVotes(votes, callerId) {
   const counts = {};

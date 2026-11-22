@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
 import { sendMail, confirmEmail, mailerEnabled } from './mailer.js';
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve('data');
@@ -19,6 +20,24 @@ function loadSecret() {
 const SECRET = loadSecret();
 
 export const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
+
+// throwaway inbox services: not real customers
+const DISPOSABLE = new Set(['mailinator.com', 'guerrillamail.com', 'guerrillamail.net', '10minutemail.com', 'tempmail.com', 'temp-mail.org', 'yopmail.com', 'trashmail.com', 'getnada.com', 'sharklasers.com', 'dispostable.com', 'throwawaymail.com', 'maildrop.cc', 'fakeinbox.com', 'mintemail.com', 'mohmal.com', 'emailondeck.com', 'tempail.com', 'burnermail.io', 'spamgourmet.com']);
+const mxCache = new Map();
+/** can this domain receive email? (DNS MX lookup; on when EMAIL_MX_CHECK=on). Fails open on DNS hiccups. */
+async function domainTakesMail(domain) {
+  if (process.env.EMAIL_MX_CHECK !== 'on') return true;
+  if (mxCache.has(domain)) return mxCache.get(domain);
+  let ok = true;
+  try {
+    const mx = await Promise.race([dns.resolveMx(domain), new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })), 3000))]);
+    ok = mx.some(r => r.exchange && r.exchange !== '.');
+  } catch (err) {
+    ok = !['ENOTFOUND', 'ENODATA', 'ENOTIMP'].includes(err.code); // the domain really doesn't exist / has no mail
+  }
+  mxCache.set(domain, ok);
+  return ok;
+}
 export const cleanName = (n) => String(n || '').replace(/[<>]/g, '').trim().slice(0, 16);
 export const cleanEmail = (e) => String(e || '').trim().toLowerCase().slice(0, 254);
 
@@ -55,9 +74,12 @@ export function signupRoutes(app, express, store) {
   app.post('/api/signup', json, async (req, res) => {
     const name = cleanName(req.body?.name);
     const email = cleanEmail(req.body?.email);
-    const marketing = req.body?.marketing === true;
+    const marketing = true; // agreeing to Starside Movers newsletters is part of playing; opt out any time
     if (!name) return res.status(400).json({ error: 'Please enter your mover name.' });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email.' });
+    const domain = email.split('@')[1];
+    if (DISPOSABLE.has(domain)) return res.status(400).json({ error: 'Please use your real email, not a throwaway inbox.' });
+    if (!(await domainTakesMail(domain))) return res.status(400).json({ error: 'That email address can’t receive mail. Check for typos.' });
     if (limited('signup', req.ip, 30)) return res.status(429).json({ error: 'Too many signups, try later.' });
     try {
       const { isNew } = await store.upsertSignup({ name, email, marketing });
@@ -96,6 +118,22 @@ export function signupRoutes(app, express, store) {
   };
   app.get('/unsubscribe', unsub);
   app.post('/unsubscribe', unsub); // one-click unsubscribe from mail apps
+
+  // settings: newsletter on/off for a signed-in player
+  app.post('/api/prefs', json, async (req, res) => {
+    const email = cleanEmail(req.body?.email);
+    if (!verifyToken(email, req.body?.token)) return res.status(401).json({ error: 'sign in first' });
+    const on = req.body?.marketing === true;
+    await store.setMarketing(email, on);
+    store.event(on ? 'optin' : 'unsubscribe').catch(() => {});
+    res.json({ ok: true, marketing: on });
+  });
+  app.get('/api/prefs', async (req, res) => {
+    const email = cleanEmail(req.query.email);
+    if (!verifyToken(email, req.query.token)) return res.status(401).json({ error: 'sign in first' });
+    const row = (await store.listSignups()).find(r => r.email === email);
+    res.json({ marketing: !!(row?.marketing && !row?.unsubscribed) });
+  });
 
   app.post('/api/event', json, (req, res) => {
     const name = String(req.body?.name || '');

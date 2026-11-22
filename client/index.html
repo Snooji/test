@@ -76,9 +76,8 @@
       <form id="gate-form">
         <label class="field"><span>Mover name</span><input id="gate-name" maxlength="16" placeholder="e.g. Rocket Rita" autocomplete="nickname" required /></label>
         <label class="field"><span>Email</span><input id="gate-email" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
-        <label class="consent"><input type="checkbox" id="gate-marketing" /> <span>Email me news, new houses and Starside Movers offers. Unsubscribe any time.</span></label>
         <button class="cta-main" type="submit">Clock in &amp; play</button>
-        <p class="fine">We use your email to save your mover and scores. <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
+        <p class="fine agree">By playing, you agree to receive newsletters and offers from <b>Starside Movers</b>. You can opt out any time in Settings or from any email. <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
         <p class="err" id="gate-err"></p>
       </form>
     </div>
@@ -127,7 +126,12 @@
       <div class="menu-links">
         <button class="link" id="btn-train2">Replay training</button>
         <button class="link hidden" id="btn-install">Install the app</button>
+        <button class="link" id="btn-settings">Settings</button>
         <button class="link" id="btn-signout">Switch mover</button>
+      </div>
+      <div class="settings hidden" id="settings">
+        <label class="switch"><input type="checkbox" id="set-news" /> <span>Starside Movers newsletters &amp; offers</span></label>
+        <p class="fine" id="set-note"></p>
       </div>
     </div>
     <aside class="promo">
@@ -179,6 +183,7 @@
         <div class="row botrow"><button class="ghost small" id="btn-addbot">＋ Add AI</button><button class="ghost small" id="btn-rmbot">－ Remove AI</button></div>
       </div>
       <div class="lobby-players" id="lobby-players"></div>
+      <button class="big alt hidden" id="btn-ready-lobby">✋ I'm ready</button>
       <button class="big" id="btn-start">Start the move ▶</button>
       <p class="fine" id="lobby-wait"></p>
       <p class="tip" id="lobby-tip"></p>

@@ -281,3 +281,20 @@ test('drive-off: a lone 4-high tower tips its fragile top', () => {
   assert.deepEqual(r.damaged.map(d => d.id), ['top']);
   assert.match(r.damaged[0].reason, /tower|toppled/i);
 });
+
+// ---- final tally: placement quality ----
+import { placementQuality } from '../shared/logic.js';
+test('placement quality: solid = 100%, heavy on a lighter box, fragile buried, or half on air all count less', () => {
+  const g = createGrid();
+  placeItem(g, mk('s', 'standard'), 0, 0, 0);
+  assert.equal(placementQuality(g, 's').q, 1);
+  placeItem(g, mk('h', 'heavy'), 0, 0, 0);                    // heavy resting on a standard box
+  assert.equal(placementQuality(g, 'h').q, 0.85);
+  placeItem(g, mk('f', 'fragile'), 1, 0, 0);
+  placeItem(g, mk('s2', 'standard'), 1, 0, 0);                // something sitting on the fragile box
+  assert.equal(placementQuality(g, 'f').q, 0.8);
+  placeItem(g, mk('a', 'standard'), 2, 2, 0);
+  placeItem(g, mk('d', 'desk', { wrapped: true }), 2, 2, 1);  // desk across one box and air (rot 1 → along z)
+  const dq = placementQuality(g, 'd');
+  assert.ok(dq.q < 1 && dq.notes.length, JSON.stringify(dq));
+});

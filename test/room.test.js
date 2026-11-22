@@ -17,6 +17,7 @@ function makeRoom(opts = { level: 'classic' }) {
     return room.players.get(id);
   };
   const send = (id, type, msg) => {
+    if (type === 'start' && !room.noAutoReady && room.phase === 'lobby') for (const p of room.players.values()) if (!p.bot && p.id !== room.hostId) p.ready = true;
     handlers[type]({ sessionId: id }, msg);
     if (type === 'start') for (let i = 0; i < 80 && room.phase === 'countdown'; i++) room.tick(0.05); // skip 3-2-1
   };
@@ -35,7 +36,7 @@ const firstOf = (room, type) => [...room.items.values()].find(i => i.type === ty
 
 test('loading scores, heavy-on-fragile breaks, correct callout strikes culprit', () => {
   const { room, join, send, events } = makeRoom();
-  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  const a = join('A', 'Ada'), b = join('B', 'Bo'); join('C', 'Cy'); // 3 movers: meetings need someone else to accuse
   send('A', 'start');
   assert.equal(room.phase, 'playing');
 
@@ -53,7 +54,8 @@ test('loading scores, heavy-on-fragile breaks, correct callout strikes culprit',
   send('A', 'callout');
   assert.equal(room.phase, 'meeting');
   send('A', 'vote', { target: 'B' });
-  send('B', 'vote', { target: 'A' }); // tie → caller's vote (B) wins
+  send('B', 'vote', { target: 'A' });
+  send('C', 'vote', { target: 'skip' }); // B 1, A 1, skip 1: a tie, so the caller's vote (B) wins
   room.tick(0.05);
   assert.equal(room.phase, 'playing');
   assert.equal(b.strikes, 1);
@@ -762,4 +764,139 @@ test('dolly: AI movers never grab it', () => {
   r.room.startRound();
   for (let i = 0; i < 20 * 60; i++) r.room.tick(0.05);
   assert.ok(![...r.room.players.values()].some(p => p.dolly));
+});
+
+// ---- round 5 ----
+test('any mode: you can pull a placed piece back out; points come back off, so no farming', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'); join('B', 'Bo');
+  send('A', 'start');
+  const box = room.items.get(firstOf(room, 'standard'));
+  load(room, a, box.id, 2, 2);
+  assert.equal(a.score, 10);
+  a.x = 11.2; a.z = 0; a.in.hold = true;
+  for (let i = 0; i < 20; i++) room.tick(0.05);
+  assert.ok(a.unloading, 'unloading works in a 3-minute round too');
+  a.in.hold = false;
+  send('A', 'aim', { gx: 2, gz: 2 });
+  a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(a.carry, box.id);
+  assert.equal(a.score, 0, 'points come back off');
+  a.cursor = { gx: 0, gz: 0, rot: 0 }; a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(box.state, 'loaded');
+  assert.equal(a.score, 10, 'reloading gives them back once: shuffling can never farm points');
+});
+
+test('a piece pulled out and left outside the truck loses value, then rots and respawns', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'); join('B', 'Bo');
+  send('A', 'start');
+  const box = room.items.get(firstOf(room, 'heavy'));
+  load(room, a, box.id, 1, 1);
+  a.loadMode = true; a.unloading = true; a.cursor = { gx: 1, gz: 1, rot: 0 };
+  a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(a.carry, box.id);
+  a.pending.dashN = 1; room.tick(0.05);          // back out holding it
+  a.pending.tapN = 1; room.tick(0.05);           // set it down outside
+  assert.equal(box.state, 'floor');
+  assert.ok(box.pulled, 'marked as pulled out');
+  for (let i = 0; i < 20 * 10; i++) room.tick(0.05);
+  assert.ok(box.value < 1 && box.value > 0, `losing value: ${box.value}`);
+  load(room, a, box.id, 0, 0);
+  assert.ok(a.score > 0 && a.score < 20, `reloaded at reduced value: ${a.score}`);
+  // pull again and let it rot completely
+  a.loadMode = true; a.unloading = true; a.cursor = { gx: 0, gz: 0, rot: 0 };
+  a.pending.tapN = 1; room.tick(0.05);
+  a.pending.dashN = 1; room.tick(0.05); a.pending.tapN = 1; room.tick(0.05);
+  for (let i = 0; i < 20 * 60 && !box.rotted; i++) room.tick(0.05);
+  assert.ok(box.rottedOnce, 'it rotted');
+  assert.equal(box.state, 'floor');
+  assert.equal(box.value, 1, 'a fresh one respawned at full value');
+  assert.ok(!box.pulled);
+});
+
+test('1v1: no call-out meetings', () => {
+  const { room, join, send } = makeRoom();
+  join('A', 'Ada'); join('B', 'Bo');
+  send('A', 'start');
+  room.breaks.push({ id: 'x', type: 'fragile', culpritIds: ['B'], resolved: false });
+  send('A', 'callout');
+  assert.equal(room.phase, 'playing');
+  assert.equal(room.snapshot().canCallOut, false);
+});
+
+test('lobby ready-up: the crew chief cannot start until everyone else is ready', () => {
+  const { room, join, send } = makeRoom({});
+  room.noAutoReady = true;
+  join('A', 'Ada'); join('B', 'Bo'); join('C', 'Cy');
+  send('A', 'start');
+  assert.equal(room.phase, 'lobby', 'blocked: nobody else is ready');
+  send('B', 'ready');
+  send('A', 'start');
+  assert.equal(room.phase, 'lobby', 'still waiting for Cy');
+  assert.ok(room.snapshot().players.find(p => p.id === 'B').ready);
+  send('C', 'ready');
+  send('A', 'start');
+  assert.notEqual(room.phase, 'lobby');
+});
+
+test('claim window: a piece pulled out and put straight back still pays its original placer', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo'); join('C', 'Cy');
+  send('A', 'start');
+  const box = room.items.get(firstOf(room, 'standard'));
+  load(room, a, box.id, 2, 2);
+  assert.equal(a.score, 10);
+  b.loadMode = true; b.unloading = true; b.cursor = { gx: 2, gz: 2, rot: 0 };
+  b.pending.tapN = 1; room.tick(0.05);                // Bo pulls Ada's box
+  assert.equal(b.carry, box.id);
+  assert.equal(a.score, 0, 'Ada loses the points while it is out');
+  b.cursor = { gx: 0, gz: 0, rot: 0 }; b.pending.tapN = 1; room.tick(0.05); // straight back in
+  assert.equal(a.score, 10, 'instant re-add: points go back to Ada');
+  assert.equal(b.score, 0);
+});
+
+test('claim window: after the piece has been out a while, whoever loads it claims it', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo'); join('C', 'Cy');
+  send('A', 'start');
+  const box = room.items.get(firstOf(room, 'standard'));
+  load(room, a, box.id, 2, 2);
+  b.loadMode = true; b.unloading = true; b.cursor = { gx: 2, gz: 2, rot: 0 };
+  b.pending.tapN = 1; room.tick(0.05);
+  for (let i = 0; i < 20 * 9; i++) room.tick(0.05);    // out of the truck for 9 s
+  b.cursor = { gx: 0, gz: 0, rot: 0 }; b.pending.tapN = 1; room.tick(0.05);
+  assert.equal(b.score, 10, 'Bo claims it');
+  assert.equal(a.score, 0);
+});
+
+test('drive-off tally: each player is scored on what they placed, how well, and its condition', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  load(room, a, firstOf(room, 'standard'), 0, 0);   // solid
+  load(room, b, firstOf(room, 'heavy'), 0, 0);      // heavy on a lighter box: 85%
+  room.timeLeft = 0.01; room.tick(0.05); driveAway(room);
+  const t = room.results.tally;
+  assert.equal(t.A.final, 10);
+  assert.equal(t.B.base, 20);
+  assert.equal(t.B.placement, -3);
+  assert.equal(t.B.final, 17);
+  assert.equal(b.score, 17, 'score matches the tally');
+  assert.equal(t.A.pieces, 1);
+});
+
+test('load report adds up: placed pieces (even ones that broke) + adjustments + damage = final', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  load(room, b, firstOf(room, 'fragile'), 1, 0);
+  load(room, b, firstOf(room, 'standard'), 0, 0);
+  load(room, b, firstOf(room, 'standard'), 0, 0);
+  const couch = room.items.get(firstOf(room, 'couch')); couch.wrapped = true;
+  load(room, a, couch.id, 0, 0);
+  room.timeLeft = 0.01; room.tick(0.05); driveAway(room);
+  for (const [pid, t] of Object.entries(room.results.tally)) {
+    assert.equal(t.base + t.condition + t.placement + t.damage, t.final, `${pid}: ${JSON.stringify(t)}`);
+  }
 });

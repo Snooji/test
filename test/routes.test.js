@@ -49,7 +49,7 @@ test('CSV + admin need the admin key; CSV shows who is OK to email', async () =>
   assert.equal((await fetch(`${s.base}/api/signups.csv`)).status, 404);
   assert.equal((await fetch(`${s.base}/admin?key=wrong`)).status, 404);
   const csv = await (await fetch(`${s.base}/api/signups.csv?key=k3y`)).text();
-  assert.match(csv, /"Cy","cy@x.io","no"/);
+  assert.match(csv, /"Cy","cy@x.io","yes"/, 'playing = agreeing to the newsletter');
   assert.equal((await fetch(`${s.base}/admin?key=k3y`)).status, 200);
   s.close();
 });
@@ -94,7 +94,7 @@ test('opting in to emails is counted as an opt-in event', async () => {
   await s.post('/api/signup', { name: 'Oo', email: 'oo@x.io', marketing: true });
   await s.post('/api/signup', { name: 'Pp', email: 'pp@x.io', marketing: false });
   const f = await s.store.funnel(1);
-  assert.equal(f.find(r => r.name === 'optin')?.n, 1);
+  assert.equal(f.find(r => r.name === 'optin')?.n, 2, 'everyone who plays is opted in');
   s.close();
 });
 
@@ -105,5 +105,21 @@ test('admin can log a booking by hand (customer mentioned the game)', async () =
   const rows = await s.store.listConversions(5);
   assert.equal(rows[0].value, 800);
   assert.equal(rows[0].source, 'manual');
+  s.close();
+});
+
+test('sign-up: everyone agrees to the newsletter by playing; throwaway inboxes are refused; settings can opt out', async () => {
+  const s = await serve();
+  assert.equal((await s.post('/api/signup', { name: 'T', email: 'x@mailinator.com' })).status, 400);
+  const j = await (await s.post('/api/signup', { name: 'Kay', email: 'kay@x.io' })).json();
+  let [row] = (await s.store.listSignups()).filter(r => r.email === 'kay@x.io');
+  assert.equal(row.marketing, true, 'agreed by playing');
+  const bad = await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'kay@x.io', token: 'nope', marketing: false }) });
+  assert.equal(bad.status, 401);
+  const ok = await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'kay@x.io', token: j.token, marketing: false }) });
+  assert.equal(ok.status, 200);
+  [row] = (await s.store.listSignups()).filter(r => r.email === 'kay@x.io');
+  assert.equal(row.marketing, false);
+  assert.equal(row.unsubscribed, true);
   s.close();
 });

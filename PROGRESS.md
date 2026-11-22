@@ -100,3 +100,13 @@ Verified: npm test 128/128 · e2e, e2e-solo, e2e-wave2, e2e-b PASS · smoke PASS
 - [x] The dolly: one per house; stack up to 3 boxes (no furniture/lamps); unloads top-first one at a time at the truck; breaks after 2 trips and reappears elsewhere; a heavy box riding on a fragile (6 s) or standard (10 s) box crushes it (pusher loses its points, box respawns); AI ignores it
 - [x] Fixed: booking card on results covered the New game button (blurred card turned position:fixed into card-relative)
 Verified: npm test 134/134 · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly PASS
+
+## Round 5 (2026-11-22)
+- [x] Move placed pieces back out in every mode (hold ✋ on the ramp); score = what's in the truck, so shuffling can't farm points
+- [x] Claim window: a piece pulled out and re-added within 8 s still pays its original placer; after that, the next loader claims it
+- [x] Pieces left outside the truck: 5 s grace, then lose value (badge shows %), rot at 0 and respawn in the house
+- [x] Drive-off load report per player: pieces placed (incl. broken), condition, placement quality (support / heavy low / fragile on top), damage → load total
+- [x] No CALL OUT in 1v1 (server refuses meetings with ≤ 2 movers)
+- [x] Lobby ready-up: crew chief's Start stays locked until every other player is ready (✅ over their mover)
+- [x] Sign-up: name + real email (format, throwaway-inbox list, MX check on in production); agreement line instead of a checkbox; Settings panel newsletter switch
+Verified: npm test 144/144 · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly PASS

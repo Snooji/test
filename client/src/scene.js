@@ -272,7 +272,7 @@ export class GameScene {
         v = { root, char: p.char, suit: p.suit, label, ready, face: p.face };
         this.players.set(p.id, v);
       }
-      v.ready.visible = !!p.ready && snap.phase === 'results';
+      v.ready.visible = !!p.ready && (snap.phase === 'results' || snap.phase === 'lobby');
       v.data = p;
       v.root.traverse(o => { if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
     }
@@ -309,6 +309,17 @@ export class GameScene {
         else if (!prevData.wrapped && it.wrapped) this.finishFx(it.x, it.z, it.type, 'wrap');
       }
       v.data = it;
+      if (it.value !== undefined && it.state !== 'loaded') { // pulled out and left outside: losing value
+        const pctV = Math.round(it.value * 100);
+        if (v.valP !== pctV) {
+          v.valP = pctV;
+          if (!v.val) { v.val = sprite('', {}, [1.3, 0.42]); v.val.position.y = 2.2; v.obj.add(v.val); }
+          v.val.material.map?.dispose();
+          v.val.material.map = labelTexture(`${pctV <= 30 ? '🍂' : '⏳'} ${pctV}%`, { bg: pctV <= 30 ? '#7a3b12' : '#3a2a1a', fg: '#ffd166', font: 'bold 40px system-ui', w: 220, h: 72 });
+          v.val.material.needsUpdate = true;
+        }
+        v.val.visible = true;
+      } else if (v.val) v.val.visible = false;
       if (it.task) {
         const pct = Math.round(it.task.p * 10);
         if (pct !== v.barP) {

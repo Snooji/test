@@ -1,5 +1,5 @@
 import { Room, ServerError } from 'colyseus';
-import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck } from '../shared/logic.js';
+import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
 import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
 import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel } from '../shared/level.js';
@@ -86,6 +86,10 @@ export class MoveRoom extends Room {
     });
     this.onMessage('start', (c) => {
       if (c.sessionId !== this.hostId || this.inRound()) return;
+      if (this.phase === 'lobby') {
+        const waiting = [...this.players.values()].filter(o => !o.bot && !o.spectator && o.id !== this.hostId && !o.ready);
+        if (waiting.length) { this.tell(this.players.get(c.sessionId), `Waiting for ${waiting.map(o => o.name).join(', ')} to ready up.`); return; }
+      }
       if (this.game === 'sabotage' && this.movers().length < 3) {
         this.tell(this.players.get(c.sessionId), 'Sabotage needs at least 3 movers. Add AI movers or invite friends.');
         return;
@@ -127,8 +131,9 @@ export class MoveRoom extends Room {
     // results screen: everyone confirms "restart" → next round with a fresh house
     this.onMessage('ready', (c) => {
       const p = this.players.get(c.sessionId);
-      if (!p || this.phase !== 'results') return;
+      if (!p || (this.phase !== 'results' && this.phase !== 'lobby')) return;
       p.ready = !p.ready;
+      if (this.phase === 'lobby') return; // in the lobby the crew chief starts once everyone is ready
       const humans = [...this.players.values()].filter(o => !o.bot);
       if (humans.length && humans.every(o => o.ready)) { this.newLevel(); this.startRound(); }
     });
@@ -303,7 +308,7 @@ export class MoveRoom extends Room {
   loadedCountCache() { let n = 0; for (const i of this.items.values()) if (i.state === 'loaded') n++; return n; }
 
   isExact() { return this.mode === 'load' || this.game === 'sabotage'; }
-  allowsUnload() { return this.isExact(); }
+  allowsUnload() { return !this.tutorialMode; }
 
   resetWorld() {
     this.items.clear();
@@ -346,7 +351,7 @@ export class MoveRoom extends Room {
     for (const p of this.players.values()) Object.assign(p, { unloads: 0, helps: 0, wraps: 0, rampSlot: -1, ready: false, dolly: null, feeding: false, tripPlaced: 0 });
     this.results = null;
     for (const b of this.bots.values()) b.reset();
-    this.overtime = false; this.drain = 0; this.driveoff = null; this.pendingEnd = null; this.resultsT = 0;
+    this.overtime = false; this.drain = 0; this.driveoff = null; this.pendingEnd = null; this.resultsT = 0; this.tally = null;
     for (const p of this.players.values()) { p.saboteur = false; p.lastMeeting = 0; }
     if (this.game === 'sabotage') {
       const movers = this.movers();
@@ -360,6 +365,8 @@ export class MoveRoom extends Room {
     this.event({ kind: 'start' });
   }
 
+  canCallOut() { return this.movers().length > 2; }
+
   isActive(p) { return p && !p.out && !p.spectator; }
   activePlayers() { return [...this.players.values()].filter(p => this.isActive(p)); }
   event(e) { this.broadcast('evt', e); }
@@ -368,6 +375,7 @@ export class MoveRoom extends Room {
   // ---------- simulation ----------
   tick(dt) {
     this.lastDt = dt;
+    this.elapsed = (this.elapsed || 0) + dt;
     this.moveCat(dt);
     if (this.phase === 'countdown') {
       this.countdown -= dt;
@@ -380,6 +388,7 @@ export class MoveRoom extends Room {
       this.updateTeamCarries(dt);
       this.updateTasks(dt);
       this.updateDollies(dt);
+      this.updateDecay(dt);
       if (this.twist === 'zerog') this.updateZeroG(dt);
       if (this.tutorial) this.updateTutorial();
       this.checkEnd();
@@ -648,6 +657,21 @@ export class MoveRoom extends Room {
     }
   }
 
+  /** pieces pulled out of the truck and left outside lose value (5 s grace, then ~30 s to zero) and finally rot */
+  updateDecay(dt) {
+    for (const it of this.items.values()) {
+      if (!it.pulled || it.state !== 'floor') continue;
+      it.outsideT = (it.outsideT || 0) + dt;
+      if (it.outsideT < 5) continue;
+      it.value = Math.max(0, (it.value ?? 1) - dt / 30);
+      if (it.value > 0) continue;
+      const label = ITEM_TYPES[it.type].label.toLowerCase();
+      it.rottedOnce = true;
+      this.respawn(it);
+      this.event({ kind: 'toast', text: `🍂 A ${label} sat outside the truck too long and rotted away. A new one is back in the house.` });
+    }
+  }
+
   /** a heavy box riding on a fragile/standard box too long crushes it */
   updateDollies(dt) {
     for (const d of this.items.values()) {
@@ -810,18 +834,20 @@ export class MoveRoom extends Room {
     const item = this.items.get(id);
     removeFromGrid(this.grid, id);
     this.gridVersion++;
+    item.prevOwners = Object.keys(item.earned || {}); item.pulledAt = this.elapsed || 0;
     for (const [pid, amt] of Object.entries(item.earned || {})) { const o = this.players.get(pid); if (o) { o.score -= amt; o.loaded = Math.max(0, o.loaded - 1); } }
     item.earned = {}; item.g = null; item.state = 'carried'; item.carriers = [p.id]; item.x = p.x; item.z = p.z;
+    item.pulled = true; item.outsideT = 0; if (item.value === undefined) item.value = 1;
     p.carry = id; p.unloading = false; p.cursor.rot = 0; p.unloads = (p.unloads || 0) + 1;
     this.event({ kind: 'emote', id: p.id, e: '↩️' });
-    this.tell(p, `Pulled out the ${ITEM_TYPES[item.type].label.toLowerCase()}. Drop it somewhere better, or BACK to set it on the ground.`);
+    this.tell(p, `Pulled out the ${ITEM_TYPES[item.type].label.toLowerCase()}: its points come off until it's back in. Left outside too long, it loses value and rots.`);
   }
 
   respawn(item) {
     const t = ITEM_TYPES[item.type];
     const taken = [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z }));
     const spot = freeSpot(this.level, taken);
-    Object.assign(item, { state: 'floor', x: spot.x, z: spot.z, wrapped: false, assembled: !!t.needsDisassemble, carriers: [], earned: {}, g: null, task: null });
+    Object.assign(item, { state: 'floor', x: spot.x, z: spot.z, wrapped: false, assembled: !!t.needsDisassemble, carriers: [], earned: {}, g: null, task: null, value: 1, pulled: false, outsideT: 0, prevOwners: null });
     this.event({ kind: 'toast', text: `📦 A replacement ${t.label.toLowerCase()} turned up in the ${this.level.roomAt(spot.x, spot.z)}.` });
   }
 
@@ -850,11 +876,17 @@ export class MoveRoom extends Room {
     item.state = 'loaded';
     const rec = this.grid.items.get(item.id);
     item.g = { x: rec.x, y: rec.y, z: rec.z, w: rec.w, d: rec.d, h: rec.h, ...(ITEM_TYPES[item.type].cells ? { cells: rec.cells } : {}) };
-    let pts = t.pts;
+    let pts = Math.round(t.pts * (item.value ?? 1));
+    item.pulled = false;
     if (t.needsWrap && !item.wrapped) { pts = Math.round(pts / 2); this.event({ kind: 'toast', text: `😬 The ${t.label.toLowerCase()} got scuffed! Half points — pad-wrap next time.` }); }
-    const share = Math.round(pts / loaderIds.length);
+    // claim window: pulled out and put straight back → the points go back to whoever placed it first
+    const CLAIM_SECONDS = 8;
+    const prev = (item.prevOwners || []).filter(id => this.players.has(id));
+    const payTo = prev.length && (this.elapsed || 0) - (item.pulledAt || 0) < CLAIM_SECONDS ? prev : loaderIds;
+    item.prevOwners = null;
+    const share = Math.round(pts / payTo.length);
     item.earned = {};
-    for (const id of loaderIds) {
+    for (const id of payTo) {
       const o = this.players.get(id);
       if (!o) continue;
       o.score += share; o.loaded += 1; item.earned[id] = share;
@@ -882,6 +914,7 @@ export class MoveRoom extends Room {
   callMeeting(callerId) {
     const p = this.players.get(callerId);
     if (this.phase !== 'playing' || this.meeting || !this.isActive(p)) return;
+    if (!this.canCallOut()) return; // 1v1: nobody else to accuse
     if (this.game === 'sabotage') {
       const now = Date.now();
       if (now - (p.lastMeeting || 0) < 20000) return this.tell(p, 'You called a meeting recently. Wait a bit.');
@@ -1023,6 +1056,31 @@ export class MoveRoom extends Room {
       d.by = payers.map(id => this.players.get(id)?.name).filter(Boolean).join(' + ');
     }
     this.driveoff = { ...check, lost: Object.entries(lost).map(([id, amt]) => ({ id, name: this.players.get(id)?.name, amt })) };
+
+    // final tally: who placed each piece still in the truck, how well, and in what condition
+    const tally = {};
+    const row = (id) => (tally[id] ||= { pieces: 0, base: 0, condition: 0, placement: 0, damage: 0, final: 0 });
+    for (const it of this.items.values()) {
+      if (it.state !== 'loaded') continue;
+      const payees = Object.keys(it.earned || {});
+      if (!payees.length) continue;
+      const full = Math.round(ITEM_TYPES[it.type].pts / payees.length);
+      if (it.damaged) { // still counts as placed; the damage line takes it away
+        for (const pid of payees) { const r = row(pid); r.pieces++; r.base += full; r.condition += it.earned[pid] - full; }
+        continue;
+      }
+      const { q } = placementQuality(this.grid, it.id);
+      for (const pid of payees) {
+        const o = this.players.get(pid); if (!o) continue;
+        const share = it.earned[pid], fin = Math.round(share * q), r = row(pid);
+        r.pieces++; r.base += full; r.condition += share - full; r.placement += fin - share;
+        o.score += fin - share; it.earned[pid] = fin;
+      }
+    }
+    for (const l of this.driveoff.lost) row(l.id).damage -= l.amt;
+    // final = what those pieces are worth now (other bonuses/penalties in the round are separate)
+    for (const r of Object.values(tally)) r.final = r.base + r.condition + r.placement + r.damage;
+    this.tally = tally;
     this.pendingEnd = [reason, forcedWinnerId, winners];
     this.phase = 'driveoff';
     this.driveT = check.damaged.length ? 7 : 5;
@@ -1049,7 +1107,7 @@ export class MoveRoom extends Room {
     const awards = [
       ['loaded', '📦 Most loaded'], ['helps', '💪 Best lifting buddy'], ['wraps', '🧣 Wrap master'], ['unloads', '🧩 Repack hero'],
     ].map(([k, title]) => { const p = best(k); return p ? { id: p.id, name: p.name, title, value: p[k] } : null; }).filter(Boolean);
-    this.results = { reason, awards, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null,
+    this.results = { reason, awards, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null, tally: this.tally || null,
       driveoff: this.driveoff ? { safety: this.driveoff.safety, damaged: this.driveoff.damaged.map(d => ({ name: d.name, reason: d.reason, by: d.by })), lost: this.driveoff.lost } : null,
       game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
@@ -1085,13 +1143,14 @@ export class MoveRoom extends Room {
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
       id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
-      assembled: i.assembled, g: i.g, n: i.carriers.length, damaged: i.damaged ? 1 : 0,
+      assembled: i.assembled, g: i.g, n: i.carriers.length, damaged: i.damaged ? 1 : 0, ...(i.pulled && i.value < 1 ? { value: +i.value.toFixed(2) } : {}),
       ...(i.type === 'dolly' ? { stack: i.stack, uses: i.uses, strain: i.strain, pusher: i.pusher } : {}), ...(i.state === 'dolly' ? { on: i.dollyId } : {}),
       task: i.task ? { kind: i.task.kind, p: +i.task.progress.toFixed(2) } : null,
     }));
     return {
       phase: this.phase, mode: this.mode, hostId: this.hostId, timeLeft: Math.max(0, Math.round(this.timeLeft)),
       countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0, driveT: this.phase === 'driveoff' ? +this.driveT.toFixed(2) : 0,
+      canCallOut: this.canCallOut(),
       game: this.game, overtime: !!this.overtime, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,

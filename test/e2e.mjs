@@ -37,6 +37,10 @@ await wait(400);
 await a.screenshot({ path: `${out}/02-lobby.png` });
 await b.screenshot({ path: `${out}/03-lobby-phone.png` });
 
+// everyone readies up before the crew chief can start
+if (!(await a.isDisabled('#btn-start'))) errors.push('start should be locked until Bo is ready');
+await b.click('#btn-ready-lobby');
+await a.waitForFunction(() => window.__sm.snap.players.every(p => p.id === window.__sm.snap.hostId || p.ready));
 await a.click('#modes button[data-mode="3min"]');
 await a.click('#btn-start');
 await a.screenshot({ path: `${out}/04-start.png` });
