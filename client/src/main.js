@@ -221,7 +221,8 @@ function onSnap(s) {
   if (s.phase === 'playing' || s.phase === 'meeting' || s.phase === 'countdown' || s.phase === 'driveoff') renderHud(s, me);
   if (s.phase === 'countdown') { $('countdown').innerHTML = `${s.countdown}<small>${esc(s.level?.name || '')}</small>`; }
   if (s.phase === 'meeting') renderMeeting(s, me);
-  if (s.phase === 'results') renderResults(s, me);
+  if (s.phase === 'results' && s.level?.tutorial) renderTrainingDone(s);
+  else if (s.phase === 'results') renderResults(s, me);
 }
 
 function onPhase(phase, prev) {
@@ -235,7 +236,8 @@ function onPhase(phase, prev) {
   show('controls', playing && isTouch);
   show('joyzone', playing && isTouch);
   show('meeting', phase === 'meeting');
-  show('results', phase === 'results');
+  show('results', phase === 'results' && !snap?.level?.tutorial);
+  show('train-done', phase === 'results' && !!snap?.level?.tutorial);
   const chatty = phase === 'lobby' || phase === 'meeting';
   show('chat', chatty);
   show('chat-toggle', chatty && isTouch);
@@ -428,6 +430,13 @@ function renderPrompt(s, me) {
   } else if (!me.carry && s.level?.exact && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
     text = `🧩 Hold ${isTouch ? '✋' : 'E'} to unload pieces from the truck and repack`;
     action = 'HOLD ↩️';
+  } else if (me.dolly && !me.carry) {
+    const d = s.items.find(i => i.id === me.dolly);
+    const n = d?.stack?.length || 0;
+    text = d?.strain > 0.25 ? '⚠️ A heavy box is crushing the box under it! Get to the truck or restack.'
+      : n ? `🛒 Dolly ${n}/3 · ${n < 3 ? `tap ${isTouch ? '✋' : 'E'} by a box to add it · ` : ''}push it to the truck to unload, top box first`
+      : `🛒 Dolly 0/3 · tap ${isTouch ? '✋' : 'E'} next to boxes to stack them (boxes only)`;
+    action = n < 3 ? 'STACK' : 'SET DOWN';
   } else if (me.carry) {
     const it = s.items.find(i => i.id === me.carry);
     const t = it && ITEM_TYPES[it.type];
@@ -671,6 +680,28 @@ function dragAim(e) {
 }
 scene.renderer.domElement.addEventListener('pointerdown', dragAim);
 scene.renderer.domElement.addEventListener('pointermove', dragAim);
+
+// ---------- training complete ----------
+function renderTrainingDone(s) {
+  if ($('train-done').dataset.done === '1') return;
+  $('train-done').dataset.done = '1';
+  const me = s.players.find(p => p.id === myId);
+  $('td-portrait').innerHTML = PORTRAITS[me?.char || 'nova'];
+  scene.setBanner(myId, '✅ TRAINING COMPLETE');
+}
+const leaveToMenu = async () => {
+  const r = room; room = null;
+  try { sessionStorage.removeItem('sm_rt'); } catch {}
+  await r?.leave(true).catch(() => {});
+  snap = null; lastPhase = null;
+  history.replaceState(null, '', location.pathname);
+  for (const id of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach', 'train-done']) show(id, false);
+  $('train-done').dataset.done = '';
+  scene.resetDrive();
+  route();
+};
+$('td-menu').onclick = leaveToMenu;
+$('td-play').onclick = async () => { await leaveToMenu(); connect(null, { solo: true, difficulty: 'easy' }); };
 
 // ---------- loop ----------
 let last = performance.now();

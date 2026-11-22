@@ -11,6 +11,8 @@ export const ITEM_TYPES = {
   couch:    { label: 'Couch',        w: 3, d: 1, h: 1, pts: 70, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: true,  color: 0x5b7cfa },
   desk:     { label: 'Desk',         w: 2, d: 1, pts: 50, heavy: true,  fragile: false, furniture: true,  needsWrap: false, needsDisassemble: true,  teamCarry: true,  color: 0x9c6b3c },
   bed:      { label: 'Bed',          w: 2, d: 3, h: 1, pts: 90, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: true,  color: 0xa78bfa },
+  // a hand truck: not cargo. Push it around, stack up to 3 boxes, feed them into the truck one by one
+  dolly:    { label: 'Dolly',        w: 1, d: 1, pts: 0,  heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, tool: true, color: 0x8f88aa },
   table:    { label: 'Table',        w: 2, d: 1, pts: 40, heavy: true,  fragile: false, furniture: true,  needsWrap: false, needsDisassemble: true,  teamCarry: true,  color: 0xb07d4f },
 };
 

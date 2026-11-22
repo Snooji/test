@@ -246,7 +246,7 @@ export class Bot {
     const loaded = [...room.items.values()].filter(i => i.state === 'loaded').length;
     let best = null, bestScore = -Infinity;
     for (const it of room.items.values()) {
-      if (it.state !== 'floor' || this.skipping(it.id) || this.claimed(it)) continue;
+      if (it.state !== 'floor' || it.type === 'dolly' || this.skipping(it.id) || this.claimed(it)) continue;
       const t = ITEM_TYPES[it.type];
       if (t.teamCarry && !alone && someoneWaiting) continue;
       let score = -Math.hypot(it.x - p.x, it.z - p.z) - Math.hypot(it.x - RAMP_TARGET.x, it.z - RAMP_TARGET.z) * 0.4;

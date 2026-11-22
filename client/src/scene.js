@@ -337,6 +337,16 @@ export class GameScene {
     return h;
   }
 
+  /** a persistent sign over one mover (e.g. TRAINING COMPLETE) */
+  setBanner(id, text) {
+    const v = this.players.get(id);
+    if (!v) return;
+    if (v.banner) { v.root.remove(v.banner); v.banner = null; }
+    if (!text) return;
+    v.banner = sprite(text, { fg: '#0b0820', bg: '#55ffcc', font: 'bold 36px system-ui', w: 420, h: 72 }, [3.6, 0.62]);
+    v.banner.position.y = 3.2; v.root.add(v.banner);
+  }
+
   emote(id, text) {
     const v = this.players.get(id);
     if (!v) return;
@@ -443,6 +453,24 @@ export class GameScene {
         }
         continue;
       }
+      if (it.state === 'dolly') { // riding on a dolly: stacked in order, bottom first
+        const d = this.snap.items.find(x => x.id === it.on), dv = d && this.items.get(d.id);
+        if (dv) {
+          const idx = d.stack.indexOf(it.id);
+          o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
+          o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
+          o.position.y = damp(o.position.y, 0.14 + idx * 0.82, 14, dt);
+          o.rotation.y = dv.obj.rotation.y;
+        }
+        continue;
+      }
+      if (it.type === 'dolly') {
+        const pusher = it.pusher && this.players.get(it.pusher);
+        if (pusher) o.rotation.y = pusher.face + Math.PI;
+        if (!o.userData.warn) { o.userData.warn = sprite('⚠️ CRUSHING!', { fg: '#ff4466', stroke: '#0b0820', font: 'bold 40px system-ui' }, [2.2, 0.55]); o.userData.warn.position.y = 3.1; o.add(o.userData.warn); }
+        o.userData.warn.visible = it.strain > 0.25;
+        if (it.strain > 0.25) o.userData.warn.material.opacity = 0.5 + Math.abs(Math.sin(t * (6 + it.strain * 10))) * 0.5;
+      }
       const solo = it.state === 'carried' && !ITEM_TYPES[it.type].teamCarry;
       const team = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry;
       const ty = (solo ? 1.85 : team ? (it.n > 1 ? 0.9 : 0.25) : 0) + (snap?.zeroG && it.state === 'floor' ? 0.6 + Math.sin(t * 2 + it.x) * 0.3 : 0);
@@ -505,7 +533,7 @@ export class GameScene {
       let tx = null, tz = null;
       const op = this.objectivePos();
       if (op) { if (Math.hypot(op.x - me.x, op.z - me.z) > 1.8) { tx = op.x; tz = op.z; } }
-      else if (me.carry) { tx = 11.2; tz = 0; }
+      else if (me.carry || (me.dolly && snap.items.find(i => i.id === me.dolly)?.stack?.length >= 3)) { tx = 11.2; tz = 0; }
       else {
         let bd = Infinity;
         for (const it of snap.items) {

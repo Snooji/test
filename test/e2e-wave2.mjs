@@ -54,6 +54,12 @@ await wait(400);
 await a.screenshot({ path: `${out}/w05-unload-aim.png` });
 await a.keyboard.press('e'); await wait(600);
 m = await me(a);
+// AI movers keep loading meanwhile; if that stack is buried, try the others
+for (let k = 0; k < 16 && !m.carry; k++) {
+  await a.evaluate((c) => window.__sm.send('aim', { gx: c % 4, gz: Math.floor(c / 4) }), k);
+  await wait(250); await a.keyboard.press('e'); await wait(400);
+  m = await me(a);
+}
 const pulled = (await snap(a)).items.find(i => i.id === m.carry);
 log('pulled out:', pulled?.type, 'score now', m.score);
 if (!pulled) errors.push('could not pull a piece back out');

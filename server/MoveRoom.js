@@ -39,6 +39,7 @@ export class MoveRoom extends Room {
     this.classic = options.level === 'classic';
     this.seedOverride = Number.isInteger(options.seed) ? options.seed : null;
     this.tutorialMode = !!options.tutorial;
+    this.dollyOn = options.dolly !== false;
     this.quick = !!options.quick;
     this.daily = /^\d{4}-\d{2}-\d{2}$/.test(options.daily || '') ? options.daily : null;
     this.twist = ['zerog', 'mansion'].includes(options.twist) ? options.twist : 'none';
@@ -100,6 +101,8 @@ export class MoveRoom extends Room {
     });
     if (process.env.DEBUG_HOOKS === '1') {
       this.onMessage('debug_end', () => { if (this.phase === 'playing') this.timeLeft = 0.01; });
+      this.onMessage('debug_tp', (c, m) => { const p = this.players.get(c.sessionId); if (p) { p.x = Number(m.x); p.z = Number(m.z); } });
+      this.onMessage('debug_tutorial_done', () => { if (this.tutorial && this.phase === 'playing') this.endRound('Training complete! You’re ready for a real move.'); });
       this.onMessage('debug_place', (c, m) => { // load an item straight into the truck (for drive-off tests)
         const p = this.players.get(c.sessionId);
         const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === m?.type);
@@ -308,6 +311,10 @@ export class MoveRoom extends Room {
     this.grid = createGrid();
     this.breaks = [];
     this.meeting = null;
+    if (this.dollyOn && !this.tutorialMode) {
+      const spot = freeSpot(this.level, this.level.items.map(([, x, z]) => ({ x, z })));
+      this.items.set('dolly', { id: 'dolly', type: 'dolly', x: spot.x, z: spot.z, state: 'floor', stack: [], uses: 0, strainT: 0, strain: 0, pusher: null, carriers: [], earned: {}, task: null, helpers: [], g: null });
+    }
     this.level.items.forEach(([type, x, z], i) => {
       const t = ITEM_TYPES[type];
       this.items.set('i' + i, {
@@ -336,7 +343,7 @@ export class MoveRoom extends Room {
     this.tutorial = this.tutorialMode ? { step: -1 } : null;
     this.autoStartAt = 0; this.zeroG = false; this.zeroT = 0;
     if (this.quick && this.listing) Promise.resolve().then(() => this.lock()).catch(() => {}); // stop Quick Play matching into a live round
-    for (const p of this.players.values()) Object.assign(p, { unloads: 0, helps: 0, wraps: 0, rampSlot: -1, ready: false });
+    for (const p of this.players.values()) Object.assign(p, { unloads: 0, helps: 0, wraps: 0, rampSlot: -1, ready: false, dolly: null, feeding: false, tripPlaced: 0 });
     this.results = null;
     for (const b of this.bots.values()) b.reset();
     this.overtime = false; this.drain = 0; this.driveoff = null; this.pendingEnd = null; this.resultsT = 0;
@@ -372,6 +379,7 @@ export class MoveRoom extends Room {
       this.separate();
       this.updateTeamCarries(dt);
       this.updateTasks(dt);
+      this.updateDollies(dt);
       if (this.twist === 'zerog') this.updateZeroG(dt);
       if (this.tutorial) this.updateTutorial();
       this.checkEnd();
@@ -496,8 +504,22 @@ export class MoveRoom extends Room {
         else if (t.heavy) mult *= 0.6;
       }
       if (p.task) mult = 0; // working on furniture
+      const dly = this.dollyOf(p);
+      if (dly) mult *= dly.stack.some(id => ITEM_TYPES[this.items.get(id)?.type]?.heavy) ? 0.7 : 0.85;
       this.freeMove(p, dt, mult);
       if (item) { item.x = p.x + Math.sin(p.face) * 0.2; item.z = p.z + Math.cos(p.face) * 0.2; }
+      if (dly) { dly.x = p.x + Math.sin(p.face) * 0.9; dly.z = p.z + Math.cos(p.face) * 0.9; }
+    }
+
+    // pushing a loaded dolly onto the ramp: boxes come off top first, one at a time
+    const dly2 = this.dollyOf(p);
+    if (dly2 && !item && dly2.stack.length && inRamp(p.x, p.z)) {
+      p.tripPlaced = 0;
+      this.feedFromDolly(p);
+      p.cursorCd = 0.35;
+      this.takeRampSlot(p);
+      this.tell(p, `Unloading the dolly: ${dly2.stack.length + 1} box${dly2.stack.length ? 'es' : ''}, top first. Aim and drop each one.`);
+      return;
     }
 
     // empty-handed on the ramp: hold ACTION to start pulling items back out (Full load only)
@@ -529,9 +551,16 @@ export class MoveRoom extends Room {
       this.releaseCarry(p);
       return;
     }
+    if (p.dolly) return this.dollyTap(p);
     const target = this.nearestItem(p);
     if (!target) return;
     const t = ITEM_TYPES[target.type];
+    if (target.type === 'dolly') {
+      target.state = 'pushed'; target.pusher = p.id; p.dolly = target.id;
+      this.event({ kind: 'emote', id: p.id, e: '🛒' });
+      this.tell(p, 'Dolly! Tap next to boxes to stack up to 3. Push it to the truck to unload them.');
+      return;
+    }
     if (target.assembled) return this.tell(p, `Hold ACTION to disassemble the ${t.label.toLowerCase()} first`);
     if (t.teamCarry) {
       if (target.state === 'carried') {
@@ -554,6 +583,7 @@ export class MoveRoom extends Room {
   nearestItem(p) {
     let best = null, bd = REACH;
     for (const it of this.items.values()) {
+      if (it.type === 'dolly' && (p.bot || it.state !== 'floor')) continue; // AI movers leave the dolly alone
       if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1)) continue;
       const t = ITEM_TYPES[it.type], len = Math.max(t.w, t.d);
       const d = dist(p, it) - (len > 1 ? len * 0.35 : 0);
@@ -562,7 +592,87 @@ export class MoveRoom extends Room {
     return best;
   }
 
+  // ---------- the dolly ----------
+  dollyOf(p) { return p.dolly ? this.items.get(p.dolly) : null; }
+
+  dollyTap(p) {
+    const d = this.dollyOf(p);
+    let box = null, bd = REACH;
+    for (const it of this.items.values()) {
+      if (it.state !== 'floor' || !['standard', 'heavy', 'fragile'].includes(it.type)) continue;
+      const dd = dist(p, it); if (dd < bd) { bd = dd; box = it; }
+    }
+    if (box && d.stack.length < 3) {
+      box.state = 'dolly'; box.dollyId = d.id; box.carriers = [];
+      d.stack.push(box.id);
+      this.event({ kind: 'emote', id: p.id, e: ITEM_TYPES[box.type].heavy ? '😤' : '📦' });
+      return;
+    }
+    if (box) return this.tell(p, 'The dolly is full (3 boxes). Push it to the truck.');
+    // nothing to stack: set the dolly down (boxes stay on it)
+    this.dropDolly(p);
+  }
+
+  dropDolly(p) {
+    const d = this.dollyOf(p);
+    p.dolly = null;
+    if (!d) return;
+    d.state = 'floor'; d.pusher = null;
+    if (this.level.hitsWall(d.x, d.z, 0.4) || inRamp(d.x, d.z)) { d.x = p.x - 1; d.z = p.z; }
+  }
+
+  /** next box off the dolly (top of the stack) into your hands, in the truck */
+  feedFromDolly(p) {
+    const d = this.dollyOf(p);
+    const id = d?.stack.pop();
+    if (!id) return false;
+    const box = this.items.get(id);
+    box.state = 'carried'; box.carriers = [p.id]; box.dollyId = null; box.x = p.x; box.z = p.z;
+    p.carry = id; p.loadMode = true; p.feeding = true;
+    p.cursor = { gx: p.cursor?.gx ?? 1, gz: p.cursor?.gz ?? 0, rot: 0 };
+    return true;
+  }
+
+  finishDollyTrip(p) {
+    const d = this.dollyOf(p);
+    p.feeding = false;
+    if (!d || !p.tripPlaced) return;
+    p.tripPlaced = 0;
+    d.uses += 1;
+    if (d.uses >= 2) { // a wheel pops off; a fresh dolly turns up somewhere else
+      for (const id of d.stack) { const b = this.items.get(id); if (b) { b.state = 'floor'; b.dollyId = null; b.x = p.x - 1.2; b.z = p.z; } }
+      p.dolly = null;
+      const spot = freeSpot(this.level, [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z })));
+      Object.assign(d, { x: spot.x, z: spot.z, state: 'floor', stack: [], uses: 0, strainT: 0, strain: 0, pusher: null });
+      this.event({ kind: 'toast', text: `🛒 The dolly lost a wheel! A fresh one turned up in the ${this.level.roomAt(spot.x, spot.z)}.` });
+    }
+  }
+
+  /** a heavy box riding on a fragile/standard box too long crushes it */
+  updateDollies(dt) {
+    for (const d of this.items.values()) {
+      if (d.type !== 'dolly' || d.stack.length < 2) { if (d.type === 'dolly') { d.strainT = 0; d.strain = 0; } continue; }
+      let under = null;
+      for (let i = 1; i < d.stack.length; i++) {
+        const top = this.items.get(d.stack[i]), below = this.items.get(d.stack[i - 1]);
+        if (ITEM_TYPES[top.type].heavy && !ITEM_TYPES[below.type].heavy) { under = below; break; }
+      }
+      if (!under) { d.strainT = 0; d.strain = 0; continue; }
+      const limit = ITEM_TYPES[under.type].fragile ? 6 : 10;
+      d.strainT += dt; d.strain = +(d.strainT / limit).toFixed(2);
+      if (d.strainT < limit) continue;
+      d.strainT = 0; d.strain = 0;
+      d.stack = d.stack.filter(id => id !== under.id);
+      const who = this.players.get(d.pusher) ? [d.pusher] : [];
+      for (const id of who) this.players.get(id).score -= ITEM_TYPES[under.type].pts;
+      under.state = 'broken'; under.dollyId = null;
+      this.recordBreak(under, who, 'got crushed on the dolly');
+      this.respawn(under);
+    }
+  }
+
   releaseCarry(p) {
+    if (p.dolly && !p.carry) { this.dropDolly(p); p.loadMode = false; return; }
     const item = p.carry ? this.items.get(p.carry) : null;
     p.loadMode = false;
     if (!item) { p.carry = null; return; }
@@ -664,6 +774,13 @@ export class MoveRoom extends Room {
     c.gx = clamp(c.gx, 0, GRID.W - w);
     c.gz = clamp(c.gz, 0, GRID.D - d);
 
+    if (p.pending.dashN && p.feeding) { // BACK: the box goes back on top of the dolly
+      const d = this.dollyOf(p);
+      item.state = 'dolly'; item.dollyId = d.id; item.carriers = []; d.stack.push(item.id);
+      p.carry = null; p.loadMode = false; p.x = TRUCK.ramp.x0 - 1.2;
+      this.finishDollyTrip(p);
+      return;
+    }
     if (p.pending.dashN) { // BACK out of the truck: step off the ramp so it doesn't re-trigger
       p.loadMode = false;
       p.x = TRUCK.ramp.x0 - 1.2; item.x = p.x; item.z = p.z;
@@ -717,6 +834,11 @@ export class MoveRoom extends Room {
 
     for (const id of loaderIds) { const o = this.players.get(id); if (o) { o.carry = null; o.loadMode = false; o.x -= 1.2; } }
     item.carriers = [];
+    if (p.feeding) { // next box off the dolly, or the trip is done
+      p.tripPlaced = (p.tripPlaced || 0) + 1;
+      p.x += 1.2;
+      if (!this.feedFromDolly(p)) { this.finishDollyTrip(p); p.x -= 1.2; }
+    }
 
     if (res.selfBroken) {
       item.state = 'broken';
@@ -850,7 +972,7 @@ export class MoveRoom extends Room {
   // ---------- end ----------
   checkEnd() {
     const all = [...this.items.values()];
-    const remaining = all.filter(i => i.state === 'floor' || i.state === 'carried');
+    const remaining = all.filter(i => i.type !== 'dolly' && (i.state === 'floor' || i.state === 'carried' || i.state === 'dolly'));
     let filled = 0;
     for (const col of this.grid.cells) for (const stack of col) for (const c of stack) if (c) filled++;
     if (this.fitCache?.v !== this.gridVersion || this.fitCache?.n !== remaining.length) {
@@ -958,12 +1080,13 @@ export class MoveRoom extends Room {
     const players = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
-      out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
+      out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dolly: p.dolly || null, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
       room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
       id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
       assembled: i.assembled, g: i.g, n: i.carriers.length, damaged: i.damaged ? 1 : 0,
+      ...(i.type === 'dolly' ? { stack: i.stack, uses: i.uses, strain: i.strain, pusher: i.pusher } : {}), ...(i.state === 'dolly' ? { on: i.dollyId } : {}),
       task: i.task ? { kind: i.task.kind, p: +i.task.progress.toFixed(2) } : null,
     }));
     return {

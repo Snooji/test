@@ -349,3 +349,15 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 #results { grid-auto-rows: auto; align-content: end; gap: 10px; }
 #results .res-promo { width: min(640px, 100%); }
 @media (max-width: 999px) { #results .res-promo .promo { margin: 0 auto 8px; } }
+
+/* training complete (layout adapted from the 21st.dev "Mission Success Dialog") */
+#train-done { background: rgba(11,8,32,.55); backdrop-filter: blur(3px); }
+.td-card { position: relative; width: min(400px, 100%); padding: 34px 26px 22px; text-align: center; border-radius: 22px;
+  background: linear-gradient(180deg, #1d1650, #140f38); border: 1px solid rgba(85,255,204,.4); box-shadow: 0 30px 80px rgba(0,0,0,.5), 0 0 0 6px rgba(85,255,204,.06);
+  animation: tdIn .35s cubic-bezier(.2,.9,.3,1.2); display: grid; gap: 10px; }
+@keyframes tdIn { from { opacity: 0; transform: translateY(20px) scale(.9); } }
+.td-badge { position: absolute; top: 14px; left: 14px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: rgba(85,255,204,.14); color: var(--accent2); }
+.td-portrait { width: 132px; height: 132px; margin: 4px auto 0; filter: drop-shadow(0 10px 18px rgba(85,255,204,.35)); animation: bob 2s ease-in-out infinite; }
+.td-portrait svg { width: 100%; height: 100%; }
+.td-title { margin: 0; font-family: var(--display); font-weight: 400; font-size: 28px; color: var(--accent2); }
+.td-text { margin: 0 0 6px; color: var(--mute); font-size: 15px; line-height: 1.45; }

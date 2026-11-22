@@ -138,8 +138,23 @@ export function makeMover(char, suit = null) {
 }
 
 // ---------- items ----------
+function makeDolly() {
+  const g = new THREE.Group();
+  const steel = mat(0x9aa3b8, { metalness: 0.6, roughness: 0.35 }), red = mat(0xe63946);
+  g.add(mesh(new THREE.BoxGeometry(0.85, 0.06, 0.55), steel, 0, 0.1, 0));                  // nose plate
+  for (const s of [-1, 1]) {
+    const rail = mesh(new THREE.BoxGeometry(0.06, 1.35, 0.06), red, s * 0.32, 0.75, -0.25); g.add(rail); // uprights
+    const wheel = mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.08, 16), mat(0x1a1a24), s * 0.44, 0.16, -0.22);
+    wheel.rotation.z = Math.PI / 2; g.add(wheel);
+  }
+  g.add(mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), red, 0, 1.4, -0.25));                // handle
+  g.add(mesh(new THREE.BoxGeometry(0.7, 0.05, 0.05), red, 0, 0.8, -0.25));
+  return g;
+}
+
 export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
   const t = ITEM_TYPES[type];
+  if (type === 'dolly') return makeDolly();
   const g = new THREE.Group();
   if (loaded && dims?.cells) { // shaped piece in the truck: one block per cell, centred on its bounding box
     const face = new THREE.MeshStandardMaterial({ map: boxFace(type, wrapped && t.furniture), roughness: 0.9 });

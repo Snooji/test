@@ -10,7 +10,7 @@ function makeRoom(opts = { level: 'classic' }) {
   room.setSimulationInterval = () => {};
   room.broadcast = (type, msg) => { if (type === 'evt') events.push(msg); if (type === 'chat') events.push({ kind: 'chat', ...msg }); };
   room.clients = [];
-  room.onCreate(opts);
+  room.onCreate({ dolly: false, ...opts }); // most tests run without the dolly
   const join = (id, name) => {
     room.clients.push({ sessionId: id, send: (t, m) => events.push({ ...m, to: id }) });
     room.onJoin({ sessionId: id }, {}, { name, email: name + '@x.io' });
@@ -677,4 +677,89 @@ test('training: every step names a target to point at (item or the truck) and us
   room.tick(0.05);
   snap = room.snapshot();
   assert.equal(snap.tutorial.target, 'ramp', 'carrying → point at the truck');
+});
+
+// ---- the dolly ----
+function dollyRoom() {
+  const r = makeRoom({ dolly: true, level: 'classic' });
+  const a = r.join('A', 'Ada'); r.join('B', 'Bo');
+  r.send('A', 'start');
+  const dolly = [...r.room.items.values()].find(i => i.type === 'dolly');
+  return { ...r, a, dolly };
+}
+const grabAt = (room, p, it) => { p.x = it.x + 0.05; p.z = it.z + 0.05; p.pending.tapN = 1; room.tick(0.05); };
+
+test('dolly: spawns in the house, grab it, then stack up to 3 boxes (no furniture)', () => {
+  const { room, a, dolly } = dollyRoom();
+  assert.ok(dolly, 'a dolly is somewhere in the house');
+  assert.equal(room.level.roomAt(dolly.x, dolly.z) !== 'Yard', true);
+  grabAt(room, a, dolly);
+  assert.equal(a.dolly, dolly.id);
+  const boxes = [...room.items.values()].filter(i => i.type === 'standard').slice(0, 4);
+  for (const b of boxes) grabAt(room, a, b);
+  assert.equal(dolly.stack.length, 3, 'max three');
+  assert.equal(boxes[3].state, 'floor');
+  grabAt(room, a, [...room.items.values()].find(i => i.type === 'lamp'));
+  assert.equal(dolly.stack.length, 3, 'lamps do not go on dollies');
+});
+
+test('dolly: at the truck the boxes come off top first, one at a time', () => {
+  const { room, a, dolly } = dollyRoom();
+  grabAt(room, a, dolly);
+  const [b1, b2] = [...room.items.values()].filter(i => i.type === 'standard');
+  grabAt(room, a, b1); grabAt(room, a, b2);           // b2 is on top
+  a.x = 11.2; a.z = 0; room.tick(0.05);
+  assert.ok(a.loadMode);
+  assert.equal(a.carry, b2.id, 'top box first');
+  a.cursor = { gx: 0, gz: 0, rot: 0 }; a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(b2.state, 'loaded');
+  assert.ok(a.loadMode, 'stays in the truck for the next box');
+  assert.equal(a.carry, b1.id);
+  a.cursor = { gx: 1, gz: 0, rot: 0 }; a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(b1.state, 'loaded');
+  assert.equal(a.loadMode, false);
+  assert.equal(dolly.uses, 1);
+});
+
+test('dolly: breaks after two trips and turns up somewhere else', () => {
+  const { room, a, dolly } = dollyRoom();
+  const boxes = [...room.items.values()].filter(i => i.type === 'standard');
+  let spot = null;
+  for (let trip = 0; trip < 2; trip++) {
+    grabAt(room, a, dolly);
+    grabAt(room, a, boxes[trip]);
+    a.x = 11.2; a.z = 0; room.tick(0.05);
+    a.cursor = { gx: trip, gz: 0, rot: 0 }; a.pending.tapN = 1; room.tick(0.05);
+    spot = [dolly.x, dolly.z];
+    if (trip === 0) { a.x = 8; a.pending.tapN = 1; room.tick(0.05); } // set it down after the first trip
+  }
+  assert.equal(a.dolly, null, 'broken dolly leaves your hands');
+  assert.equal(dolly.uses, 0, 'a fresh dolly');
+  assert.equal(dolly.state, 'floor');
+  assert.ok(room.level.roomAt(dolly.x, dolly.z) !== 'Yard', 'back in the house');
+});
+
+test('dolly: a heavy box riding on a fragile one too long breaks it, costs points, and it respawns', () => {
+  const { room, a, dolly } = dollyRoom();
+  grabAt(room, a, dolly);
+  const f = [...room.items.values()].find(i => i.type === 'fragile');
+  const h = [...room.items.values()].find(i => i.type === 'heavy');
+  grabAt(room, a, f); grabAt(room, a, h);
+  a.score = 50;
+  for (let i = 0; i < 20 * 3; i++) room.tick(0.05);
+  assert.ok(dolly.strain > 0, 'warning is showing');
+  assert.equal(f.state, 'dolly', 'not broken yet');
+  for (let i = 0; i < 20 * 4; i++) room.tick(0.05);
+  assert.equal(f.state, 'floor', 'broke and respawned');
+  assert.equal(a.score, 50 - 15);
+  assert.deepEqual(dolly.stack, [h.id]);
+  assert.ok(room.breaks.some(b => b.culpritIds.includes('A')));
+});
+
+test('dolly: AI movers never grab it', () => {
+  const r = makeRoom({ dolly: true, level: 'classic' });
+  for (let i = 0; i < 4; i++) r.room.addBot();
+  r.room.startRound();
+  for (let i = 0; i < 20 * 60; i++) r.room.tick(0.05);
+  assert.ok(![...r.room.players.values()].some(p => p.dolly));
 });
