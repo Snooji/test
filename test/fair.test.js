@@ -1,0 +1,141 @@
+// AI fairness: bots play by the same physical rules as people, see only what's near them,
+// and only know who broke something if they saw it happen.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { MoveRoom } from '../server/MoveRoom.js';
+import { mulberryFor } from '../shared/logic.js';
+
+const SPEED = 5, DT = 0.05;
+
+function makeRoom(opts = {}) {
+  const room = new MoveRoom();
+  const handlers = {};
+  room.onMessage = (type, fn) => { handlers[type] = fn; };
+  room.setSimulationInterval = () => {};
+  room.broadcast = () => {};
+  room.clients = [];
+  room.onCreate({ dolly: false, ...opts });
+  const join = (id, name) => {
+    room.clients.push({ sessionId: id, send: () => {} });
+    room.onJoin({ sessionId: id }, {}, { name, email: name + '@x.io' });
+    return room.players.get(id);
+  };
+  return { room, join, handlers };
+}
+
+function audit(room, seconds) {
+  const last = new Map(), s = {};
+  for (let t = 0; t < seconds && room.phase !== 'results'; t += DT) {
+    const wasPlaying = room.phase === 'playing';
+    room.tick(DT);
+    for (const p of room.players.values()) {
+      if (!p.bot) continue;
+      const r = s[p.name] ||= { moved: 0, ticks: 0, dashT: 0, firstDash: null, bad: [], inWall: 0 };
+      const l = last.get(p.id);
+      if (l && wasPlaying && room.phase === 'playing') {
+        const d = Math.hypot(p.x - l.x, p.z - l.z);
+        r.moved += d; r.ticks++;
+        if (p.dashT > 0) { r.dashT += DT; if (r.firstDash === null) r.firstDash = t; }
+        const cap = SPEED * DT * (p.dashT > 0 ? 2 : 1) * 1.15;
+        if (d > cap) r.bad.push({ t: +t.toFixed(2), d: +d.toFixed(2), load: p.loadMode, carry: p.carry && room.items.get(p.carry)?.type });
+        if (room.level.hitsWall(p.x, p.z, 0.3)) r.inWall++;
+      }
+      last.set(p.id, { x: p.x, z: p.z });
+    }
+  }
+  return s;
+}
+
+for (const seed of [4242, 11]) {
+  test(`AI movers never teleport, clip walls or outrun a walking person (seed ${seed})`, () => {
+    const rnd = Math.random; Math.random = mulberryFor(seed);
+    try {
+      const { room } = makeRoom({ seed, dolly: true });
+      for (let i = 0; i < 4; i++) room.addBot();
+      room.difficulty = 'hard'; for (const b of room.bots.values()) b.setDifficulty('hard');
+      room.startRound();
+      const s = audit(room, 100);
+      for (const [n, r] of Object.entries(s)) {
+        assert.deepEqual(r.bad.slice(0, 5), [], `${n} moved faster than allowed in one tick`);
+        assert.equal(r.inWall, 0, `${n} stood inside a wall`);
+        assert.ok(r.firstDash === null || r.firstDash > 4, `${n} dashed off the start line at ${r.firstDash}s`);
+        assert.ok(r.dashT <= 3.1, `${n} dashed ${r.dashT.toFixed(1)}s in 100s`);
+        assert.ok(r.moved / (r.ticks * DT) < SPEED * 0.9, `${n} averaged ${(r.moved / (r.ticks * DT)).toFixed(2)} m/s`);
+      }
+    } finally { Math.random = rnd; }
+  });
+}
+
+test('a person dropping a box in the truck is not shoved off the ramp', () => {
+  const { room, join } = makeRoom({ level: 'classic' });
+  const a = join('A', 'Ada'); join('B', 'Bo');
+  room.startRound();
+  while (room.phase !== 'playing') room.tick(DT);
+  const box = [...room.items.values()].find(i => i.type === 'standard' && i.state === 'floor');
+  box.state = 'carried'; box.carriers = [a.id]; a.carry = box.id;
+  a.x = 10.2; a.z = 0.3; box.x = a.x; box.z = a.z;
+  let prev = { x: a.x, z: a.z };
+  for (let i = 0; i < 40; i++) {
+    if (a.loadMode && i === 30) a.pending.tapN = 1;
+    room.tick(DT);
+    const d = Math.hypot(a.x - prev.x, a.z - prev.z);
+    assert.ok(d <= SPEED * DT * 1.15, `tick ${i}: jumped ${d.toFixed(2)} m`);
+    prev = { x: a.x, z: a.z };
+  }
+  assert.equal(box.state, 'loaded');
+});
+
+test('AI only goes for things it has actually seen', () => {
+  const { room } = makeRoom({ seed: 222 });
+  room.addBot();
+  room.startRound();
+  const bot = [...room.bots.values()][0];
+  bot.perceive(true);
+  for (const id of bot.known.keys()) assert.ok(bot.canSee(room.items.get(id)), 'remembers only what it saw');
+  const unseen = [...room.items.values()].filter(i => i.state === 'floor' && !bot.canSee(i));
+  assert.ok(unseen.length > 0, 'some of the house is out of sight from the yard');
+  for (let i = 0; i < 20; i++) {
+    const t = bot.chooseTarget();
+    if (t) assert.ok(bot.known.has(t.id), `targeted ${t.type} it never saw`);
+  }
+});
+
+test('sabotage: a crew bot that did not see the crunch cannot name the saboteur', () => {
+  const { room, join } = makeRoom({ game: 'sabotage', seed: 3333 });
+  const a = join('A', 'Ada'); join('B', 'Bo'); room.addBot();
+  room.startRound();
+  for (const p of room.players.values()) p.saboteur = p.id === 'A';
+  const bot = [...room.bots.values()][0];
+  bot.setDifficulty('hard');
+  // the bot is deep in the house behind walls; Ada is at the truck
+  const far = room.level.rooms.reduce((m, r) => (r.x0 + r.x1) / 2 < (m.x0 + m.x1) / 2 ? r : m);
+  bot.p.x = (far.x0 + far.x1) / 2; bot.p.z = (far.z0 + far.z1) / 2;
+  a.x = 11.2; a.z = 0;
+  const box = [...room.items.values()].find(i => i.type === 'fragile');
+  assert.ok(!bot.canSeePoint(a.x, a.z), 'setup: Ada is out of sight');
+  for (let i = 0; i < 10; i++) room.recordBreak(box, ['A'], 'got crushed');
+  assert.ok((bot.sus.A || 0) < 1, `blind bot suspects Ada at ${bot.sus.A}`);
+  assert.equal(bot.calloutAt, null, 'no meeting called on a hunch');
+
+  // now it watches it happen
+  bot.p.x = 8.5; bot.p.z = 0.5;
+  assert.ok(bot.canSeePoint(a.x, a.z), 'setup: Ada in plain view');
+  for (let i = 0; i < 3; i++) room.recordBreak(box, ['A'], 'got crushed');
+  assert.ok((bot.sus.A || 0) >= 1, 'a witness remembers');
+});
+
+test('classic meetings: bots vote on what they saw, not on hidden culprit data', () => {
+  const { room, join } = makeRoom({ level: 'classic' });
+  join('A', 'Ada'); join('B', 'Bo'); room.addBot();
+  room.startRound();
+  const bot = [...room.bots.values()][0];
+  bot.rng = mulberryFor(9);
+  room.players.get('A').x = 11.2; room.players.get('A').z = 0;
+  const far = room.level.rooms.reduce((m, r) => (r.x0 + r.x1) / 2 < (m.x0 + m.x1) / 2 ? r : m);
+  bot.p.x = (far.x0 + far.x1) / 2; bot.p.z = (far.z0 + far.z1) / 2;
+  const box = [...room.items.values()].find(i => i.type === 'fragile');
+  room.recordBreak(box, ['A'], 'got crushed');
+  let hits = 0;
+  for (let i = 0; i < 300; i++) if (bot.meetingVote() === 'A') hits++;
+  assert.ok(hits / 300 < 0.5, `blind bot picked the real culprit ${Math.round(hits / 3)}% of the time`);
+});

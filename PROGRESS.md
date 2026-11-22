@@ -110,3 +110,18 @@ Verified: npm test 134/134 · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly PASS
 - [x] Lobby ready-up: crew chief's Start stays locked until every other player is ready (✅ over their mover)
 - [x] Sign-up: name + real email (format, throwaway-inbox list, MX check on in production); agreement line instead of a checkbox; Settings panel newsletter switch
 Verified: npm test 144/144 · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly PASS
+
+## Round 6: fair AI (2026-11-22)
+Report: "AI cheat: speed boost at start, faster than players, guess the saboteur without seeing it, omniscient, glitch through things."
+Root causes found (measured with a tick-by-tick audit, 4 hard bots, 120 s):
+- Dash on every cooldown whenever the path was > 9 m, including the very first run (rocket start). Hard bots also walked at 100% stick.
+- Bots chose targets from every item in the house (no sight), and helped lifts anywhere.
+- Sabotage suspicion and classic meeting votes read the real culprit list from the server, so no witnessing was needed.
+- Movement glitches (people too): 2.5–4 m snap onto a ramp spot, 1.2 m shove after every drop, separation pushes up to 8 m/s, two-mover lifts placing carriers inside walls and snapping 0.6 m.
+Fixes:
+- [x] Speed 65/78/88% of a person; dash at most once per 45 s (normal) / 30 s (hard), never in the first 6 s; easy never dashes
+- [x] Eyesight: 6/7.5/9 m, blocked by walls; memory of what they saw (goes to where it last saw a thing, forgets it if it's gone); explores unvisited rooms when it knows of nothing; hears 🆘 calls like everyone
+- [x] Suspicion only from crunches they watched (culprit in sight); otherwise a small hunch on whoever they saw at the truck; meetings only called by a witness; votes from their own suspicion
+- [x] Full load: bots follow the packing plan less often (50/70/85%)
+- [x] No teleports: walk to the ramp spot, no post-drop shove, BACK just steps you out (ramp re-entry locked until you leave it), gentle separation, lift formation turns with the walking line and never stands a mover in a wall
+Verified: unit tests 150/150 (incl. new test/fair.test.js) · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · audit: 0 teleports, 0 wall ticks, 0 over-speed ticks; hard bots average 3.0–3.8 m/s vs a person's 5 m/s

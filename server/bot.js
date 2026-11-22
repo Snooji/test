@@ -3,11 +3,14 @@
 import { ITEM_TYPES, GRID, footprint, cloneGrid, placeItem, shapeCells, shapeDrop, isRemovable, topItemAt, canFitAny } from '../shared/logic.js';
 import { inRamp } from '../shared/world.js';
 
+// Bots walk a little slower than a person at full stick, see only what's near them (sight, in metres,
+// blocked by walls), remember what they saw, and only dash now and then (dashEvery seconds at most).
 export const DIFFICULTY = {
-  easy:   { speed: 0.7,  react: [0.9, 1.6],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.35, dash: false, follow: 0.6 },
-  normal: { speed: 0.88, react: [0.4, 0.9],  sloppy: 0.25, wrap: 0.7, help: 0.9, callout: 0.4,  accuracy: 0.6,  dash: true,  follow: 0.9 },
-  hard:   { speed: 1,    react: [0.15, 0.4], sloppy: 0,    wrap: 1,   help: 1,   callout: 0.7,  accuracy: 0.85, dash: true,  follow: 1 },
+  easy:   { speed: 0.65, react: [1.0, 1.8],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.4,  dashEvery: 0,  follow: 0.5,  sight: 6 },
+  normal: { speed: 0.78, react: [0.5, 1.0],  sloppy: 0.3,  wrap: 0.7, help: 0.8, callout: 0.35, accuracy: 0.6,  dashEvery: 45, follow: 0.7,  sight: 7.5 },
+  hard:   { speed: 0.88, react: [0.3, 0.6],  sloppy: 0.05, wrap: 1,   help: 1,   callout: 0.6,  accuracy: 0.8,  dashEvery: 30, follow: 0.85, sight: 9 },
 };
+const NO_DASH_BEFORE = 6; // nobody gets a rocket start
 
 export const BOT_NAMES = ['Beep', 'Sprocket', 'Orbit', 'Nebby', 'Kip', 'Bolt', 'Pixel', 'Comet'];
 const RAMP_TARGET = { x: 11.2, z: 0 };
@@ -67,6 +70,59 @@ export class Bot {
     this.waitT = this.react(); this.waitAlone = 0; this.stuckT = 0; this.last = null; this.placed = null;
     this.wantsWrap = false; this.calloutAt = null;
     this.sus = {}; this.skipUntil = new Map(); this.setAside = null; this.holdT = 0; this.t = 0; this.stuckCache = null;
+    this.known = new Map();      // itemId -> { x, z, at } : things this bot has actually seen
+    this.seenAtTruck = {};       // playerId -> time last seen loading at the truck
+    this.visited = {};           // room name -> time last walked through
+    this.lookT = 0; this.lastDash = -1e9; this.exploreTo = null;
+  }
+
+  // ---------- eyesight & memory ----------
+  canSeePoint(x, z) {
+    const p = this.p, dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
+    if (d > this.cfg.sight) return false;
+    const n = Math.ceil(d / 0.3);
+    for (let i = 1; i < n; i++) if (this.room.level.hitsWall(p.x + dx * i / n, p.z + dz * i / n, 0.05)) return false;
+    return true;
+  }
+  canSee(it) { return !!it && this.canSeePoint(it.x, it.z); }
+  hear(it) { if (it) this.known.set(it.id, { x: it.x, z: it.z, at: this.t }); } // a 🆘 call everyone hears
+  perceive(force = false, dt = 0.05) {
+    if (!force && (this.lookT -= dt) > 0) return;
+    this.lookT = 0.25;
+    const room = this.room, p = this.p;
+    for (const it of room.items.values()) {
+      if (it.type === 'dolly') continue;
+      const visible = (it.state === 'floor' || it.state === 'carried') && this.canSee(it);
+      if (visible) this.known.set(it.id, { x: it.x, z: it.z, at: this.t });
+      else if (this.known.has(it.id)) { const k = this.known.get(it.id); if (this.canSeePoint(k.x, k.z)) this.known.delete(it.id); } // looked: it's gone
+    }
+    for (const o of room.players.values()) {
+      if (o === p || !room.isActive(o)) continue;
+      if ((o.loadMode || inRamp(o.x, o.z)) && this.canSeePoint(o.x, o.z)) this.seenAtTruck[o.id] = this.t;
+    }
+    const here = room.level.roomAt(p.x, p.z);
+    this.visited[here] = this.t;
+    if (this.exploreTo && here === this.exploreTo.name) this.exploreTo = null;
+  }
+  /** where this bot believes an item is: live if in view, else where it last saw it */
+  seenAt(it) { return this.canSee(it) ? it : this.known.get(it.id) || null; }
+  explore(dt) {
+    const rooms = this.room.level.rooms || [];
+    if (!rooms.length) return this.wander(dt);
+    if (!this.exploreTo) {
+      const p = this.p;
+      let best = null, bs = Infinity;
+      for (const r of rooms) {
+        const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+        const s = (this.visited[r.name] ?? -60) * 2 + Math.hypot(cx - p.x, cz - p.z) + this.rng() * 3;
+        if (s < bs && this.room.level.roomAt(p.x, p.z) !== r.name) { bs = s; best = { name: r.name, x: cx, z: cz }; }
+      }
+      this.exploreTo = best;
+      this.path = null;
+    }
+    if (!this.exploreTo) return this.wander(dt);
+    this.goTo(this.exploreTo, dt, false);
+    if (!this.path) this.exploreTo = null;
   }
   skipping(id) { return (this.skipUntil.get(id) || 0) > this.t; }
 
@@ -134,6 +190,7 @@ export class Bot {
     const room = this.room, p = this.p;
     this.t += dt;
     if (room.phase !== 'playing' || !room.isActive(p)) { this.idle(); return; }
+    this.perceive(false, dt);
     if (this.calloutAt !== null && (this.calloutAt -= dt) <= 0) { this.calloutAt = null; room.callMeeting(p.id); }
     if (this.waitT > 0) { this.waitT -= dt; this.idle(); return; }
 
@@ -202,10 +259,13 @@ export class Bot {
     const room = this.room, p = this.p;
     let target = this.targetId ? room.items.get(this.targetId) : null;
     if (!target || !this.stillValid(target) || this.skipping(target.id) || (this.plan() && !p.saboteur && target.state === 'floor' && !this.openSlot(target.type))) { this.wantsWrap = false; target = this.chooseTarget(); this.targetId = target?.id || null; this.path = null; }
-    if (!target) { this.idle(); this.wander(dt); return; }
+    if (!target) { this.idle(); if (this.coach) this.wander(dt); else this.explore(dt); return; }
     const t = ITEM_TYPES[target.type];
-    const d = Math.hypot(target.x - p.x, target.z - p.z);
-    if (d > 1.15) { this.goTo(target, dt, false); return; }
+    const where = this.seenAt(target);
+    if (!where) { this.targetId = null; this.path = null; return; }
+    const d = Math.hypot(where.x - p.x, where.z - p.z);
+    if (d > 1.15) { this.goTo(where, dt, false); return; }
+    if (!this.canSee(target) || !this.stillValid(target)) { this.known.delete(target.id); this.targetId = null; this.path = null; return; }
     this.idle();
     // at the item
     if (target.assembled || (this.wantsWrap && t.needsWrap && !target.wrapped)) {
@@ -221,6 +281,7 @@ export class Bot {
   }
 
   stillValid(it) {
+    if (!this.canSee(it)) return this.known.has(it.id); // out of sight: assume it's still where we saw it
     if (it.state === 'floor') return true;
     return it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1 && !it.carriers.includes(this.p.id);
   }
@@ -238,18 +299,20 @@ export class Bot {
       return null;
     }
     const alone = room.activePlayers().length === 1;
-    // 1) someone is holding one end of a two-mover lift: help them
-    for (const it of room.items.values()) {
+    const knownItems = [...this.known.keys()].map(id => room.items.get(id)).filter(Boolean);
+    // 1) someone is holding one end of a two-mover lift (seen, or heard the 🆘): help them
+    for (const it of knownItems) {
       if (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1 && !it.carriers.includes(p.id) && !room.players.get(it.carriers[0])?.loadMode && !this.claimed(it) && this.rng() < cfg.help) return it;
     }
-    const someoneWaiting = [...room.items.values()].some(it => it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1);
-    const loaded = [...room.items.values()].filter(i => i.state === 'loaded').length;
+    const someoneWaiting = knownItems.some(it => it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1);
+    const loaded = room.grid.items.size; // anyone can see the truck
     let best = null, bestScore = -Infinity;
-    for (const it of room.items.values()) {
-      if (it.state !== 'floor' || it.type === 'dolly' || this.skipping(it.id) || this.claimed(it)) continue;
+    for (const it of knownItems) {
+      const seen = this.seenAt(it);
+      if (!seen || (this.canSee(it) && it.state !== 'floor') || it.type === 'dolly' || this.skipping(it.id) || this.claimed(it)) continue;
       const t = ITEM_TYPES[it.type];
       if (t.teamCarry && !alone && someoneWaiting) continue;
-      let score = -Math.hypot(it.x - p.x, it.z - p.z) - Math.hypot(it.x - RAMP_TARGET.x, it.z - RAMP_TARGET.z) * 0.4;
+      let score = -Math.hypot(seen.x - p.x, seen.z - p.z) - Math.hypot(seen.x - RAMP_TARGET.x, seen.z - RAMP_TARGET.z) * 0.4;
       if (this.difficulty === 'hard') {
         if (t.heavy || t.furniture) score += loaded < 12 ? 14 : 4; // build the floor first
         if (t.fragile) score -= loaded < 10 ? 12 : 0;              // fragile goes on top, later
@@ -287,30 +350,41 @@ export class Bot {
     while (wp && Math.hypot(wp.x - src.x, wp.z - src.z) < 0.35 && this.pathI < this.path.length - 1) wp = this.path[++this.pathI];
     if (!wp) { this.idle(); return; }
     const dx = wp.x - src.x, dz = wp.z - src.z, d = Math.hypot(dx, dz) || 1;
-    p.in.mx = dx / d * this.cfg.speed; p.in.mz = dz / d * this.cfg.speed; p.in.hold = false;
+    const sp = this.cfg.speed;
+    p.in.mx = dx / d * sp; p.in.mz = dz / d * sp; p.in.hold = false;
 
     // stuck detection: nudge sideways and repath
     if (this.last && Math.hypot(this.last.x - src.x, this.last.z - src.z) < 0.02 && !p.task) this.stuckT += dt; else this.stuckT = 0;
     this.last = { x: src.x, z: src.z };
-    if (this.stuckT > 0.8) { p.in.mx = -dz / d; p.in.mz = dx / d; this.repathT = 0; this.stuckT = 0; }
+    if (this.stuckT > 0.8) { p.in.mx = -dz / d * sp; p.in.mz = dx / d * sp; this.repathT = 0; this.stuckT = 0; }
 
-    // dash on long open runs
+    // an occasional dash on a long open run (never off the start line, never on cooldown)
+    const every = this.cfg.dashEvery;
+    if (!every || heavy || p.carry || p.dashCd > 0 || this.t < NO_DASH_BEFORE || this.t - this.lastDash < every || inRamp(p.x, p.z)) return;
     const remaining = this.path.slice(this.pathI).reduce((s, q, i, a) => s + (i ? Math.hypot(q.x - a[i - 1].x, q.z - a[i - 1].z) : Math.hypot(q.x - p.x, q.z - p.z)), 0);
-    if (this.cfg.dash && !heavy && !p.carry && remaining > 9 && p.dashCd <= 0 && !inRamp(p.x, p.z)) p.pending.dashN = 1;
+    if (remaining > 12 && this.rng() < 0.05) { p.pending.dashN = 1; this.lastDash = this.t; }
   }
 
   // ---------- social ----------
+  /** A crunch everyone hears. The bot only knows who did it if it watched them (in sight, not behind a wall);
+   *  otherwise it can only go on who it last saw hanging around the truck. */
   onCrunch(culpritIds) {
-    if (culpritIds.includes(this.p.id) || !this.room.isActive(this.p)) return;
-    if (this.room.game === 'sabotage' && !this.p.saboteur) {
-      for (const c of culpritIds) {
-        if (this.rng() < this.cfg.accuracy) this.sus[c] = (this.sus[c] || 0) + 1;
-        else { const o = this.room.activePlayers().filter(q => q.id !== this.p.id); if (o.length) { const r = o[Math.floor(this.rng() * o.length)].id; this.sus[r] = (this.sus[r] || 0) + 0.5; } }
-      }
-      if (Math.max(0, ...Object.values(this.sus)) >= 1.5 && this.rng() < this.cfg.callout) this.calloutAt = 2 + this.rng() * 4;
-      return;
+    const room = this.room, p = this.p;
+    if (culpritIds.includes(p.id) || !room.isActive(p) || p.saboteur) return;
+    let sawIt = false;
+    for (const c of culpritIds) {
+      const o = room.players.get(c);
+      if (!o || !this.canSeePoint(o.x, o.z)) continue;
+      sawIt = true;
+      if (this.rng() < this.cfg.accuracy) this.sus[c] = (this.sus[c] || 0) + 1;
+      else this.sus[c] = (this.sus[c] || 0) + 0.5; // saw them there, not sure they did it
     }
-    if (this.room.canCallOut?.() !== false && this.rng() < this.cfg.callout) this.calloutAt = 2 + this.rng() * 5;
+    if (!sawIt) { // hunch: whoever it noticed at the truck lately, only a little
+      for (const [id, at] of Object.entries(this.seenAtTruck)) if (this.t - at < 8 && id !== p.id) this.sus[id] = (this.sus[id] || 0) + 0.25;
+    }
+    const top = Math.max(0, ...Object.values(this.sus));
+    if (room.canCallOut?.() === false) return;
+    if (top >= 1 && sawIt && this.rng() < this.cfg.callout) this.calloutAt = 2 + this.rng() * 4;
   }
 
   meetingVote() {
@@ -323,12 +397,11 @@ export class Bot {
       if (ranked.length && this.rng() < this.cfg.accuracy) return ranked[0][0];
       return this.rng() < 0.5 ? 'skip' : pick(others, this.rng).id;
     }
-    const open = room.breaks.filter(b => !b.resolved);
-    const culprits = [...new Set(open.flatMap(b => b.culpritIds))].filter(id => id !== p.id && room.players.get(id) && room.isActive(room.players.get(id)));
-    const guilty = open.some(b => b.culpritIds.includes(p.id));
+    const guilty = room.breaks.some(b => !b.resolved && b.culpritIds.includes(p.id)); // it knows what it did itself
     if (guilty) return pick(others, this.rng).id;                         // bluff
-    if (culprits.length && this.rng() < this.cfg.accuracy) return pick(culprits, this.rng);
-    return this.rng() < 0.25 ? 'skip' : pick(others, this.rng).id;
+    const ranked = Object.entries(this.sus).filter(([id]) => others.some(o => o.id === id)).sort((a, b) => b[1] - a[1]);
+    if (ranked.length && ranked[0][1] >= 1 && this.rng() < this.cfg.accuracy) return ranked[0][0];
+    return this.rng() < 0.4 ? 'skip' : pick(others, this.rng).id;
   }
 
   meetingLine(target) {

@@ -32,6 +32,8 @@ await wait(300);
 if (snap?.phase !== 'lobby' || snap.players.length !== 2) fail('lobby snapshot wrong: ' + JSON.stringify(snap?.players?.length));
 if (snap.players.find(p => p.id === r1.sessionId).char !== 'glorp') fail('char not applied');
 r1.send('mode', { mode: '5min' });
+r2.send('ready'); // everyone readies up before the crew chief can start
+await wait(150);
 r1.send('start');
 await wait(300);
 if (snap.phase !== 'countdown' || snap.mode !== '5min') fail('did not start the countdown');
@@ -45,7 +47,7 @@ const x1 = snap.players.find(p => p.id === r1.sessionId).x;
 if (!(x1 < x0 - 2)) fail(`did not move ${x0} → ${x1}`);
 r1.send('callout');
 await wait(200);
-if (!evts.some(e => e.kind === 'toast' && /Nothing is broken/.test(e.text))) fail('callout without break should be refused');
+if (snap.phase !== 'playing' || evts.some(e => e.kind === 'meeting')) fail('1v1: a call-out must not start a meeting');
 console.log(`ok: moved ${x0} → ${x1}, items=${snap.items.length}, time=${snap.timeLeft}`);
 await r1.leave(); await r2.leave();
 console.log('SMOKE PASS');

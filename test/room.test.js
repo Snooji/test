@@ -535,6 +535,8 @@ test('movers aiming in the truck get their own spots on the ramp', () => {
   for (const [p, it] of [[a, i1], [b, i2]]) { it.state = 'carried'; it.carriers = [p.id]; p.carry = it.id; p.x = 11.2; p.z = 0; }
   room.tick(0.05);
   assert.ok(a.loadMode && b.loadMode);
+  for (let i = 0; i < 12; i++) room.tick(0.05); // they walk to their spots (no teleport)
+  assert.ok(a.loadMode && b.loadMode);
   assert.ok(Math.hypot(a.x - b.x, a.z - b.z) > 0.9, 'not stacked on the ramp');
 });
 

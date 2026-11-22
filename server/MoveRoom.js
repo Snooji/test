@@ -9,6 +9,7 @@ import { verifyToken, cleanName, cleanEmail } from './signups.js';
 const CHARS = ['nova', 'cosmo', 'glorp', 'zibble'];
 const SPEED = 5;
 const R = 0.45;           // player radius
+const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
 const TICK = 50;          // ms (20 Hz)
 const MAX_MOVERS = 4;
@@ -289,6 +290,7 @@ export class MoveRoom extends Room {
     const now = this.clock?.currentTime ?? Date.now();
     if (p.lastHelp && now - p.lastHelp < 5000) return false;
     p.lastHelp = now;
+    for (const b of this.bots.values()) b.hear?.(item); // everyone hears a 🆘
     const label = ITEM_TYPES[item.type].label.toLowerCase();
     this.event({ kind: 'help', id: p.id, name: p.name, item: label, x: +item.x.toFixed(1), z: +item.z.toFixed(1), text: `🆘 ${p.name} needs a hand with the ${label}! Lift the other end and split the points.` });
     return true;
@@ -467,7 +469,7 @@ export class MoveRoom extends Room {
       let dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
       if (d >= MIN) continue;
       if (d < 1e-3) { dx = 1; dz = 0; d = 1; }
-      const push = (MIN - d) / 2, ux = dx / d * push, uz = dz / d * push;
+      const push = Math.min((MIN - d) / 2, SEP_STEP), ux = dx / d * push, uz = dz / d * push;
       if (!this.level.hitsWall(a.x - ux, a.z - uz, R)) { a.x -= ux; a.z -= uz; }
       if (!this.level.hitsWall(b.x + ux, b.z + uz, R)) { b.x += ux; b.z += uz; }
     }
@@ -521,8 +523,9 @@ export class MoveRoom extends Room {
     }
 
     // pushing a loaded dolly onto the ramp: boxes come off top first, one at a time
+    if (p.rampLock && !inRamp(p.x, p.z) && !(item && inRamp(item.x, item.z))) p.rampLock = false;
     const dly2 = this.dollyOf(p);
-    if (dly2 && !item && dly2.stack.length && inRamp(p.x, p.z)) {
+    if (dly2 && !item && dly2.stack.length && inRamp(p.x, p.z) && !p.rampLock) {
       p.tripPlaced = 0;
       this.feedFromDolly(p);
       p.cursorCd = 0.35;
@@ -543,7 +546,7 @@ export class MoveRoom extends Room {
     } else p.unloadT = 0;
 
     // carrying into the ramp → load mode (leader only for team carries)
-    if (item && item.carriers[0] === p.id && inRamp(item.x, item.z)) {
+    if (item && item.carriers[0] === p.id && inRamp(item.x, item.z) && !p.rampLock) {
       p.loadMode = true;
       p.cursor = { gx: 1, gz: 0, rot: 0 };
       this.takeRampSlot(p);
@@ -717,18 +720,34 @@ export class MoveRoom extends Room {
     for (const item of this.items.values()) {
       if (item.state !== 'carried') continue;
       const cs = item.carriers.map(id => this.players.get(id)).filter(Boolean);
-      if (cs.length < 2 || cs[0].loadMode) continue;
+      if (cs.length < 2) { item.axis = undefined; continue; }
+      if (cs[0].loadMode) continue;
       let mx = 0, mz = 0;
       for (const c of cs) { mx += c.in.mx; mz += c.in.mz; }
       mx /= cs.length; mz /= cs.length;
+      const off = this.carryOffset(item);
+      if (item.axis === undefined) item.axis = Math.atan2(cs[1].z - cs[0].z, cs[1].x - cs[0].x);
+      const spots = (x, z, a) => [[x - Math.cos(a) * off, z - Math.sin(a) * off], [x + Math.cos(a) * off, z + Math.sin(a) * off]];
+      const clear = (x, z, a) => !this.level.hitsWall(x, z, 0.45) && spots(x, z, a).every(([sx, sz]) => !this.level.hitsWall(sx, sz, R * 0.8));
+      const stuckNow = !clear(item.x, item.z, item.axis); // squeezed already: allow any move that doesn't hit the furniture itself
+      const ok = (x, z, a) => clear(x, z, a) || (stuckNow && !this.level.hitsWall(x, z, 0.45));
+      const moving = Math.abs(mx) + Math.abs(mz) > 0.05;
+      if (moving) { // swing the pole round toward the walking line (either end can lead)
+        let want = Math.atan2(mz, mx), diff = ((want - item.axis) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+        const turn = Math.sign(diff) * Math.min(Math.abs(diff), 1.6 * dt);
+        if (turn && ok(item.x, item.z, item.axis + turn)) item.axis += turn;
+      }
       const sp = SPEED * 0.7 * dt;
       const nx = item.x + mx * sp, nz = item.z + mz * sp;
-      if (!this.level.hitsWall(nx, item.z, 0.45)) item.x = nx;
-      if (!this.level.hitsWall(item.x, nz, 0.45)) item.z = nz;
-      const off = this.carryOffset(item);
-      cs[0].x = item.x - off; cs[0].z = item.z; cs[0].face = Math.PI / 2;
-      cs[1].x = item.x + off; cs[1].z = item.z; cs[1].face = -Math.PI / 2;
-      if (Math.abs(mx) + Math.abs(mz) > 0.05) { cs[0].face = cs[1].face = Math.atan2(mx, mz); }
+      if (ok(nx, item.z, item.axis)) item.x = nx;
+      if (ok(item.x, nz, item.axis)) item.z = nz;
+      const sp2 = spots(item.x, item.z, item.axis), maxStep = SPEED * dt;
+      cs.slice(0, 2).forEach((c, k) => { // walk into position; never jump
+        const [tx, tz] = sp2[k], dx = tx - c.x, dz = tz - c.z, d = Math.hypot(dx, dz);
+        const nx2 = d <= maxStep ? tx : c.x + dx / d * maxStep, nz2 = d <= maxStep ? tz : c.z + dz / d * maxStep;
+        if (!this.level.hitsWall(nx2, nz2, R * 0.8)) { c.x = nx2; c.z = nz2; }
+        c.face = moving ? Math.atan2(mx, mz) : Math.atan2(item.x - c.x, item.z - c.z);
+      });
       // a tap from either carrier sets it down
       if (cs.some(c => c.pending.tapN)) this.releaseCarry(cs[0]);
     }
@@ -769,6 +788,11 @@ export class MoveRoom extends Room {
 
   updateLoadMode(p, item, dt) {
     if (!item && !p.unloading) { p.loadMode = false; return; }
+    if (p.slotTo) { // walk over to our spot on the ramp at normal pace (no teleports)
+      const dx = p.slotTo[0] - p.x, dz = p.slotTo[1] - p.z, d = Math.hypot(dx, dz), st = SPEED * dt;
+      if (d <= st) { p.x = p.slotTo[0]; p.z = p.slotTo[1]; p.slotTo = null; } else { p.x += dx / d * st; p.z += dz / d * st; }
+      if (item && item.carriers.length < 2) { item.x = p.x; item.z = p.z; }
+    }
     const c = p.cursor;
     p.cursorCd = Math.max(0, p.cursorCd - dt);
     const { mx, mz } = p.in;
@@ -779,7 +803,7 @@ export class MoveRoom extends Room {
         p.cursorCd = 0.18;
       }
       c.gx = clamp(c.gx, 0, GRID.W - 1); c.gz = clamp(c.gz, 0, GRID.D - 1);
-      if (p.pending.dashN) { p.loadMode = false; p.unloading = false; p.x = TRUCK.ramp.x0 - 1.2; return; }
+      if (p.pending.dashN) { p.loadMode = false; p.unloading = false; p.rampLock = true; p.slotTo = null; return; }
       if (p.pending.tapN) this.pullFromTruck(p);
       return;
     }
@@ -801,14 +825,12 @@ export class MoveRoom extends Room {
     if (p.pending.dashN && p.feeding) { // BACK: the box goes back on top of the dolly
       const d = this.dollyOf(p);
       item.state = 'dolly'; item.dollyId = d.id; item.carriers = []; d.stack.push(item.id);
-      p.carry = null; p.loadMode = false; p.x = TRUCK.ramp.x0 - 1.2;
+      p.carry = null; p.loadMode = false; p.rampLock = true; p.slotTo = null;
       this.finishDollyTrip(p);
       return;
     }
     if (p.pending.dashN) { // BACK out of the truck: step off the ramp so it doesn't re-trigger
-      p.loadMode = false;
-      p.x = TRUCK.ramp.x0 - 1.2; item.x = p.x; item.z = p.z;
-      if (item.carriers.length > 1) item.x += this.carryOffset(item);
+      p.loadMode = false; p.rampLock = true; p.slotTo = null;
       return;
     }
     if (p.pending.tapN) this.dropIntoTruck(p, item);
@@ -823,8 +845,7 @@ export class MoveRoom extends Room {
     if (i < 0) return;
     const item = p.carry ? this.items.get(p.carry) : null;
     if (item && item.carriers.length > 1) return; // team carries keep their formation
-    [p.x, p.z] = SLOTS[i];
-    if (item) { item.x = p.x; item.z = p.z; }
+    p.slotTo = SLOTS[i];
   }
 
   pullFromTruck(p) {
@@ -858,13 +879,13 @@ export class MoveRoom extends Room {
     const res = placeItem(this.grid, { id: item.id, type: item.type, wrapped: item.wrapped, loaderIds }, gx, gz, rot);
     if (!res.ok) return this.tell(p, res.reason === 'full' ? 'That stack is full — try another column!' : "Won't fit there!");
 
-    for (const id of loaderIds) { const o = this.players.get(id); if (o) { o.carry = null; o.loadMode = false; o.x -= 1.2; } }
+    for (const id of loaderIds) { const o = this.players.get(id); if (o) { o.carry = null; o.loadMode = false; o.slotTo = null; } }
     item.carriers = [];
     if (p.feeding) { // next box off the dolly, or the trip is done
       p.tripPlaced = (p.tripPlaced || 0) + 1;
-      p.x += 1.2;
-      if (!this.feedFromDolly(p)) { this.finishDollyTrip(p); p.x -= 1.2; }
+      if (!this.feedFromDolly(p)) this.finishDollyTrip(p);
     }
+    for (const id of loaderIds) { const o = this.players.get(id); if (o && !o.loadMode) o.rampLock = true; }
 
     if (res.selfBroken) {
       item.state = 'broken';
