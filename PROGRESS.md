@@ -72,3 +72,24 @@ Bugs found by playtesting wave 2 (fixed, with regression tests or sim checks):
 
 Verified: npm test 84/84 · e2e.mjs, e2e-solo.mjs, e2e-wave2.mjs (Full load lamp/rotate/drop/unload + Sabotage role/HUD/meeting) PASS · smoke PASS ·
 sim: Hard AI completes Full load in ~3–3.5 min (all seeds tried); Sabotage outcomes split 3 crew / 3 saboteur across 6 AI rounds.
+
+## Round 3 (2026-11-22): the 10 improvements + business funnel + Let's Move It
+- [x] 1 Email compliance: opt-in checkbox (unchecked by default), privacy page, signed confirm/unsubscribe links, one-click unsubscribe, confirmation email via Resend when RESEND_API_KEY + MAIL_FROM are set
+- [x] 2 Storage: Postgres when DATABASE_URL is set, otherwise a JSON file on the disk (old signups.jsonl imported once); duplicate sign-ups fixed
+- [x] 3 Training: 9-step guided round in a tiny house with a Coach AI
+- [x] 4 Quick Play: joins an open public game or starts one with AI fillers; auto-starts in 30 s; locks during rounds
+- [x] 5 Feel: carry/walk/squash animation, crunch shards, drop dust, confetti, procedural music (calm / tense meetings / rush in the last 20 s)
+- [x] 6 Full load balance: Normal/Easy AI follow the packing more and avoid gaps; MVP awards; separate ramp spots
+- [x] 7 Daily House + leaderboard, Zero-G and Moon Mansion twists, 5 unlockable suit colours
+- [x] 8 Phones: haptics, landscape layout, installable app (manifest + service worker), quick-chat buttons
+- [x] 9 Ops: admin dashboard, funnel counters, client + server error log, load test (100 rooms / 400 players held 20 Hz locally)
+- [x] 10 Sharing: link-preview image + tags
+- [x] Drive-off load check: shutter + drive animation; pieces resting on air slide and smash (and what they land on); whoever placed them loses the points
+- [x] Results: podium with names, places, points, crown; Restart needs every human (✅ over their mover); New game → main menu → 👍/👎 "should this be a full game?"
+- [x] Renamed to Let's Move It; Book a move CTA (15% off, Central Florida only) on menu, sign-up and results; "Powered by & created by Starside Movers"
+- [x] Business funnel: visits → sign-ups → opt-ins → game starts → completed rounds → book clicks → quote requests → bookings (+$), via webhook, pixel or manual admin entry
+- [x] Main menu redesign over a live AI demo game (shared stream, ~7 Hz, auto-disposes when idle, never counted in stats)
+
+Bugs found along the way (fixed, with tests): browsers rebuilt Full load / Sabotage houses without the exact-fill flag (wrong walls since wave 2); Chrome centred the menu column via place-items on a block layout.
+
+Verified: npm test 128/128 · e2e, e2e-solo, e2e-wave2, e2e-b PASS · smoke PASS · load test.

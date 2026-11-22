@@ -16,6 +16,12 @@ services:
         generateValue: true
       - key: ADMIN_KEY
         generateValue: true
+      - key: CONVERSION_KEY      # for the booking-site webhook / pixel
+        generateValue: true
+      # optional, set in the Render dashboard:
+      # DATABASE_URL   - Postgres (Render Postgres or Neon) so sign-ups live in a real database
+      # RESEND_API_KEY + MAIL_FROM - send the opt-in confirmation email
+      # CONTACT_EMAIL  - shown on /privacy for deletion requests
     disk:
       name: signups
       mountPath: /data
