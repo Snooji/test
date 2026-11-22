@@ -132,7 +132,7 @@ export class Bot {
     const alone = room.activePlayers().length === 1;
     // 1) someone is holding one end of a two-mover lift: help them
     for (const it of room.items.values()) {
-      if (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1 && !it.carriers.includes(p.id) && !this.claimed(it) && this.rng() < cfg.help) return it;
+      if (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1 && !it.carriers.includes(p.id) && !room.players.get(it.carriers[0])?.loadMode && !this.claimed(it) && this.rng() < cfg.help) return it;
     }
     const someoneWaiting = [...room.items.values()].some(it => it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1);
     const loaded = [...room.items.values()].filter(i => i.state === 'loaded').length;

@@ -31,3 +31,27 @@ Plan: `docs/superpowers/plans/2026-11-21-starside-movers.md`.
   - Final: minor (deferred): no auto-reconnect if a phone's connection drops mid-round (the player rejoins as a spectator).
   - Final: minor (deferred): loaded furniture shows as labelled wrapped blocks in the truck, not full furniture models.
   - Final: minor (deferred): client bundle is 720 KB (191 KB gzipped), mostly three.js.
+
+## Round 2 (2026-11-22): live playtest → solo AI, procedural houses, QoL
+Source of truth is now **Snooji/test** (branch `claude/sharp-ptolemy-333xsj`), which Render deploys from.
+Design: `docs/superpowers/specs/2026-11-22-solo-ai-and-qol-design.md`.
+
+### Wave 1 (shipped)
+- [x] Solo vs 3 AI movers with Easy / Normal / Hard; hosts can add or remove AI in any crew
+- [x] Procedural houses: seeded generator (size, 3–6 rooms, doors, yard distance, item spawns); new house every round; 🎲 New house in lobby
+- [x] Couch is 3 long and can stand 3 high; new 2×3×1 bed; ROTATE cycles every orientation (turn + flip)
+- [x] Minimap, guide arrow, stack-height numbers in the truck, 3-2-1 countdown, "today's job" intro
+- [x] Phone truck aiming: D-pad + drag on the grid; drop stays on the ✋ button
+- [x] 🆘 Help ping for two-mover lifts (beacon + minimap ping; AI answers it)
+- [x] Disconnect notices in chat, 30 s reconnect, last human standing wins by default
+- [x] Spread spawns + no overlapping movers, Strikes 0/2, sound toggle, collapsible phone chat, better results
+
+### Bugs found by playtesting (all fixed, each with a regression test)
+- Joining a two-mover lift dropped it instantly (the join tap was read twice) — affected humans too
+- AI decided to wrap lamps, then forgot (shattered lamps)
+- AI deadlocked holding two different heavy pieces, each waiting for the other
+- Team carries steered from each mover's body, wedging furniture in doorways
+- A helper could join a lift that was already being placed in the truck and steal half the points
+- Generator could make 2-room houses when doorways blocked every split
+
+Verified: npm test 60/60 · test/e2e.mjs (2 players, same house) PASS · test/e2e-solo.mjs (solo hard AI, phone D-pad/drag/rotate/drop) PASS · test/sim.mjs headless rounds: hard AI loads ~26/27 with 0 breaks.

@@ -123,3 +123,49 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 #res-truth { margin-top: 12px; font-size: 14px; color: var(--mute); text-align: left; }
 #res-truth b { color: var(--danger); }
 .team { margin-top: 8px; font-weight: 800; color: var(--accent2); }
+
+/* ---- v2: solo, difficulty, minimap, countdown, help, dpad ---- */
+.big.alt { background: linear-gradient(180deg, #2c2458, #1f1946); box-shadow: 0 4px 0 #120d33; border: 2px solid rgba(143,123,255,.45); }
+.diff { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0 4px; }
+.diff button { background: rgba(255,255,255,.08); border: 2px solid transparent; border-radius: 12px; padding: 8px 4px; font-weight: 700; font-size: 14px; }
+.diff button.on { border-color: var(--accent2); background: rgba(85,255,204,.14); }
+.diff button:disabled { cursor: default; opacity: .7; }
+.ghost.small { width: auto; margin: 0; padding: 8px 12px; font-size: 13px; font-weight: 700; }
+.botrow { justify-content: center; margin-top: 6px; }
+.house-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 14px; background: rgba(255,255,255,.05); border-radius: 12px; padding: 8px 10px; font-size: 14px; text-align: left; }
+.house-row b { color: var(--warn); }
+.char .bot { position: absolute; top: 4px; right: 6px; font-size: 12px; }
+.pill.icon { pointer-events: auto; padding: 6px 10px; }
+.pill.help { background: #c0392b; border-color: #fff; pointer-events: auto; }
+#minimap { position: absolute; left: 10px; bottom: 40px; width: 220px; height: 130px; border-radius: 12px; background: rgba(11,8,32,.75); border: 2px solid rgba(143,123,255,.45); }
+#countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: min(30vw, 220px); font-weight: 900; color: var(--warn); text-shadow: 0 8px 0 rgba(0,0,0,.35); animation: pop .5s; }
+#countdown small { display: block; font-size: 22px; color: var(--ink); text-align: center; }
+@keyframes pop { from { transform: scale(1.6); opacity: 0 } }
+#btn-help { width: 60px; height: 60px; background: rgba(192,57,43,.92) !important; grid-column: 1 / 3; justify-self: end; }
+#dpad { position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 13; display: grid; grid-template-columns: repeat(3, 58px); grid-template-rows: repeat(3, 58px) auto; gap: 4px; }
+#dpad button { background: rgba(107,77,255,.8); border: 2px solid rgba(255,255,255,.4); border-radius: 14px; font-size: 22px; touch-action: none; }
+#dpad button.down { background: rgba(85,255,204,.85); }
+#dpad [data-dir=up] { grid-column: 2; grid-row: 1; } #dpad [data-dir=left] { grid-column: 1; grid-row: 2; }
+#dpad [data-dir=right] { grid-column: 3; grid-row: 2; } #dpad [data-dir=down] { grid-column: 2; grid-row: 3; }
+#dpad .dpad-tip { grid-column: 1 / 4; grid-row: 4; font-size: 11px; color: var(--mute); text-align: center; }
+#chat-toggle { position: fixed; left: 10px; bottom: 10px; z-index: 26; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); font-size: 22px; }
+.res-row.me { outline: 2px solid var(--accent2); }
+.tag-bot { font-size: 11px; background: rgba(255,255,255,.12); border-radius: 6px; padding: 1px 5px; margin-left: 4px; }
+#chat-log .sys { color: var(--accent2); }
+@media (pointer: coarse) {
+  #minimap { width: 150px; height: 88px; left: auto; right: 10px; top: auto; bottom: auto; top: 108px; }
+  #scoreboard { top: 200px; }
+  #chat.collapsed { display: none !important; }
+}
+@media (pointer: fine) { #dpad, #chat-toggle { display: none !important; } }
+
+.toast.help { border-color: #ff4466; background: rgba(90,20,40,.9); font-weight: 700; }
+
+@media (pointer: coarse) {
+  .topbar { gap: 4px; }
+  .pill { font-size: 13px; padding: 5px 9px; }
+  #toasts { top: 92px; max-width: 62vw; }
+  #prompt { white-space: normal; text-align: center; width: max-content; max-width: 92vw; font-size: 13px; bottom: auto; top: 50px; }
+}
+
+@media (pointer: coarse) { body.aiming #scoreboard { display: none; } }

@@ -2,13 +2,14 @@
 const HOLD_MS = 250;
 
 export class Input {
-  constructor({ onCallout, onChatKey }) {
+  constructor({ onCallout, onChatKey, onHelp }) {
     this.s = { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 };
     this.keys = new Set();
     this.joy = { x: 0, z: 0 };
     this.enabled = true;
     this.onCallout = onCallout;
     this.onChatKey = onChatKey;
+    this.onHelp = onHelp;
     this.actDown = 0; this.actTimer = null;
 
     addEventListener('keydown', (e) => {
@@ -22,6 +23,7 @@ export class Input {
       if (k === 'shift') this.s.dashN++;
       if (k === 'r') this.s.rotN++;
       if (k === 'q' || k === 'c') this.onCallout?.();
+      if (k === 'h') this.onHelp?.();
     });
     addEventListener('keyup', (e) => {
       const k = e.key.toLowerCase();

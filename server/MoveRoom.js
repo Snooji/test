@@ -82,6 +82,13 @@ export class MoveRoom extends Room {
       if (c.sessionId === this.hostId && this.phase === 'lobby' && !this.classic) { this.newLevel(); this.resetWorld(); }
     });
     if (process.env.DEBUG_HOOKS === '1') {
+      this.onMessage('debug_give', (c, m) => {
+        const p = this.players.get(c.sessionId);
+        const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === m?.type);
+        if (!p || !it || this.phase !== 'playing') return;
+        it.wrapped = true; it.assembled = false; it.state = 'carried'; it.carriers = [p.id]; p.carry = it.id;
+        p.x = 11.2; p.z = 0; it.x = p.x; it.z = p.z;
+      });
       this.onMessage('debug_break', (c) => {
         const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === 'fragile');
         if (it && this.phase === 'playing') { it.state = 'broken'; this.recordBreak(it, [c.sessionId], 'got crushed'); }
@@ -89,6 +96,15 @@ export class MoveRoom extends Room {
     }
     this.onMessage('callout', (c) => this.callMeeting(c.sessionId));
     this.onMessage('help', (c) => this.helpPing(this.players.get(c.sessionId)));
+    // D-pad / drag-to-aim in the truck: set the drop column directly
+    this.onMessage('aim', (c, m) => {
+      const p = this.players.get(c.sessionId);
+      const item = p?.carry ? this.items.get(p.carry) : null;
+      if (!p?.loadMode || !item) return;
+      const { w, d } = footprint(item.type, p.cursor.rot);
+      p.cursor.gx = clamp(Number(m?.gx) | 0, 0, GRID.W - w);
+      p.cursor.gz = clamp(Number(m?.gz) | 0, 0, GRID.D - d);
+    });
     this.onMessage('vote', (c, m) => this.castVote(this.players.get(c.sessionId), m?.target));
     this.onMessage('chat', (c, m) => this.say(this.players.get(c.sessionId), m?.text));
     const hostInLobby = (c) => c.sessionId === this.hostId && (this.phase === 'lobby' || this.phase === 'results');
@@ -361,6 +377,7 @@ export class MoveRoom extends Room {
     if (t.teamCarry) {
       if (target.state === 'carried') {
         if (target.carriers.length >= 2) return;
+        if (this.players.get(target.carriers[0])?.loadMode) return; // already being placed in the truck
         target.carriers.push(p.id); p.carry = target.id;
         this.event({ kind: 'emote', id: p.id, e: '💪' });
         this.event({ kind: 'toast', text: `Team lift! ${target.carriers.map(id => this.players.get(id)?.name).join(' + ')} carry the ${t.label.toLowerCase()}` });

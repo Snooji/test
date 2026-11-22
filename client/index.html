@@ -16,7 +16,15 @@
 
   <!-- touch controls -->
   <div id="joyzone" class="hidden"><div id="joybase"><div id="joyknob"></div></div></div>
+  <div id="dpad" class="hidden">
+    <button data-dir="up" aria-label="Aim up">▲</button>
+    <button data-dir="left" aria-label="Aim left">◀</button>
+    <button data-dir="right" aria-label="Aim right">▶</button>
+    <button data-dir="down" aria-label="Aim down">▼</button>
+    <span class="dpad-tip">or drag on the truck</span>
+  </div>
   <div id="controls" class="hidden">
+    <button id="btn-help" class="hidden">🆘<span>HELP</span></button>
     <button id="btn-callout" class="hidden">📣<span>CALL OUT</span></button>
     <button id="btn-rot" class="hidden">⟳<span>ROTATE</span></button>
     <button id="btn-dash">🚀<span id="dash-label">DASH</span></button>
@@ -31,11 +39,15 @@
       <div class="pill" id="hud-strikes">♥♥</div>
       <div class="pill" id="hud-truck">🚚 0/29</div>
       <button class="pill danger hidden" id="hud-callout">📣 CALL OUT <kbd>Q</kbd></button>
+      <button class="pill help hidden" id="hud-help">🆘 NEED A HAND <kbd>H</kbd></button>
+      <button class="pill icon" id="hud-sound" aria-label="Toggle sound">🔊</button>
     </div>
+    <canvas id="minimap" width="220" height="130" aria-label="Minimap"></canvas>
+    <div id="countdown" class="hidden"></div>
     <div id="scoreboard"></div>
     <div id="toasts"></div>
     <div id="prompt" class="hidden"></div>
-    <div id="keyhelp">WASD move · <kbd>E</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>Shift</kbd> dash/back · <kbd>R</kbd> rotate · <kbd>Q</kbd> call out · <kbd>Enter</kbd> chat</div>
+    <div id="keyhelp">WASD move · <kbd>E</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>Shift</kbd> dash/back · <kbd>R</kbd> rotate/flip · <kbd>H</kbd> call for help · <kbd>Q</kbd> call out · <kbd>Enter</kbd> chat · in the truck you can also click the grid</div>
     <div id="flash"></div>
   </div>
 
@@ -60,7 +72,11 @@
     <div class="card">
       <div class="logo"><span class="star">★</span> STARSIDE <b>MOVERS</b></div>
       <p class="tag" id="home-hi">Welcome back, mover!</p>
-      <button class="big" id="btn-create">🚚 Start a new crew</button>
+      <button class="big" id="btn-solo">🤖 Solo vs 3 AI movers</button>
+      <div class="diff" id="home-diff" role="group" aria-label="AI difficulty">
+        <button data-level="easy">Easy</button><button data-level="normal">Normal</button><button data-level="hard">Hard</button>
+      </div>
+      <button class="big alt" id="btn-create">🚚 Start a crew with friends</button>
       <div class="or">or join a friend's crew</div>
       <div class="row"><input id="join-code" placeholder="Paste invite link or crew code" /><button id="btn-join">Join</button></div>
       <p class="err" id="home-err"></p>
@@ -94,6 +110,14 @@
         <button data-mode="5min">⏱ 5 min</button>
         <button data-mode="load">🚚 Until loaded</button>
       </div>
+      <div class="house-row"><span id="lobby-house"></span><button class="ghost small" id="btn-reroll">🎲 New house</button></div>
+      <div id="bot-controls">
+        <h3>AI movers</h3>
+        <div class="diff" id="lobby-diff" role="group" aria-label="AI difficulty">
+          <button data-level="easy">Easy</button><button data-level="normal">Normal</button><button data-level="hard">Hard</button>
+        </div>
+        <div class="row botrow"><button class="ghost small" id="btn-addbot">＋ Add AI</button><button class="ghost small" id="btn-rmbot">－ Remove AI</button></div>
+      </div>
       <div class="lobby-players" id="lobby-players"></div>
       <button class="big" id="btn-start">Start the move ▶</button>
       <p class="fine" id="lobby-wait"></p>
@@ -113,6 +137,7 @@
   </section>
 
   <!-- Chat (lobby + meeting) -->
+  <button id="chat-toggle" class="hidden" aria-label="Show chat">💬</button>
   <div id="chat" class="hidden">
     <div id="chat-log"></div>
     <form id="chat-form"><input id="chat-input" maxlength="120" placeholder="Say something… (Enter)" autocomplete="off" /></form>

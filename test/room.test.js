@@ -289,3 +289,27 @@ test('help ping: only when holding one end of a two-mover lift alone, with a coo
   send('A', 'help');
   assert.equal(events.filter(e => e.kind === 'help').length, 1, 'cooldown');
 });
+
+test('aim sets the drop column directly in load mode and is clamped to fit', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada');
+  send('A', 'start');
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  couch.state = 'carried'; couch.carriers = ['A']; a.carry = couch.id; a.loadMode = true; a.cursor = { gx: 0, gz: 0, rot: 0 };
+  send('A', 'aim', { gx: 3, gz: 2 });
+  assert.deepEqual([a.cursor.gx, a.cursor.gz], [1, 2], 'a 3-long couch clamps to gx=1');
+  a.loadMode = false;
+  send('A', 'aim', { gx: 0, gz: 0 });
+  assert.deepEqual([a.cursor.gx, a.cursor.gz], [1, 2], 'ignored outside load mode');
+});
+
+test('nobody can join a two-mover lift that is already being placed in the truck', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  couch.state = 'carried'; couch.carriers = ['A']; a.carry = couch.id; a.loadMode = true;
+  b.x = couch.x + 0.5; b.z = couch.z;
+  room.onTap(b, null);
+  assert.deepEqual(couch.carriers, ['A']);
+});

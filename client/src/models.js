@@ -137,15 +137,16 @@ export function makeMover(char) {
 }
 
 // ---------- items ----------
-export function makeItem(type, { wrapped = false, assembled = false, loaded = false } = {}) {
+export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
   const t = ITEM_TYPES[type];
   const g = new THREE.Group();
   if (!t.furniture || loaded || (!assembled && t.needsDisassemble)) {
-    // a box (or flat-pack / wrapped bundle once loaded)
+    // a box (or flat-pack / wrapped bundle once loaded). In the truck, grid width runs along world-z.
     const flat = t.needsDisassemble && !assembled && !loaded;
-    const w = loaded ? t.w * CELL * 0.96 : t.w * 0.9;
-    const h = loaded ? CELL * 0.96 : flat ? 0.35 : 0.8;
-    const d = loaded ? t.d * CELL * 0.96 : 0.8;
+    const L = loaded && dims ? dims : { w: t.d, d: t.w, h: t.h || 1 };
+    const w = loaded ? L.d * CELL * 0.96 : t.w * 0.9;
+    const h = loaded ? (L.h || 1) * CELL * 0.96 : flat ? 0.35 : 0.8;
+    const d = loaded ? L.w * CELL * 0.96 : Math.max(0.8, t.d * 0.9);
     const face = new THREE.MeshStandardMaterial({ map: boxFace(type, wrapped && t.furniture), roughness: 0.9 });
     const m = mesh(new THREE.BoxGeometry(w, h, d), face, 0, h / 2, 0);
     m.receiveShadow = true;
@@ -156,9 +157,18 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   }
   const c = wrapped ? new THREE.MeshStandardMaterial({ map: boxFace(type, true) }) : mat(t.color);
   if (type === 'couch') {
-    g.add(mesh(new THREE.BoxGeometry(2.0, 0.45, 0.85), c, 0, 0.32, 0));
-    g.add(mesh(new THREE.BoxGeometry(2.0, 0.6, 0.25), c, 0, 0.75, -0.32));
-    for (const s of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.25, 0.55, 0.85), c, s * 0.95, 0.5, 0));
+    g.add(mesh(new THREE.BoxGeometry(3.0, 0.45, 0.9), c, 0, 0.32, 0));
+    g.add(mesh(new THREE.BoxGeometry(3.0, 0.6, 0.25), c, 0, 0.75, -0.33));
+    for (const s of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.25, 0.55, 0.9), c, s * 1.42, 0.5, 0));
+    if (!wrapped) for (const s of [-0.75, 0.75]) g.add(mesh(new THREE.BoxGeometry(1.35, 0.14, 0.7), mat(0x7d97ff), s, 0.6, 0.06)); // cushions
+  } else if (type === 'bed') {
+    g.add(mesh(new THREE.BoxGeometry(2.0, 0.35, 3.0), wrapped ? c : mat(0x6b4f8a), 0, 0.2, 0));          // frame
+    g.add(mesh(new THREE.BoxGeometry(1.9, 0.28, 2.9), wrapped ? c : mat(0xf4f1ff), 0, 0.5, 0));          // mattress
+    if (!wrapped) {
+      g.add(mesh(new THREE.BoxGeometry(1.7, 0.08, 1.8), mat(0xa78bfa), 0, 0.66, 0.5));                   // blanket
+      g.add(mesh(new THREE.BoxGeometry(1.5, 0.16, 0.5), mat(0xffffff), 0, 0.7, -1.1));                   // pillow
+    }
+    g.add(mesh(new THREE.BoxGeometry(2.0, 0.9, 0.12), wrapped ? c : mat(0x6b4f8a), 0, 0.6, -1.5));        // headboard
   } else if (type === 'lamp') {
     g.add(mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.12, 16), wrapped ? c : mat(0x444466), 0, 0.06, 0));
     g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.0), wrapped ? c : mat(0xcccccc), 0, 0.6, 0));

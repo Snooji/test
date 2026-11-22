@@ -1,5 +1,9 @@
 // Tiny synth sound effects — no audio files to download.
 let ctx = null;
+let muted = false;
+try { muted = localStorage.getItem('sm_mute') === '1'; } catch {}
+export const isMuted = () => muted;
+export function setMuted(m) { muted = !!m; try { localStorage.setItem('sm_mute', muted ? '1' : '0'); } catch {} }
 const ac = () => {
   if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } }
   if (ctx.state === 'suspended') ctx.resume();
@@ -28,6 +32,8 @@ function noise(dur, vol = 0.3) {
 }
 
 export function sfx(name) {
+  if (muted) return;
+  if (name === 'tick') return tone(880, 0.04, 'triangle', 0.05);
   if (name === 'blip') tone(660, 0.08, 'triangle', 0.08, 220);
   else if (name === 'coin') { tone(880, 0.08, 'square', 0.05); tone(1320, 0.12, 'square', 0.05, 0, 0.07); }
   else if (name === 'crunch') { noise(0.35, 0.5); tone(120, 0.3, 'sawtooth', 0.12, -60); }

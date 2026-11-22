@@ -39,45 +39,22 @@ await b.screenshot({ path: `${out}/03-lobby-phone.png` });
 
 await a.click('#modes button[data-mode="3min"]');
 await a.click('#btn-start');
-await a.waitForFunction(() => window.__sm.snap?.phase === 'playing');
-await wait(800);
 await a.screenshot({ path: `${out}/04-start.png` });
+const aId = await a.evaluate(() => window.__sm.myId);
 
-// A: walk to the yard box at (4,-10) — start around (11.2,-1.6)
-const me = async () => { const id = await a.evaluate(() => window.__sm.myId); return (await snap(a)).players.find(p => p.id === id); };
-async function walkTo(x, z) {
-  for (let pass = 0; pass < 20; pass++) {
-    const p = await me();
-    const dx = x - p.x, dz = z - p.z;
-    if (process.env.TRACE) console.log("pass", pass, p.x, p.z, "→", x, z);
-    if (Math.hypot(dx, dz) < 0.5) break;
-    if (Math.abs(dx) > 0.25) { const k = dx < 0 ? 'a' : 'd'; await a.keyboard.down(k); await wait(Math.abs(dx) / 5 * 500); await a.keyboard.up(k); }
-    if (Math.abs(dz) > 0.25) { const k = dz < 0 ? 'w' : 's'; await a.keyboard.down(k); await wait(Math.abs(dz) / 5 * 500); await a.keyboard.up(k); }
-    await wait(250);
-  }
-}
-for (let t = 0; t < 4; t++) { await walkTo(4, -9.4); await wait(600); const q = await me(); if (Math.hypot(q.x - 4, q.z + 10) < 1.4) break; }
-await a.keyboard.press('e');
-await wait(300);
-let p = await me();
-console.log('carrying:', p.carry);
-if (!p.carry) { const box = (await snap(a)).items.find(i => i.id === 'i27'); errors.push(`A failed to pick up box: me=(${p.x},${p.z}) box=(${box.x},${box.z},${box.state})`); }
-await a.screenshot({ path: `${out}/05-carry.png` });
-await walkTo(10.5, -1);
-await wait(400);
-p = await me();
-console.log('loadMode:', p.loadMode);
-if (!p.loadMode) errors.push('A did not enter load mode');
-await a.screenshot({ path: `${out}/06-loadmode.png` });
-await a.keyboard.press('e');
-await wait(500);
-p = await me();
-console.log('score after load:', p.score);
-if (p.score !== 10) errors.push('expected 10 pts after loading standard box, got ' + p.score);
-await wait(500);
-await a.screenshot({ path: `${out}/07-loaded.png` });
-await b.screenshot({ path: `${out}/08-phone-hud.png` });
-
+// both players must see the identical generated house, and the round must start for both
+await a.waitForFunction(() => window.__sm.snap?.phase === 'playing', null, { timeout: 8000 });
+await b.waitForFunction(() => window.__sm.snap?.phase === 'playing', null, { timeout: 8000 });
+const [la, lb] = [await a.evaluate(() => window.__sm.snap.level), await b.evaluate(() => window.__sm.snap.level)];
+console.log('house:', la.name, la.rooms, 'rooms · seed', la.seed);
+if (la.seed !== lb.seed) errors.push('players see different houses');
+const startX = (await snap(a)).players.find(p => p.id === aId).x;
+await a.keyboard.down('a'); await wait(800); await a.keyboard.up('a'); await wait(300);
+const endX = (await snap(a)).players.find(p => p.id === aId).x;
+console.log('moved', startX, '→', endX);
+if (!(endX < startX - 1)) errors.push('keyboard movement did not move the mover');
+await a.screenshot({ path: `${out}/05-desktop-play.png` });
+await b.screenshot({ path: `${out}/06-phone-play.png` });
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'E2E PASS');
 await browser.close();
 process.exit(errors.length ? 1 : 0);

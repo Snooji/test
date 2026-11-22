@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ITEM_TYPES, GRID, footprint } from '../../shared/logic.js';
-import { WALLS, ROOMS, PROPS, TRUCK, CELL, gridToWorld } from '../../shared/world.js';
+import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
+import { generateLevel, classicLevel } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
@@ -41,6 +42,23 @@ export class GameScene {
     this.ghost.add(this.ghostEdges);
     this.scene.add(this.ghost);
     this.emotes = [];
+    this.pings = [];
+    // guide arrow at your feet: to the truck when carrying, else to the nearest item
+    const arrowShape = new THREE.Shape();
+    arrowShape.moveTo(0, 0.9); arrowShape.lineTo(0.45, 0.25); arrowShape.lineTo(0.16, 0.25); arrowShape.lineTo(0.16, -0.4);
+    arrowShape.lineTo(-0.16, -0.4); arrowShape.lineTo(-0.16, 0.25); arrowShape.lineTo(-0.45, 0.25); arrowShape.closePath();
+    this.arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.85, depthWrite: false }));
+    this.arrow.rotation.x = -Math.PI / 2; this.arrow.visible = false; this.arrow.renderOrder = 5;
+    this.arrowPivot = new THREE.Group(); this.arrowPivot.add(this.arrow); this.arrow.position.set(0, 0.06, 0);
+    this.scene.add(this.arrowPivot);
+    // stack-height numbers over each truck column (load mode)
+    this.colLabels = [];
+    for (let gx = 0; gx < GRID.W; gx++) for (let gz = 0; gz < GRID.D; gz++) {
+      const sp = sprite('0', { fg: '#55ffcc', stroke: '#0b0820', font: 'bold 60px system-ui', w: 96, h: 96 }, [0.55, 0.55]);
+      sp.visible = false; sp.userData = { gx, gz, v: '0' };
+      this.scene.add(sp); this.colLabels.push(sp);
+    }
+    this.raycaster = new THREE.Raycaster();
 
     addEventListener('resize', () => this.resize());
     this.resize();
@@ -57,14 +75,14 @@ export class GameScene {
   buildWorld() {
     const s = this.scene;
     // lunar ground
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 80), mat(0x3a3358));
-    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; s.add(ground);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(170, 90), mat(0x3a3358));
+    ground.rotation.x = -Math.PI / 2; ground.position.x = -10; ground.receiveShadow = true; s.add(ground);
     for (let i = 0; i < 26; i++) { // craters
       const r = 0.6 + Math.random() * 1.8;
       const c = new THREE.Mesh(new THREE.RingGeometry(r * 0.6, r, 20), new THREE.MeshBasicMaterial({ color: 0x2c2645 }));
       c.rotation.x = -Math.PI / 2;
       let x, z;
-      do { x = -40 + Math.random() * 80; z = -30 + Math.random() * 60; } while (x > -24 && x < 24 && z > -15 && z < 15);
+      do { x = -70 + Math.random() * 110; z = -40 + Math.random() * 80; } while (x > -46 && x < 26 && z > -17 && z < 17);
       c.position.set(x, 0.01, z); s.add(c);
     }
     // stars
@@ -77,23 +95,33 @@ export class GameScene {
     const planet = new THREE.Mesh(new THREE.SphereGeometry(8, 32, 24), mat(0xff8a3d, { emissive: 0x662200, emissiveIntensity: 0.4 }));
     planet.position.set(-30, 25, -60); s.add(planet);
 
-    // yard path + driveway
-    const drive = new THREE.Mesh(new THREE.PlaneGeometry(10, 5.2), mat(0x57507a));
-    drive.rotation.x = -Math.PI / 2; drive.position.set(5, 0.015, -1); drive.receiveShadow = true; s.add(drive);
-    const path = new THREE.Mesh(new THREE.PlaneGeometry(3, 4), mat(0x57507a));
-    path.rotation.x = -Math.PI / 2; path.position.set(1, 0.015, -4); s.add(path);
+    this.buildTruck();
+  }
 
+  /** (Re)build the house for a level. Every round can be a different, generated house. */
+  buildHouse(level) {
+    if (this.house) { this.scene.remove(this.house); this.house.traverse(o => { o.geometry?.dispose(); if (o.material?.map) o.material.map.dispose(); }); }
+    const s = new THREE.Group();
+    this.house = s;
+    this.level = level;
+    const fd = level.frontDoor;
+    // walkway from the front door to the driveway, and the driveway to the ramp
+    const walkLen = Math.max(0.1, 9.4 - fd.x);
+    const walk = new THREE.Mesh(new THREE.PlaneGeometry(walkLen, 3), mat(0x57507a));
+    walk.rotation.x = -Math.PI / 2; walk.position.set(fd.x + walkLen / 2, 0.015, fd.z); walk.receiveShadow = true; s.add(walk);
+    const dz = Math.abs(fd.z) + 2.6;
+    const drive = new THREE.Mesh(new THREE.PlaneGeometry(4, dz * 2), mat(0x57507a));
+    drive.rotation.x = -Math.PI / 2; drive.position.set(7.4, 0.014, 0); drive.receiveShadow = true; s.add(drive);
     // room floors + labels
-    for (const r of ROOMS) {
+    for (const r of level.rooms) {
       const f = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), mat(r.floor));
       f.rotation.x = -Math.PI / 2; f.position.set((r.x0 + r.x1) / 2, 0.02, (r.z0 + r.z1) / 2); f.receiveShadow = true; s.add(f);
-      const l = new THREE.Mesh(new THREE.PlaneGeometry(5, 1.25), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
-      l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.03, r.z0 + 1.4); s.add(l);
+      const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
+      l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.03, r.z0 + 1.3); s.add(l);
     }
     // walls
     const wallMat = mat(0xe9e4ff), trimMat = mat(0x8f7bff);
-    for (const w of WALLS) {
-      if (w.invisible || w.x0 >= 13) continue;
+    for (const w of level.houseWalls) {
       const h = 1.3;
       const m = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0, h, w.z1 - w.z0), wallMat);
       m.position.set((w.x0 + w.x1) / 2, h / 2, (w.z0 + w.z1) / 2); m.castShadow = m.receiveShadow = true; s.add(m);
@@ -101,20 +129,18 @@ export class GameScene {
       t.position.set(m.position.x, h, m.position.z); s.add(t);
     }
     // props
-    for (const p of PROPS) {
+    for (const p of level.props) {
       let m;
       if (p.kind === 'rug') { m = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.d), mat(p.color)); m.rotation.x = -Math.PI / 2; m.position.set(p.x, 0.03, p.z); }
       else if (p.kind === 'counter') { m = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.9, p.d), mat(p.color)); m.position.set(p.x, 0.45, p.z); }
-      else if (p.kind === 'bed') { m = new THREE.Group(); const b = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.5, p.d), mat(p.color)); b.position.y = 0.25; m.add(b); const pil = new THREE.Mesh(new THREE.BoxGeometry(p.w * 0.8, 0.15, 0.6), mat(0xffffff)); pil.position.set(0, 0.55, -p.d / 2 + 0.5); m.add(pil); m.position.set(p.x, 0, p.z); }
       else if (p.kind === 'plant') { m = new THREE.Group(); const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.22, 0.4, 12), mat(0xff8a3d)); pot.position.y = 0.2; m.add(pot); const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 0), mat(0x52d17c, { flatShading: true })); leaf.position.y = 0.7; m.add(leaf); m.position.set(p.x, 0, p.z); }
       else if (p.kind === 'mailbox') { m = new THREE.Group(); const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1, 0.12), mat(0xcccccc)); post.position.y = 0.5; m.add(post); const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.3), mat(0x2ec4b6)); box.position.y = 1.1; m.add(box); m.position.set(p.x, 0, p.z); }
       if (m) { m.traverse(o => { o.castShadow = true; o.receiveShadow = true; }); s.add(m); }
     }
     // front door mat
-    const dm = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 3.6), mat(0xffd166));
-    dm.rotation.x = -Math.PI / 2; dm.position.set(0.8, 0.03, -4); s.add(dm);
-
-    this.buildTruck();
+    const dm = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 3.4), mat(0xffd166));
+    dm.rotation.x = -Math.PI / 2; dm.position.set(fd.x + 0.8, 0.03, fd.z); s.add(dm);
+    this.scene.add(s);
   }
 
   buildTruck() {
@@ -173,6 +199,12 @@ export class GameScene {
   apply(snap, myId) {
     this.snap = snap;
     this.myId = myId;
+    const lv = snap.level;
+    if (lv && (!this.level || this.level.seed !== lv.seed || !!this.level.classic !== lv.classic)) {
+      this.buildHouse(lv.classic ? classicLevel() : generateLevel(lv.seed));
+      for (const v of this.items.values()) this.scene.remove(v.obj);
+      this.items.clear();
+    }
     // players
     const seen = new Set();
     for (const p of snap.players) {
@@ -201,19 +233,16 @@ export class GameScene {
       let v = this.items.get(it.id);
       if (!v || v.key !== key) {
         if (v) this.scene.remove(v.obj);
-        const obj = makeItem(it.type, { wrapped: it.wrapped, assembled: it.assembled, loaded: it.state === 'loaded' });
+        const obj = makeItem(it.type, { wrapped: it.wrapped, assembled: it.assembled, loaded: it.state === 'loaded', dims: it.g });
         obj.position.set(it.x, 0, it.z);
         this.scene.add(obj);
         const bar = sprite('', {}, [1.4, 0.22]); bar.visible = false; bar.position.y = 1.9; obj.add(bar);
         v = { obj, key, bar, barP: -1 };
         this.items.set(it.id, v);
         if (it.state === 'loaded' && it.g) {
-          const t = ITEM_TYPES[it.type];
           const wp = gridToWorld(it.g.x, it.g.z, it.g.y, it.g.w, it.g.d);
           obj.position.set(wp.x, wp.y + 3, wp.z); // drops in from above
           obj.userData.dropTo = wp.y;
-          // geometry spans t.w along world-x, but grid width runs along world-z
-          if (t.w !== t.d && it.g.w === t.w) obj.rotation.y = Math.PI / 2;
         }
       }
       v.data = it;
@@ -235,7 +264,7 @@ export class GameScene {
     const h = Array.from({ length: GRID.W }, () => new Array(GRID.D).fill(0));
     for (const it of this.snap?.items || []) {
       if (!it.g) continue;
-      for (let x = it.g.x; x < it.g.x + it.g.w; x++) for (let z = it.g.z; z < it.g.z + it.g.d; z++) h[x][z] = Math.max(h[x][z], it.g.y + 1);
+      for (let x = it.g.x; x < it.g.x + it.g.w; x++) for (let z = it.g.z; z < it.g.z + it.g.d; z++) h[x][z] = Math.max(h[x][z], it.g.y + (it.g.h || 1));
     }
     return h;
   }
@@ -250,6 +279,46 @@ export class GameScene {
   }
 
   shake() { this.shakeT = 0.4; }
+
+  /** 🆘 beacon: a pulsing ring + light pillar where someone needs a hand. */
+  ping(x, z) {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.1, 32), new THREE.MeshBasicMaterial({ color: 0xff4466, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08; g.add(ring);
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6, 8, 1, true), new THREE.MeshBasicMaterial({ color: 0xff4466, transparent: true, opacity: 0.5, depthWrite: false }));
+    pillar.position.y = 3; g.add(pillar);
+    const icon = sprite('🆘', { font: 'bold 64px system-ui', w: 96, h: 96 }, [1, 1]); icon.position.y = 3.4; g.add(icon);
+    g.position.set(x, 0, z);
+    this.scene.add(g);
+    this.pings.push({ g, ring, t: 0 });
+  }
+
+  /** Screen point → truck grid cell (for drag-to-aim). null when not over the truck. */
+  pickGrid(clientX, clientY) {
+    const v = new THREE.Vector2((clientX / innerWidth) * 2 - 1, -(clientY / innerHeight) * 2 + 1);
+    this.raycaster.setFromCamera(v, this.camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(TRUCK.floorY + CELL));
+    const hit = new THREE.Vector3();
+    if (!this.raycaster.ray.intersectPlane(plane, hit)) return null;
+    const gx = Math.floor((hit.z - TRUCK.z0) / CELL), gz = Math.floor((TRUCK.bayX1 - hit.x) / CELL);
+    if (gx < -1 || gz < -1 || gx > GRID.W || gz > GRID.D) return null;
+    return { gx: Math.max(0, Math.min(GRID.W - 1, gx)), gz: Math.max(0, Math.min(GRID.D - 1, gz)) };
+  }
+
+  /** Which grid step looks like "up/down/left/right" on screen right now (D-pad). */
+  gridStepFor(sx, sy) {
+    const base = gridToWorld(1.5, 1.5, 0);
+    const proj = (w) => new THREE.Vector3(w.x, TRUCK.floorY, w.z).project(this.camera);
+    const o = proj(base);
+    let best = null, bestDot = -Infinity;
+    for (const [dgx, dgz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const q = proj(gridToWorld(1.5 + dgx, 1.5 + dgz, 0));
+      const dx = q.x - o.x, dy = -(q.y - o.y), l = Math.hypot(dx, dy) || 1;
+      const dot = (dx / l) * sx + (dy / l) * sy;
+      if (dot > bestDot) { bestDot = dot; best = { dgx, dgz }; }
+    }
+    return best;
+  }
 
   frame(dt) {
     const snap = this.snap;
@@ -300,19 +369,73 @@ export class GameScene {
       return true;
     });
 
+    // 🆘 beacons
+    this.pings = this.pings.filter(pg => {
+      pg.t += dt;
+      const k = (pg.t * 1.5) % 1;
+      pg.ring.scale.setScalar(1 + k * 1.5); pg.ring.material.opacity = 0.9 * (1 - k);
+      if (pg.t > 7) { this.scene.remove(pg.g); return false; }
+      return true;
+    });
+
+    // guide arrow
+    this.arrow.visible = false;
+    if (me && snap?.phase === 'playing' && !me.out && !me.spectator && !me.loadMode) {
+      let tx = null, tz = null;
+      if (me.carry) { tx = 11.2; tz = 0; }
+      else {
+        let bd = Infinity;
+        for (const it of snap.items) {
+          if (it.state !== 'floor' && !(it.state === 'carried' && it.n === 1 && !it.carriers?.includes?.(me.id) && ITEM_TYPES[it.type].teamCarry)) continue;
+          const d = Math.hypot(it.x - me.x, it.z - me.z);
+          if (d < bd) { bd = d; tx = it.x; tz = it.z; }
+        }
+        if (bd < 2.2) tx = null; // already there
+      }
+      if (tx !== null) {
+        const pr = this.players.get(this.myId)?.root.position;
+        if (pr) {
+          this.arrowPivot.position.set(pr.x, 0, pr.z);
+          this.arrowPivot.rotation.y = Math.atan2(tx - pr.x, tz - pr.z) + Math.PI;
+          this.arrow.position.z = -1.25;
+          this.arrow.material.color.set(me.carry ? 0x55ffcc : 0xffd166);
+          this.arrow.material.opacity = 0.6 + Math.sin(t * 5) * 0.25;
+          this.arrow.visible = true;
+        }
+      }
+    }
+
+    // column heights in load mode
+    const showCols = !!me?.loadMode;
+    const hts = showCols ? this.heights() : null;
+    for (const sp of this.colLabels) {
+      sp.visible = showCols;
+      if (!showCols) continue;
+      const hv = hts[sp.userData.gx][sp.userData.gz];
+      const txt = hv >= GRID.H ? 'FULL' : String(hv);
+      if (sp.userData.v !== txt) {
+        sp.userData.v = txt;
+        sp.material.map.dispose();
+        sp.material.map = labelTexture(txt, { fg: hv >= GRID.H ? '#ff4466' : '#55ffcc', stroke: '#0b0820', font: `bold ${txt.length > 1 ? 34 : 60}px system-ui`, w: 96, h: 96 });
+        sp.material.needsUpdate = true;
+      }
+      const wp = gridToWorld(sp.userData.gx, sp.userData.gz, Math.min(hv, GRID.H));
+      sp.position.set(wp.x, wp.y + 0.35, wp.z);
+    }
+
     // ghost
     this.ghost.visible = false;
     if (me?.loadMode && me.cursor && me.carry) {
       const it = snap.items.find(i => i.id === me.carry);
       if (it) {
-        const { w, d } = footprint(it.type, me.cursor.rot);
+        const { w, d, h: ih } = footprint(it.type, me.cursor.rot);
         const h = this.heights();
         let y = 0;
         for (let x = me.cursor.gx; x < me.cursor.gx + w; x++) for (let z = me.cursor.gz; z < me.cursor.gz + d; z++) y = Math.max(y, h[x]?.[z] ?? 9);
-        const ok = y < GRID.H;
-        const wp = gridToWorld(me.cursor.gx, me.cursor.gz, Math.min(y, GRID.H - 1), w, d);
-        this.ghost.scale.set(d * CELL * 0.98, CELL * 0.98, w * CELL * 0.98);
-        this.ghost.position.set(wp.x, wp.y + CELL / 2 + (ok ? 0 : CELL), wp.z);
+        const ok = y + ih <= GRID.H;
+        const wp = gridToWorld(me.cursor.gx, me.cursor.gz, Math.min(y, GRID.H - ih), w, d);
+        this.ghost.scale.set(d * CELL * 0.98, ih * CELL * 0.98, w * CELL * 0.98);
+        this.ghost.position.set(wp.x, wp.y + ih * CELL / 2 + (ok ? 0 : 0.4), wp.z);
         this.ghost.material.color.set(ok ? 0x55ffcc : 0xff4466);
         this.ghost.material.opacity = 0.3 + Math.sin(t * 6) * 0.1;
         this.ghost.visible = true;
