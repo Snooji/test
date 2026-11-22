@@ -140,6 +140,17 @@ export function makeMover(char) {
 export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
   const t = ITEM_TYPES[type];
   const g = new THREE.Group();
+  if (loaded && dims?.cells) { // shaped piece in the truck: one block per cell, centred on its bounding box
+    const face = new THREE.MeshStandardMaterial({ map: boxFace(type, wrapped && t.furniture), roughness: 0.9 });
+    const geo = new THREE.BoxGeometry(CELL * 0.96, CELL * 0.96, CELL * 0.96);
+    for (const [cx, cy, cz] of dims.cells) {
+      const m = mesh(geo, face, -(cz + 0.5 - dims.d / 2) * CELL, cy * CELL + CELL * 0.48, (cx + 0.5 - dims.w / 2) * CELL);
+      m.receiveShadow = true; g.add(m);
+    }
+    const l = sprite(t.label.toUpperCase(), { fg: '#fff', stroke: '#000', font: 'bold 40px system-ui' }, [1.6, 0.4]);
+    l.position.y = dims.h * CELL + 0.1; l.material.depthTest = true; g.add(l);
+    return g;
+  }
   if (!t.furniture || loaded || (!assembled && t.needsDisassemble)) {
     // a box (or flat-pack / wrapped bundle once loaded). In the truck, grid width runs along world-z.
     const flat = t.needsDisassemble && !assembled && !loaded;
@@ -169,10 +180,12 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
       g.add(mesh(new THREE.BoxGeometry(1.5, 0.16, 0.5), mat(0xffffff), 0, 0.7, -1.1));                   // pillow
     }
     g.add(mesh(new THREE.BoxGeometry(2.0, 0.9, 0.12), wrapped ? c : mat(0x6b4f8a), 0, 0.6, -1.5));        // headboard
-  } else if (type === 'lamp') {
-    g.add(mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.12, 16), wrapped ? c : mat(0x444466), 0, 0.06, 0));
-    g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.0), wrapped ? c : mat(0xcccccc), 0, 0.6, 0));
-    g.add(mesh(new THREE.ConeGeometry(0.38, 0.45, 16, 1, true), wrapped ? c : mat(0xff9ad5, { emissive: 0xff66bb, emissiveIntensity: 0.5, side: THREE.DoubleSide }), 0, 1.15, 0));
+  } else if (type === 'lamp') { // an "r": tall pole, arm across the top, shade hanging off the end
+    const pole = wrapped ? c : mat(0xcccccc);
+    g.add(mesh(new THREE.CylinderGeometry(0.24, 0.3, 0.12, 16), wrapped ? c : mat(0x444466), -0.45, 0.06, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.7), pole, -0.45, 0.9, 0));
+    const arm = mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0), pole, 0.05, 1.72, 0); arm.rotation.z = Math.PI / 2; g.add(arm);
+    g.add(mesh(new THREE.ConeGeometry(0.36, 0.42, 16, 1, true), wrapped ? c : mat(0xff9ad5, { emissive: 0xff66bb, emissiveIntensity: 0.6, side: THREE.DoubleSide }), 0.55, 1.45, 0));
   } else { // desk / table assembled
     const top = type === 'desk' ? [2.0, 0.12, 0.9] : [2.0, 0.1, 1.1];
     g.add(mesh(new THREE.BoxGeometry(...top), c, 0, 0.82, 0));

@@ -28,6 +28,7 @@ export class MoveRoom extends Room {
   onCreate(options = {}) {
     this.phase = 'lobby';
     this.mode = '3min';
+    this.game = options.game === 'sabotage' ? 'sabotage' : 'classic';
     this.difficulty = DIFFICULTY[options.difficulty] ? options.difficulty : 'normal';
     this.bots = new Map();
     this.botSeq = 0;
@@ -75,6 +76,10 @@ export class MoveRoom extends Room {
     });
     this.onMessage('start', (c) => {
       if (c.sessionId !== this.hostId || this.inRound()) return;
+      if (this.game === 'sabotage' && this.movers().length < 3) {
+        this.tell(this.players.get(c.sessionId), 'Sabotage needs at least 3 movers. Add AI movers or invite friends.');
+        return;
+      }
       if (this.phase === 'results') this.newLevel(); // play again → fresh house
       this.startRound();
     });
@@ -117,6 +122,12 @@ export class MoveRoom extends Room {
       for (const b of this.bots.values()) b.setDifficulty(m.level);
     });
     this.onMessage('addBot', (c) => { if (hostInLobby(c)) this.addBot(); });
+    this.onMessage('game', (c, m) => {
+      if (!hostInLobby(c) || !['classic', 'sabotage'].includes(m?.game)) return;
+      const wasExact = this.isExact();
+      this.game = m.game;
+      if (this.isExact() !== wasExact && !this.classic) { this.newLevel(); this.resetWorld(); }
+    });
     this.onMessage('removeBot', (c) => {
       if (!hostInLobby(c)) return;
       const last = [...this.bots.keys()].pop();
@@ -194,6 +205,7 @@ export class MoveRoom extends Room {
       try {
         await this.allowReconnection(client, 30);
         p.away = false; p.resync = true;
+        this.sendRole(p);
         this.system(`✅ ${p.name} is back!`);
         return;
       } catch { /* timed out */ }
@@ -207,6 +219,18 @@ export class MoveRoom extends Room {
       const left = [...this.players.values()].filter(o => !o.bot && !o.spectator);
       if (left.length === 1) this.endRound(`Everyone else left. ${left[0].name} wins by default!`, left[0].id);
     }
+  }
+
+  sendRole(p) {
+    if (this.game !== 'sabotage' || p.bot) return;
+    this.clients.find(c => c.sessionId === p.id)?.send('evt', { kind: 'role', saboteur: !!p.saboteur });
+  }
+
+  /** Crew score in sabotage: the value of everything packed, minus overtime drain. */
+  crewScore() {
+    let v = 0;
+    for (const i of this.items.values()) if (i.state === 'loaded') v += ITEM_TYPES[i.type].pts;
+    return Math.max(0, Math.round(v - (this.drain || 0)));
   }
 
   system(text) { this.broadcast('chat', { from: 'Starside', text, system: true }); }
@@ -229,6 +253,8 @@ export class MoveRoom extends Room {
     this.nav = createNav(this.level);
     this.cat = { x: this.level.cat[0][0], z: this.level.cat[0][1], wp: 0 };
   }
+
+  loadedCountCache() { let n = 0; for (const i of this.items.values()) if (i.state === 'loaded') n++; return n; }
 
   isExact() { return this.mode === 'load' || this.game === 'sabotage'; }
   allowsUnload() { return this.isExact(); }
@@ -266,6 +292,13 @@ export class MoveRoom extends Room {
     this.timeLeft = RULES.MODES[this.mode];
     this.results = null;
     for (const b of this.bots.values()) b.reset();
+    this.overtime = false; this.drain = 0;
+    for (const p of this.players.values()) { p.saboteur = false; p.lastMeeting = 0; }
+    if (this.game === 'sabotage') {
+      const movers = this.movers();
+      movers[Math.floor(Math.random() * movers.length)].saboteur = true;
+      for (const p of movers) this.sendRole(p);
+    }
     this.phase = 'countdown';
     this.countdown = 3;
     this.roundHumans = [...this.players.values()].filter(p => !p.bot && !p.spectator).length;
@@ -279,6 +312,7 @@ export class MoveRoom extends Room {
 
   // ---------- simulation ----------
   tick(dt) {
+    this.lastDt = dt;
     this.moveCat(dt);
     if (this.phase === 'countdown') {
       this.countdown -= dt;
@@ -447,8 +481,8 @@ export class MoveRoom extends Room {
       mx /= cs.length; mz /= cs.length;
       const sp = SPEED * 0.7 * dt;
       const nx = item.x + mx * sp, nz = item.z + mz * sp;
-      if (!this.level.hitsWall(nx, item.z, 0.7)) item.x = nx;
-      if (!this.level.hitsWall(item.x, nz, 0.7)) item.z = nz;
+      if (!this.level.hitsWall(nx, item.z, 0.45)) item.x = nx;
+      if (!this.level.hitsWall(item.x, nz, 0.45)) item.z = nz;
       const off = this.carryOffset(item);
       cs[0].x = item.x - off; cs[0].z = item.z; cs[0].face = Math.PI / 2;
       cs[1].x = item.x + off; cs[1].z = item.z; cs[1].face = -Math.PI / 2;
@@ -470,8 +504,14 @@ export class MoveRoom extends Room {
       const t = ITEM_TYPES[it.type];
       const kind = it.assembled ? 'disassemble' : (t.needsWrap && !it.wrapped ? 'wrap' : null);
       if (!kind) continue;
+      if (it.jam > 0 && kind === 'disassemble' && !p.saboteur && !it.jamNoticed) { it.jamNoticed = true; this.tell(p, '🔩 These bolts are way too tight… someone has been messing with this.'); }
       if (!it.task || it.task.kind !== kind) it.task = { kind, progress: 0, contributors: [] };
-      const secs = kind === 'wrap' ? RULES.WRAP_SECONDS : RULES.DISASSEMBLE_SECONDS;
+      if (p.saboteur && kind === 'disassemble') { // looks like helping; actually over-tightens the bolts
+        it.jam = Math.min(8, (it.jam || 0) + dt * 1.3);
+        p.task = { id: it.id, kind };
+        continue;
+      }
+      const secs = kind === 'wrap' ? RULES.WRAP_SECONDS : RULES.DISASSEMBLE_SECONDS + (it.jam || 0);
       it.task.progress += dt / secs;
       it.helpers.push(p.id);
       if (!it.task.contributors.includes(p.id)) it.task.contributors.push(p.id);
@@ -599,7 +639,11 @@ export class MoveRoom extends Room {
   callMeeting(callerId) {
     const p = this.players.get(callerId);
     if (this.phase !== 'playing' || this.meeting || !this.isActive(p)) return;
-    if (!this.breaks.some(b => !b.resolved)) return this.tell(p, 'Nothing is broken… yet. Call out when you hear a CRUNCH!');
+    if (this.game === 'sabotage') {
+      const now = Date.now();
+      if (now - (p.lastMeeting || 0) < 20000) return this.tell(p, 'You called a meeting recently. Wait a bit.');
+      p.lastMeeting = now;
+    } else if (!this.breaks.some(b => !b.resolved)) return this.tell(p, 'Nothing is broken… yet. Call out when you hear a CRUNCH!');
     this.phase = 'meeting';
     this.meeting = { callerId, timeLeft: RULES.MEETING_SECONDS, votes: {}, botAt: {} };
     for (const id of this.bots.keys()) if (this.isActive(this.players.get(id))) this.meeting.botAt[id] = 3 + Math.random() * 9;
@@ -640,6 +684,7 @@ export class MoveRoom extends Room {
 
     const target = tallyVotes(m.votes, m.callerId);
     const caller = this.players.get(m.callerId);
+    if (this.game === 'sabotage') return this.resolveSabotageVote(target, m.votes);
     const open = this.breaks.filter(b => !b.resolved);
     const guilty = target !== 'skip' && open.some(b => b.culpritIds.includes(target));
     let penalized, text;
@@ -666,6 +711,21 @@ export class MoveRoom extends Room {
     this.phase = 'playing';
   }
 
+  resolveSabotageVote(target, votes) {
+    this.meeting = null;
+    this.phase = 'playing';
+    const t = target !== 'skip' ? this.players.get(target) : null;
+    if (!t) { this.event({ kind: 'verdict', text: '🤷 No one was voted off. Back to work!', votes }); return; }
+    if (t.saboteur) {
+      this.event({ kind: 'verdict', text: `🎯 ${t.name} WAS the saboteur! The crew wins!`, guilty: true, votes });
+      return this.endRound(`The crew caught the saboteur: ${t.name}!`, null, 'crew');
+    }
+    t.out = true;
+    this.releaseCarry(t);
+    this.event({ kind: 'verdict', text: `😬 ${t.name} was NOT the saboteur. They're off the truck.`, guilty: false, votes });
+    if (!this.activePlayers().some(p => !p.saboteur)) this.endRound('The saboteur outlasted the crew!', null, 'saboteur');
+  }
+
   // ---------- end ----------
   checkEnd() {
     const all = [...this.items.values()];
@@ -688,22 +748,36 @@ export class MoveRoom extends Room {
     const done = !!doneReason;
     const humans = [...this.players.values()].filter(p => !p.bot && !p.spectator);
     const noneLeft = (this.activePlayers().length === 0 && this.players.size > 0) || (humans.length > 0 && humans.every(h => h.out) && this.bots.size > 0);
+    if (this.game === 'sabotage') {
+      if (done) return this.endRound('Perfect load! The crew beat the saboteur.', null, 'crew');
+      if (this.timeLeft <= 0) {
+        if (!this.overtime) { this.overtime = true; this.event({ kind: 'toast', text: '⏰ Overtime! The crew score is draining. Finish the load before it hits zero!' }); }
+        this.drain += 4 * this.lastDt;
+        if (this.crewScore() <= 0) return this.endRound('The crew score hit zero. The saboteur wins!', null, 'saboteur');
+      }
+      if (!this.activePlayers().some(p => !p.saboteur)) return this.endRound('The saboteur outlasted the crew!', null, 'saboteur');
+      return;
+    }
     if (this.timeLeft <= 0 || done || noneLeft) this.endRound(done ? doneReason : noneLeft ? 'Everyone got kicked off the truck!' : "Time's up!");
   }
 
-  endRound(reason, forcedWinnerId = null) {
+  endRound(reason, forcedWinnerId = null, winners = null) {
     this.phase = 'results';
     const players = [...this.players.values()].filter(p => !p.spectator)
       .map(p => ({ id: p.id, name: p.name, char: p.char, score: p.score, strikes: p.strikes, out: p.out, loaded: p.loaded, breaks: p.breaks || 0, bot: !!p.bot }))
       .sort((a, b) => b.score - a.score);
-    const winner = (forcedWinnerId && players.find(p => p.id === forcedWinnerId)) || players.find(p => !p.out) || null;
+    const sab = [...this.players.values()].find(p => p.saboteur);
+    let winner = (forcedWinnerId && players.find(p => p.id === forcedWinnerId)) || players.find(p => !p.out) || null;
+    if (winners === 'saboteur' && sab) winner = players.find(p => p.id === sab.id) || winner;
+    if (winners === 'crew') winner = players.find(p => sab ? p.id !== sab.id : true) || winner;
     const loaded = [...this.items.values()].filter(i => i.state === 'loaded');
     const teamTotal = loaded.reduce((s, i) => s + Object.values(i.earned || {}).reduce((a, b) => a + b, 0), 0);
     const unresolved = this.breaks.filter(b => !b.resolved).map(b => ({
       type: ITEM_TYPES[b.type].label,
       culprits: b.culpritIds.map(id => this.players.get(id)?.name || 'a mover who left').join(' + '),
     }));
-    this.results = { reason, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null };
+    this.results = { reason, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null,
+      game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
     this.event({ kind: 'end' });
   }
@@ -723,6 +797,7 @@ export class MoveRoom extends Room {
     return {
       phase: this.phase, mode: this.mode, hostId: this.hostId, timeLeft: Math.max(0, Math.round(this.timeLeft)),
       countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0,
+      game: this.game, overtime: !!this.overtime, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
       level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },

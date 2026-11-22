@@ -34,7 +34,9 @@ if (snap.players.find(p => p.id === r1.sessionId).char !== 'glorp') fail('char n
 r1.send('mode', { mode: '5min' });
 r1.send('start');
 await wait(300);
-if (snap.phase !== 'playing' || snap.mode !== '5min') fail('did not start');
+if (snap.phase !== 'countdown' || snap.mode !== '5min') fail('did not start the countdown');
+await wait(3400);
+if (snap.phase !== 'playing') fail('countdown did not finish');
 // walk player 1 left for a second
 r1.send('input', { mx: -1, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 });
 const x0 = snap.players.find(p => p.id === r1.sessionId).x;

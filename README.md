@@ -7,7 +7,10 @@ crewmate who did it in a crew meeting. Two strikes and you're off the truck.
 - **Three.js** top-down 3D. Works on phone (touch joystick + buttons) and desktop (keyboard). Nothing to download.
 - **Colyseus** real-time multiplayer. Share the invite link and friends join the same crew.
 - **Email gate** before the first match. Signups land in `data/signups.jsonl`.
-- Rounds of **3 min**, **5 min**, or **until the truck is loaded**.
+- **Solo vs 3 AI movers** (Easy / Normal / Hard), or friends + AI in any mix.
+- A **new procedurally generated house** every round.
+- Games: **🏆 Competitive** (most points still on the truck wins) or **🕵️ Sabotage** (one secret saboteur).
+- Rounds: **3 min**, **5 min**, or **🧩 Full load** (the house holds exactly one truckload; pack it perfectly).
 
 ## Controls
 | | Desktop | Phone |
@@ -16,7 +19,10 @@ crewmate who did it in a crew meeting. Two strikes and you're off the truck.
 | Grab, drop, load | tap **E** / Space | ✋ ACTION (tap) |
 | Pad-wrap / disassemble | hold **E** | hold ✋ ACTION |
 | Dash (ability) / back out of truck | Shift | 🚀 DASH / BACK |
-| Rotate furniture in truck | R | ⟳ ROTATE |
+| Rotate / flip furniture in truck | R | ⟳ ROTATE |
+| Aim in the truck | move, or point at the grid | D-pad, or drag on the truck |
+| Unload a piece (Full load) | hold **E** on the ramp | hold ✋ on the ramp |
+| Call for help with a 2-mover lift | H | 🆘 HELP |
 | Call out a crewmate | Q or the CALL OUT pill | 📣 CALL OUT |
 | Chat (lobby + meetings) | Enter | tap the chat box |
 

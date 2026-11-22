@@ -1,6 +1,6 @@
 // Procedural house generator. Deterministic from a seed, so the server and every
 // browser build the identical house from just one number.
-import { ITEM_TYPES, buildExactLoad } from './logic.js';
+import { ITEM_TYPES, buildExactLoad, createGrid, placeItem } from './logic.js';
 import { TRUCK_WALLS, HOUSE_WALLS, ROOMS, PROPS, ITEM_SPAWNS, CAT_WAYPOINTS, WORLD } from './world.js';
 
 const T = 0.4; // wall thickness
@@ -134,7 +134,17 @@ export function generateLevel(seed, opts = {}) {
   for (let i = RI(5, 8); i--;) list.push('fragile');
   for (let i = RI(8, 12); i--;) list.push('standard');
   while (list.reduce((a, t) => a + size(t), 0) > 52) list.splice(list.lastIndexOf('standard'), 1);
-  if (exact) list = buildExactLoad(rng).pieces.sort((a, b) => size(b) - size(a)); // big pieces get first pick of space
+  if (exact) {
+    const built = buildExactLoad(rng);
+    list = built.pieces.sort((a, b) => size(b) - size(a)); // big pieces get first pick of space
+    // remember the known-good packing: AI movers use it as their plan
+    const g = createGrid();
+    level.solution = built.solution.map(sl => {
+      const r = placeItem(g, { id: sl.id, type: sl.type, wrapped: true }, sl.gx, sl.gz, sl.rot);
+      const rec = g.items.get(sl.id);
+      return { type: sl.type, gx: sl.gx, gz: sl.gz, rot: sl.rot, y: r.y, cells: rec.cells.map(([x, y, z]) => [sl.gx + x, r.y + y, sl.gz + z]) };
+    });
+  }
 
   // ---- scatter items: clear of walls, doors and each other ----
   const doorPts = [...doors.map(d => d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }), level.frontDoor];

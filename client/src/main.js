@@ -22,6 +22,7 @@ let room = null, snap = null, myId = null, lastPhase = null, myVote = null;
 let prefChar = null, prefDiff = 'normal';
 try { prefChar = localStorage.getItem('sm_char'); prefDiff = localStorage.getItem('sm_diff') || 'normal'; } catch {}
 let reconnecting = false;
+let myRole = null; // sabotage: true = saboteur, false = crew; told privately by the server
 
 const scene = new GameScene($('app'));
 const input = new Input({ onCallout: () => room?.send('callout'), onChatKey: () => focusChat(), onHelp: () => room?.send('help') });
@@ -173,7 +174,7 @@ function renderLobby(s, me) {
   const link = `${location.origin}${location.pathname}?room=${room.roomId}`;
   if ($('share-link').value !== link) $('share-link').value = link;
   const host = s.hostId === myId;
-  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot]), s.hostId, s.mode, s.difficulty, s.level?.seed]);
+  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
   $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
@@ -182,6 +183,11 @@ function renderLobby(s, me) {
     return `<button class="char ${cls}" data-char="${k}" ${who?.bot ? 'disabled' : ''}>${who ? `<div class="who">${esc(who.name)}</div>` : ''}${who?.bot ? '<span class="bot" title="AI mover">🤖</span>' : ''}${PORTRAITS[k]}<div class="n">${c.name}</div><div class="k">${c.kind}</div></button>`;
   }).join('');
   for (const b of $('modes').children) { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = !host; }
+  for (const b of $('games').children) { b.classList.toggle('on', b.dataset.game === s.game); b.disabled = !host; }
+  $('game-desc').textContent = s.game === 'sabotage'
+    ? '🕵️ One mover is secretly a saboteur. Pack the truck perfectly before time runs out, or vote them out. Needs 3+ movers.'
+    : s.mode === 'load' ? '🧩 Full load: the house holds exactly one truckload. Pack it perfectly. Hold ✋ on the ramp to pull pieces back out.'
+    : '🏆 Everyone for themselves. Most points still on the truck wins.';
   const movers = s.players.filter(p => !p.spectator);
   const bots = s.players.filter(p => p.bot);
   $('lobby-players').innerHTML = `Crew (${movers.length}/4): ` + s.players.map(p => `<b>${esc(p.name)}</b>${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.id === s.hostId ? ' 👑' : ''}`).join(', ');
@@ -195,7 +201,10 @@ function renderLobby(s, me) {
   $('btn-addbot').disabled = movers.length >= 4;
   $('btn-rmbot').disabled = bots.length === 0;
   show('btn-start', host);
-  $('lobby-wait').textContent = host ? (movers.length === 1 ? 'Add AI movers, or share the invite so friends can join.' : 'Everyone ready? Hit start!') : 'Waiting for the crew chief 👑 to start…';
+  $('lobby-wait').textContent = !host ? 'Waiting for the crew chief 👑 to start…'
+    : s.game === 'sabotage' && movers.length < 3 ? 'Sabotage needs 3+ movers. Add AI movers or invite friends.'
+    : movers.length === 1 ? 'Add AI movers, or share the invite so friends can join.' : 'Everyone ready? Hit start!';
+  $('btn-start').disabled = host && s.game === 'sabotage' && movers.length < 3;
   if (me && !me.spectator) prefChar = me.char;
 }
 $('chars').addEventListener('click', (e) => {
@@ -205,6 +214,7 @@ $('chars').addEventListener('click', (e) => {
   try { localStorage.setItem('sm_char', b.dataset.char); } catch {}
   sfx('blip');
 });
+$('games').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('game', { game: b.dataset.game }); });
 $('modes').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('mode', { mode: b.dataset.mode }); });
 $('btn-start').onclick = () => room?.send('start');
 $('btn-reroll').onclick = () => { room?.send('reroll'); sfx('blip'); };
@@ -233,7 +243,11 @@ function renderHud(s, me) {
   $('hud-timer').classList.toggle('low', s.mode !== 'load' && s.timeLeft <= 20);
   if (me) {
     $('hud-score').textContent = `${me.score} pts`;
-    $('hud-strikes').textContent = me.out ? '🚪 OFF THE TRUCK' : `Strikes ${me.strikes}/2`;
+    const sabotage = s.game === 'sabotage';
+    $('hud-strikes').textContent = me.out ? '🚪 OFF THE TRUCK' : sabotage ? (myRole ? '🕵️ Saboteur' : '🧰 Crew') : `Strikes ${me.strikes}/2`;
+    $('hud-strikes').classList.toggle('role-sab', sabotage && !!myRole);
+    show('hud-crew', sabotage);
+    if (sabotage) { $('hud-crew').textContent = s.overtime ? `⏰ Crew ${s.crewScore}` : `🧰 Crew ${s.crewScore}`; $('hud-crew').classList.toggle('drain', !!s.overtime); }
   }
   $('hud-truck').textContent = `🚚 ${s.loadedCount}/${s.totalItems}${isTouch ? '' : ' loaded'}`;
   const held = me?.carry ? s.items.find(i => i.id === me.carry) : null;
@@ -245,7 +259,7 @@ function renderHud(s, me) {
   show('dpad', aiming && isTouch);
   document.body.classList.toggle('aiming', aiming);
   show('joyzone', !aiming && isTouch && s.phase !== 'meeting');
-  const canCall = s.phase === 'playing' && s.openBreaks > 0 && me && !me.out && !me.spectator;
+  const canCall = s.phase === 'playing' && (s.openBreaks > 0 || s.game === 'sabotage') && me && !me.out && !me.spectator;
   show('hud-callout', canCall && !isTouch);
   show('btn-callout', canCall);
   show('btn-rot', !!me?.loadMode);
@@ -271,12 +285,18 @@ function renderPrompt(s, me) {
   if (me.spectator) text = '👀 Spectating — you join next round';
   else if (me.out) text = '👻 You got kicked off the truck. Float around and watch!';
   else if (s.phase === 'meeting') text = '';
-  else if (me.loadMode) {
+  else if (me.loadMode && me.unloading) {
+    text = scene.pullTarget ? `↩️ ${isTouch ? '✋ PULL' : 'E pulls'} the ${scene.pullTarget.toLowerCase()} off this stack · ${isTouch ? 'BACK' : 'Shift'} to leave` : '↩️ Aim at a stack to pull its top piece';
+    action = 'PULL';
+  } else if (me.loadMode) {
     const it = s.items.find(i => i.id === me.carry);
     const f = it ? footprint(it.type, me.cursor?.rot || 0) : null;
     const turn = it && orientations(it.type).length > 1 ? ` · ${isTouch ? 'ROTATE' : 'R'} turn/flip (${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h})` : '';
     text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `🎯 D-pad or drag to aim · ✋ DROP${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : '🎯 Move or point to aim · E drop · Shift back' + turn;
     action = 'DROP';
+  } else if (!me.carry && s.level?.exact && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
+    text = `🧩 Hold ${isTouch ? '✋' : 'E'} to unload pieces from the truck and repack`;
+    action = 'HOLD ↩️';
   } else if (me.carry) {
     const it = s.items.find(i => i.id === me.carry);
     const t = it && ITEM_TYPES[it.type];
@@ -320,6 +340,16 @@ function onEvent(e) {
     sfx(e.guilty ? 'coin' : 'buzz');
     setTimeout(() => show(v, false), 4500);
   } else if (e.kind === 'end') sfx('fanfare');
+  else if (e.kind === 'role') {
+    myRole = !!e.saboteur;
+    const r = $('role');
+    r.className = myRole ? 'sab' : 'crew';
+    r.innerHTML = myRole
+      ? '<div class="card"><div class="big-icon">🕵️</div><h2>You are the SABOTEUR</h2><p>Keep the crew from packing a perfect load. Hold ✋ on desks and tables to jam their bolts, and crush boxes when nobody is looking. Don’t get voted out.</p></div>'
+      : '<div class="card"><div class="big-icon">🧰</div><h2>You are CREW</h2><p>Pack the truck perfectly before time runs out. Someone on this crew is a saboteur. Watch for crunches and call a meeting to vote them out.</p></div>';
+    show(r); sfx(myRole ? 'buzz' : 'coin');
+    setTimeout(() => show(r, false), 5000);
+  }
   else if (e.kind === 'go') { $('countdown').innerHTML = 'GO!'; show('countdown'); setTimeout(() => show('countdown', false), 600); sfx('fanfare'); }
   else if (e.kind === 'help') {
     scene.ping(e.x, e.z);
@@ -336,7 +366,9 @@ function renderMeeting(s, me) {
   if (!m) return;
   const caller = s.players.find(p => p.id === m.callerId);
   const canVote = me && !me.out && !me.spectator && !m.voted.includes(myId);
-  $('meeting-sub').textContent = `${caller?.name || 'Someone'} heard a crunch. Who broke it? Talk it out, then vote. Wrong call = the caller takes the hit.`;
+  $('meeting-sub').textContent = s.game === 'sabotage'
+    ? `${caller?.name || 'Someone'} called a meeting. Who is the saboteur? Vote them off. Vote wrong and an innocent mover leaves the truck.`
+    : `${caller?.name || 'Someone'} heard a crunch. Who broke it? Talk it out, then vote. Wrong call = the caller takes the hit.`;
   $('meeting-timer').textContent = m.timeLeft;
   const key = JSON.stringify([m.voted, myVote, canVote, s.players.map(p => p.id + p.out)]);
   if ($('vote-grid').dataset.key !== key) {
@@ -381,7 +413,14 @@ function renderResults(s, me) {
   if ($('results').dataset.key === key) return;
   $('results').dataset.key = key;
   $('res-reason').textContent = r.reason;
+  if (r.game === 'sabotage') myRole = null;
   const w = r.players.find(p => p.id === r.winnerId);
+  if (r.game === 'sabotage') {
+    const sp = r.players.find(p => p.id === r.saboteurId);
+    $('res-winner').innerHTML = `<div class="outcome ${r.winners}">${r.winners === 'crew' ? '🧰 CREW WINS' : '🕵️ SABOTEUR WINS'}</div>`
+      + (sp ? `${PORTRAITS[sp.char]}<div class="w">The saboteur was ${esc(sp.name)}${sp.id === myId ? ' (you!)' : ''}</div>` : '')
+      + `<div class="team">Final crew score: ${r.crewScore}</div>`;
+  } else
   $('res-winner').innerHTML = w ? `<span class="crown">👑</span>${PORTRAITS[w.char]}<div class="w">${esc(w.name)} is Mover of the Day!</div>` : '<div class="w">Nobody stayed on the truck… 🙃</div>';
   $('res-table').innerHTML = r.players.map((p, i) => `
     <div class="res-row ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}"><span>#${i + 1}</span>${PORTRAITS[p.char]}<span><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.out ? ' · off the truck' : ''}<br><small>${p.loaded} loaded · ${p.breaks} broken · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}</small></span><span class="s">${p.score}</span><span></span></div>`).join('') +

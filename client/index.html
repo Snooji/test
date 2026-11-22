@@ -38,6 +38,7 @@
       <div class="pill" id="hud-score">0 pts</div>
       <div class="pill" id="hud-strikes">♥♥</div>
       <div class="pill" id="hud-truck">🚚 0/29</div>
+      <div class="pill crew hidden" id="hud-crew">🧰 Crew 0</div>
       <button class="pill danger hidden" id="hud-callout">📣 CALL OUT <kbd>Q</kbd></button>
       <button class="pill help hidden" id="hud-help">🆘 NEED A HAND <kbd>H</kbd></button>
       <button class="pill icon" id="hud-sound" aria-label="Toggle sound">🔊</button>
@@ -104,11 +105,17 @@
       </div>
       <h3>Pick your mover</h3>
       <div class="chars" id="chars"></div>
+      <h3>Game</h3>
+      <div class="modes two" id="games">
+        <button data-game="classic">🏆 Competitive</button>
+        <button data-game="sabotage">🕵️ Sabotage</button>
+      </div>
+      <p class="fine" id="game-desc"></p>
       <h3>Round</h3>
       <div class="modes" id="modes">
         <button data-mode="3min">⏱ 3 min</button>
         <button data-mode="5min">⏱ 5 min</button>
-        <button data-mode="load">🚚 Until loaded</button>
+        <button data-mode="load">🧩 Full load</button>
       </div>
       <div class="house-row"><span id="lobby-house"></span><button class="ghost small" id="btn-reroll">🎲 New house</button></div>
       <div id="bot-controls">
@@ -144,6 +151,7 @@
   </div>
 
   <div id="verdict" class="hidden"></div>
+  <div id="role" class="hidden"></div>
 
   <!-- Results -->
   <section id="results" class="screen hidden">

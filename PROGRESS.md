@@ -54,4 +54,21 @@ Design: `docs/superpowers/specs/2026-11-22-solo-ai-and-qol-design.md`.
 - A helper could join a lift that was already being placed in the truck and steal half the points
 - Generator could make 2-room houses when doorways blocked every split
 
-Verified: npm test 60/60 · test/e2e.mjs (2 players, same house) PASS · test/e2e-solo.mjs (solo hard AI, phone D-pad/drag/rotate/drop) PASS · test/sim.mjs headless rounds: hard AI loads ~26/27 with 0 breaks.
+Verified: npm test 59/59 (an earlier draft of this line said 60/60, which was wrong) · test/e2e.mjs (2 players, same house) PASS · test/e2e-solo.mjs (solo hard AI, phone D-pad/drag/rotate/drop) PASS · test/sim.mjs headless rounds: hard AI loads ~26/27 with 0 breaks.
+
+### Wave 2 (shipped)
+- [x] r-shaped 3-block floor lamp; generic shape system (any polycube, all rotations/flips)
+- [x] Broken items respawn in the house (all modes)
+- [x] Truck full ends timed rounds
+- [x] 🧩 Full load: exact-fill houses (always solvable), perfect-load win, hold ✋ on the ramp to unload and repack
+- [x] 🕵️ Sabotage: secret saboteur, private role card, crew score + overtime drain, jammed furniture, vote-off rules
+- [x] AI for Full load (follows the packing, sets aside, unloads mistakes) and Sabotage (saboteur + suspicion-voting crew)
+
+Bugs found by playtesting wave 2 (fixed, with regression tests or sim checks):
+- BACK in the truck never worked: it left you on the ramp, which put you straight back into aiming
+- AI dropped pieces over empty cells (lamp arm, bed) creating unfillable gaps, and didn't treat them as misplaced
+- AI re-picked items it had just set aside, looping forever
+- Team-carried furniture wedged in doorways (collision clearance wider than the pathfinder's)
+
+Verified: npm test 84/84 · e2e.mjs, e2e-solo.mjs, e2e-wave2.mjs (Full load lamp/rotate/drop/unload + Sabotage role/HUD/meeting) PASS · smoke PASS ·
+sim: Hard AI completes Full load in ~3–3.5 min (all seeds tried); Sabotage outcomes split 3 crew / 3 saboteur across 6 AI rounds.

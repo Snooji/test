@@ -408,3 +408,82 @@ test('BACK really leaves the truck (you end up off the ramp, still holding the i
   assert.equal(a.loadMode, false);
   assert.equal(a.carry, box.id);
 });
+
+// ---- sabotage mode ----
+function sabotageRoom(n = 3) {
+  const r = makeRoom({});
+  const ids = ['A', 'B', 'C', 'D'].slice(0, n);
+  ids.forEach(id => r.join(id, id));
+  r.send('A', 'game', { game: 'sabotage' });
+  r.send('A', 'start');
+  return { ...r, ids };
+}
+const sab = (room) => [...room.players.values()].find(p => p.saboteur);
+
+test('sabotage: exactly one secret saboteur, told privately, never in the shared snapshot', () => {
+  const { room, events } = sabotageRoom(4);
+  assert.equal(room.game, 'sabotage');
+  assert.equal(room.level.exact, true);
+  assert.equal([...room.players.values()].filter(p => p.saboteur).length, 1);
+  const roles = events.filter(e => e.kind === 'role');
+  assert.equal(roles.length, 4, 'everyone gets a private role card');
+  assert.equal(roles.filter(r => r.saboteur).length, 1);
+  assert.ok(!JSON.stringify(room.snapshot()).includes('saboteur'), 'role not leaked in snapshot');
+});
+
+test('sabotage needs at least 3 movers', () => {
+  const r = makeRoom({});
+  r.join('A', 'A'); r.join('B', 'B');
+  r.send('A', 'game', { game: 'sabotage' });
+  r.send('A', 'start');
+  assert.equal(r.room.phase, 'lobby');
+});
+
+test('sabotage: the saboteur jams furniture, making disassembly take longer', () => {
+  const { room } = sabotageRoom(3);
+  const s = sab(room);
+  const desk = [...room.items.values()].find(i => i.assembled);
+  if (!desk) return; // some Full load houses have no desk/table
+  s.x = desk.x + 0.8; s.z = desk.z; s.in.hold = true;
+  for (let i = 0; i < 60; i++) room.tick(0.05);
+  assert.ok(desk.jam > 0, 'jammed');
+  assert.equal(desk.assembled, true, 'saboteur made no real progress');
+});
+
+test('sabotage: voting out the saboteur wins it for the crew', () => {
+  const { room, send, ids } = sabotageRoom(3);
+  const s = sab(room);
+  const caller = ids.find(id => id !== s.id);
+  send(caller, 'callout');
+  assert.equal(room.phase, 'meeting', 'anyone can call a meeting in sabotage');
+  for (const id of ids) send(id, 'vote', { target: s.id });
+  room.tick(0.05);
+  assert.equal(room.phase, 'results');
+  assert.equal(room.results.winners, 'crew');
+});
+
+test('sabotage: voting out an innocent ejects them, no strikes', () => {
+  const { room, send, ids } = sabotageRoom(4);
+  const s = sab(room);
+  const innocent = ids.filter(id => id !== s.id);
+  send(innocent[0], 'callout');
+  for (const id of ids) send(id, 'vote', { target: innocent[1] });
+  room.tick(0.05);
+  assert.equal(room.phase, 'playing');
+  assert.equal(room.players.get(innocent[1]).out, true);
+  assert.equal(room.players.get(innocent[0]).strikes, 0);
+});
+
+test('sabotage: after time runs out the crew score drains; at zero the saboteur wins', () => {
+  const { room } = sabotageRoom(3);
+  const box = [...room.items.values()].find(i => i.type === 'heavy');
+  load(room, room.players.get('A'), box.id, 0, 0);
+  assert.equal(room.crewScore(), 20);
+  room.timeLeft = 0.01;
+  room.tick(0.05);
+  assert.equal(room.phase, 'playing', 'overtime, not game over');
+  assert.ok(room.overtime);
+  for (let i = 0; i < 40 && room.phase === 'playing'; i++) room.tick(0.5);
+  assert.equal(room.phase, 'results');
+  assert.equal(room.results.winners, 'saboteur');
+});

@@ -1,10 +1,17 @@
 import * as THREE from 'three';
-import { ITEM_TYPES, GRID, footprint } from '../../shared/logic.js';
+import { ITEM_TYPES, GRID, footprint, shapeCells } from '../../shared/logic.js';
 import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
 import { generateLevel, classicLevel } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
+/** cells [x,y,z] a loaded item occupies relative to its grid anchor */
+const cellsOf = (it) => {
+  if (it.g.cells) return it.g.cells;
+  const out = [];
+  for (let x = 0; x < it.g.w; x++) for (let y = 0; y < (it.g.h || 1); y++) for (let z = 0; z < it.g.d; z++) out.push([x, y, z]);
+  return out;
+};
 
 export class GameScene {
   constructor(container) {
@@ -36,10 +43,14 @@ export class GameScene {
     this.players = new Map(); // id → {root, label, char, carried}
     this.items = new Map();   // id → {obj, key, bar}
     this.cat = makeCat(); this.scene.add(this.cat);
-    this.ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.4, depthWrite: false }));
+    // ghost = one translucent cube per cell, so shaped pieces (the r-lamp) preview exactly
+    this.ghost = new THREE.Group();
     this.ghost.visible = false;
-    this.ghostEdges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0xffffff }));
-    this.ghost.add(this.ghostEdges);
+    this.ghostMat = new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.4, depthWrite: false });
+    this.ghostLine = new THREE.LineBasicMaterial({ color: 0xffffff });
+    this.cellGeo = new THREE.BoxGeometry(CELL * 0.98, CELL * 0.98, CELL * 0.98);
+    this.cellEdges = new THREE.EdgesGeometry(this.cellGeo);
+    this.ghostKey = '';
     this.scene.add(this.ghost);
     this.emotes = [];
     this.pings = [];
@@ -260,11 +271,34 @@ export class GameScene {
     for (const [id, v] of this.items) if (!seenI.has(id)) { this.scene.remove(v.obj); this.items.delete(id); }
   }
 
+  setGhostCells(cells) {
+    const key = JSON.stringify(cells);
+    if (key === this.ghostKey) return;
+    this.ghostKey = key;
+    this.ghost.clear();
+    for (const [cx, cy, cz] of cells) {
+      const m = new THREE.Mesh(this.cellGeo, this.ghostMat);
+      m.position.set(-cz * CELL, cy * CELL + CELL / 2, cx * CELL);
+      m.add(new THREE.LineSegments(this.cellEdges, this.ghostLine));
+      this.ghost.add(m);
+    }
+  }
+
+  /** occupancy from the snapshot: occ[x][z][y] = item id */
+  occupancy() {
+    const occ = Array.from({ length: GRID.W }, () => Array.from({ length: GRID.D }, () => new Array(GRID.H).fill(null)));
+    for (const it of this.snap?.items || []) {
+      if (!it.g) continue;
+      for (const [cx, cy, cz] of cellsOf(it)) if (occ[it.g.x + cx]?.[it.g.z + cz]) occ[it.g.x + cx][it.g.z + cz][it.g.y + cy] = it.id;
+    }
+    return occ;
+  }
+
   heights() {
     const h = Array.from({ length: GRID.W }, () => new Array(GRID.D).fill(0));
     for (const it of this.snap?.items || []) {
       if (!it.g) continue;
-      for (let x = it.g.x; x < it.g.x + it.g.w; x++) for (let z = it.g.z; z < it.g.z + it.g.d; z++) h[x][z] = Math.max(h[x][z], it.g.y + (it.g.h || 1));
+      for (const [cx, cy, cz] of cellsOf(it)) { const x = it.g.x + cx, z = it.g.z + cz; if (h[x]) h[x][z] = Math.max(h[x][z], it.g.y + cy + 1); }
     }
     return h;
   }
@@ -423,24 +457,47 @@ export class GameScene {
       sp.position.set(wp.x, wp.y + 0.35, wp.z);
     }
 
-    // ghost
+    // ghost: where the carried piece will land, or which piece you'd pull out
     this.ghost.visible = false;
     if (me?.loadMode && me.cursor && me.carry) {
       const it = snap.items.find(i => i.id === me.carry);
       if (it) {
-        const { w, d, h: ih } = footprint(it.type, me.cursor.rot);
+        const cells = shapeCells(it.type, me.cursor.rot);
         const h = this.heights();
-        let y = 0;
-        for (let x = me.cursor.gx; x < me.cursor.gx + w; x++) for (let z = me.cursor.gz; z < me.cursor.gz + d; z++) y = Math.max(y, h[x]?.[z] ?? 9);
-        const ok = y + ih <= GRID.H;
-        const wp = gridToWorld(me.cursor.gx, me.cursor.gz, Math.min(y, GRID.H - ih), w, d);
-        this.ghost.scale.set(d * CELL * 0.98, ih * CELL * 0.98, w * CELL * 0.98);
-        this.ghost.position.set(wp.x, wp.y + ih * CELL / 2 + (ok ? 0 : 0.4), wp.z);
-        this.ghost.material.color.set(ok ? 0x55ffcc : 0xff4466);
-        this.ghost.material.opacity = 0.3 + Math.sin(t * 6) * 0.1;
+        let y = 0, top = 0;
+        const low = new Map();
+        for (const [cx, cy, cz] of cells) { top = Math.max(top, cy); const k = cx + ',' + cz; if (!low.has(k) || low.get(k)[2] > cy) low.set(k, [cx, cz, cy]); }
+        for (const [cx, cz, lo] of low.values()) y = Math.max(y, (h[me.cursor.gx + cx]?.[me.cursor.gz + cz] ?? 9) - lo);
+        const ok = y + top < GRID.H;
+        this.setGhostCells(cells);
+        const wp = gridToWorld(me.cursor.gx, me.cursor.gz, Math.min(y, GRID.H - 1 - top));
+        this.ghost.position.set(wp.x, wp.y + (ok ? 0 : 0.4), wp.z);
+        this.ghostMat.color.set(ok ? 0x55ffcc : 0xff4466);
+        this.ghostMat.opacity = 0.3 + Math.sin(t * 6) * 0.1;
         this.ghost.visible = true;
         this.ghostOk = ok;
         this.ghostY = y;
+      }
+    } else if (me?.loadMode && me.unloading && me.cursor) {
+      const occ = this.occupancy();
+      const col = occ[me.cursor.gx]?.[me.cursor.gz] || [];
+      let id = null;
+      for (let y = GRID.H - 1; y >= 0; y--) if (col[y]) { id = col[y]; break; }
+      const it = id && snap.items.find(i => i.id === id);
+      this.pullTarget = it ? ITEM_TYPES[it.type].label : null;
+      if (it) {
+        this.setGhostCells(cellsOf(it));
+        const wp = gridToWorld(it.g.x, it.g.z, it.g.y);
+        this.ghost.position.set(wp.x, wp.y + 0.05, wp.z);
+        this.ghostMat.color.set(0xffd166);
+        this.ghostMat.opacity = 0.35 + Math.sin(t * 6) * 0.15;
+        this.ghost.visible = true;
+      } else {
+        this.setGhostCells([[0, 0, 0]]);
+        const wp = gridToWorld(me.cursor.gx, me.cursor.gz, 0);
+        this.ghost.position.set(wp.x, wp.y, wp.z);
+        this.ghostMat.color.set(0x888899); this.ghostMat.opacity = 0.2;
+        this.ghost.visible = true;
       }
     }
     this.rampZone.material.opacity = me?.carry ? 0.2 + Math.sin(t * 4) * 0.1 : 0.1;

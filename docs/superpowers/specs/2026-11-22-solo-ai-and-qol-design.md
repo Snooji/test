@@ -48,3 +48,15 @@ which matters for an email-gated funnel: one person should be able to clock in a
 1. **Server-side bots that emit inputs (chosen).** One simulation path, so they can't desync. Bots also work in mixed crews.
 2. Client-side bots in the solo player's browser. No server cost, but it splits the logic and breaks mixed crews.
 3. Bots that move by direct state edits. Simpler, but they'd walk through walls and feel unfair.
+
+---
+
+## Addendum — wave 2 (requested mid-build)
+- **Shaped furniture**: couch 3×1×1 (stands 3 high), bed 2×3×1, floor lamp "r" (3 cells: 2-high pole + arm). Every piece can be turned and flipped into all of its distinct orientations (lamp: 12).
+- **Procedural houses** every round (seeded, identical on every client): 3–6 rooms, size and yard distance vary. Lobby shows the house; host can re-roll.
+- **Broken items respawn** somewhere in the house as a fresh item, in every mode. The break still counts for call-outs.
+- **Truck full ends the round** in timed modes as soon as nothing left in the house fits.
+- **Full load (🧩)**: the house holds exactly one truckload (64 cells), built by packing the truck first, so it's always solvable without crushes. The round ends only on a perfect load. Hold ACTION on the ramp to pull the top piece off a stack and repack (points come back off whoever loaded it). Unloading is Full load / Sabotage only so it can't be used to steal points.
+- **Sabotage (🕵️)**: 3+ movers, Full load house, one secret saboteur (told privately; never in the shared snapshot). Crew wins on a perfect load or by voting out the saboteur. When time runs out the crew score drains; at zero the saboteur wins. Saboteur's hold on an assembled desk/table looks like disassembling but jams the bolts (+up to 8 s). Meetings any time (20 s cooldown per caller). A wrong vote ejects that innocent mover. No strikes.
+- **AI in Full load** follows the known packing (Hard always, Normal 80%, Easy 45%), sets aside pieces that can't go in yet, and pulls misplaced/gap-making pieces back out when the truck gets stuck. **AI saboteur** crushes on purpose, jams furniture, sometimes packs correctly to blend in, and bluffs in meetings. **AI crew** build suspicion from crunches they "see" and vote on it.
+- **Multiplayer**: disconnect notices in chat; 30 s reconnect; if everyone else leaves mid-round, the last human wins by default. 🆘 help ping for two-mover lifts. Phone truck aiming uses a D-pad and drag; the drop stays on the ✋ button.
