@@ -93,3 +93,10 @@ sim: Hard AI completes Full load in ~3–3.5 min (all seeds tried); Sabotage out
 Bugs found along the way (fixed, with tests): browsers rebuilt Full load / Sabotage houses without the exact-fill flag (wrong walls since wave 2); Chrome centred the menu column via place-items on a block layout.
 
 Verified: npm test 128/128 · e2e, e2e-solo, e2e-wave2, e2e-b PASS · smoke PASS · load test.
+
+## Round 4 (2026-11-22)
+- [x] Training objective arrow + ring, minimap ping until done, short device-aware steps, quiet HUD while training
+- [x] Training complete: overhead "TRAINING COMPLETE" sign + completion box (layout adapted from 21st.dev "Mission Success Dialog") with Back to main menu
+- [x] The dolly: one per house; stack up to 3 boxes (no furniture/lamps); unloads top-first one at a time at the truck; breaks after 2 trips and reappears elsewhere; a heavy box riding on a fragile (6 s) or standard (10 s) box crushes it (pusher loses its points, box respawns); AI ignores it
+- [x] Fixed: booking card on results covered the New game button (blurred card turned position:fixed into card-relative)
+Verified: npm test 134/134 · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly PASS
