@@ -55,6 +55,14 @@ export class GameScene {
     this.emotes = [];
     this.pings = [];
     this.parts = [];
+    this.puffs = [];
+    { // soft round dust texture
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+      gr.addColorStop(0, 'rgba(255,255,255,.95)'); gr.addColorStop(.5, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+      this.dustTex = new THREE.CanvasTexture(c);
+    }
     this.partGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
     // guide arrow at your feet: to the truck when carrying, else to the nearest item
     const arrowShape = new THREE.Shape();
@@ -274,6 +282,7 @@ export class GameScene {
     const seenI = new Set();
     for (const it of snap.items) {
       seenI.add(it.id);
+      const prevData = this.items.get(it.id)?.data; // before any rebuild below
       const key = `${it.state === 'loaded'}|${it.wrapped}|${it.assembled}`;
       let v = this.items.get(it.id);
       if (!v || v.key !== key) {
@@ -289,6 +298,10 @@ export class GameScene {
           obj.position.set(wp.x, wp.y + 3, wp.z); // drops in from above
           obj.userData.dropTo = wp.y;
         }
+      }
+      if (prevData && prevData.state === 'floor') {
+        if (prevData.assembled && !it.assembled) this.finishFx(it.x, it.z, it.type, 'disassemble');
+        else if (!prevData.wrapped && it.wrapped) this.finishFx(it.x, it.z, it.type, 'wrap');
       }
       v.data = it;
       if (it.task) {
@@ -368,6 +381,32 @@ export class GameScene {
       this.scene.add(m); this.parts.push(m);
     }
   }
+  /** how big a dust cloud a piece kicks up: lamps/boxes small, beds/tables/desks/couches big */
+  dustScale(type) {
+    const t = ITEM_TYPES[type];
+    if (!t) return 0.6;
+    const size = (t.cells ? t.cells.length : t.w * t.d * (t.h || 1));
+    return size >= 6 ? 1.9 : size >= 3 ? 1.5 : size >= 2 ? 1.25 : 0.65;
+  }
+  /** one soft billowing puff */
+  puff(x, y, z, scale, color, life = 1.1, rise = 0.6) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, color, transparent: true, depthWrite: false, opacity: 0.9 }));
+    m.position.set(x + (Math.random() - 0.5) * scale * 1.4, y + Math.random() * 0.3 * scale, z + (Math.random() - 0.5) * scale * 1.4);
+    const s0 = (0.4 + Math.random() * 0.4) * scale;
+    m.scale.setScalar(s0);
+    m.userData = { t: 0, life: life * (0.8 + Math.random() * 0.4), s0, grow: 1.6 + Math.random(), vy: rise * (0.6 + Math.random() * 0.6), vx: (Math.random() - 0.5) * 0.6 * scale, vz: (Math.random() - 0.5) * 0.6 * scale };
+    this.scene.add(m); this.puffs.push(m);
+  }
+  dustCloud(x, z, type, kind, n = 1) {
+    const sc = this.dustScale(type);
+    const colors = kind === 'wrap' ? [0xb9c1d9, 0x9aa6c8, 0xd5d9e6] : [0xb39f80, 0x8f826e, 0xcdc4b4];
+    for (let i = 0; i < n; i++) this.puff(x, 0.15 + Math.random() * 0.4 * sc, z, sc, colors[i % colors.length], kind === 'wrap' ? 0.9 : 1.3, kind === 'wrap' ? 0.9 : 0.5);
+  }
+  finishFx(x, z, type, kind) { // the job's done: one big burst
+    this.dustCloud(x, z, type, kind, Math.round(8 + 10 * this.dustScale(type)));
+    if (kind === 'disassemble') this.burst(x, 0.8, z, [0x9aa3b8, 0x6b7080], 6, 3, 0.9, 0.5); // a few bolts
+  }
+
   crunchFx() { this.burst(15.4, 2.2, 0, [0xf2d16b, 0xffffff, 0xe63946], 26, 5, 1.1); }
   dropFx(x, y, z) { this.burst(x, y, z, [0xbfb8d6, 0x8f88aa], 10, 1.6, 0.6, 0.7); }
   confetti(x, z) { this.burst(x, 4, z, [0xff8a3d, 0x55ffcc, 0xffd166, 0xa66cff, 0x7bd84a], 80, 6, 2.6, 0.8); }
@@ -498,9 +537,26 @@ export class GameScene {
       if (carrying && !v.wasCarrying) v.squash = 0.25; // little squash when lifting
       v.wasCarrying = carrying;
       if (v.squash > 0) { v.squash = Math.max(0, v.squash - dt); const k = v.squash * 0.8; v.root.userData.body.scale.set(1 + k, 1 - k, 1 + k); }
-      if (p.task && Math.random() < dt * 14) this.burst(p.x, 1, p.z, p.task.kind === 'wrap' ? [0x6f95ff, 0x2f5fd0] : [0xffd166, 0xaaaaaa], 1, 1.4, 0.5, 0.6);
+      if (p.task) {
+        const it = snap.items.find(i => i.id === p.task.id);
+        if (it) {
+          const sc = this.dustScale(it.type);
+          if (Math.random() < dt * (5 + 7 * sc)) this.dustCloud(it.x, it.z, it.type, p.task.kind, 1);
+          if (p.task.kind === 'disassemble' && Math.random() < dt * 3) this.burst(it.x, 0.9, it.z, [0x9aa3b8], 1, 2.2, 0.6, 0.45); // a stray bolt
+        }
+      }
     }
     // particles
+    this.puffs = this.puffs.filter(m => {
+      const u = m.userData; u.t += dt;
+      const k = u.t / u.life;
+      m.position.x += u.vx * dt; m.position.z += u.vz * dt; m.position.y += u.vy * dt;
+      u.vx *= 0.97; u.vz *= 0.97;
+      m.scale.setScalar(u.s0 * (1 + k * u.grow));
+      m.material.opacity = 0.9 * (1 - k * k) * Math.min(1, u.t * 8);
+      if (k >= 1) { this.scene.remove(m); m.material.dispose(); return false; }
+      return true;
+    });
     this.parts = this.parts.filter(m => {
       const u = m.userData; u.t += dt;
       u.v.y -= 9.8 * dt; m.position.addScaledVector(u.v, dt);
