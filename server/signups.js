@@ -40,7 +40,7 @@ function limited(kind, ip, max, windowMs = 3600_000) {
   return arr.length > max;
 }
 
-const EVENTS = new Set(['visit', 'gate_view', 'home_view', 'solo_click', 'create_click', 'join_click', 'quickplay_click', 'tutorial_start', 'tutorial_done', 'share_click', 'install', 'feedback_up', 'feedback_down']);
+const EVENTS = new Set(['visit', 'gate_view', 'home_view', 'solo_click', 'create_click', 'join_click', 'quickplay_click', 'tutorial_start', 'tutorial_done', 'share_click', 'install', 'feedback_up', 'feedback_down', 'book_click_home', 'book_click_results', 'book_click_gate']);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const baseUrl = (req) => process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
@@ -62,6 +62,7 @@ export function signupRoutes(app, express, store) {
     try {
       const { isNew } = await store.upsertSignup({ name, email, marketing });
       store.event(isNew ? 'signup' : 'signin').catch(() => {});
+      if (isNew && marketing) store.event('optin').catch(() => {});
       if (isNew && marketing && mailerEnabled()) {
         const b = baseUrl(req);
         const mail = confirmEmail({
@@ -83,7 +84,7 @@ export function signupRoutes(app, express, store) {
     const email = cleanEmail(req.query.e);
     if (!same(confirmToken(email), req.query.t || '')) return res.status(400).send(page('Link expired', '<h1>That link doesn’t look right</h1><p>Try the newest email from us.</p>'));
     await store.confirm(email);
-    res.send(page('Confirmed', `<h1>✅ You're confirmed!</h1><p>We'll send Starside Movers news to <b>${esc(email)}</b>.</p><p><a class="btn" href="/">Play now</a></p>`));
+    res.send(page('Confirmed', `<h1>✅ You're confirmed!</h1><p>We'll send Let’s Move It and Starside Movers news to <b>${esc(email)}</b>.</p><p><a class="btn" href="/">Play now</a></p>`));
   });
 
   const unsub = async (req, res) => {
@@ -91,7 +92,7 @@ export function signupRoutes(app, express, store) {
     if (!same(unsubToken(email), req.query.t || '')) return res.status(400).send(page('Link expired', '<h1>That link doesn’t look right</h1><p>Use the unsubscribe link from one of our emails.</p>'));
     await store.unsubscribe(email);
     store.event('unsubscribe').catch(() => {});
-    res.send(page('Unsubscribed', `<h1>You're unsubscribed</h1><p><b>${esc(email)}</b> won't get any more Starside Movers emails. You can still play any time.</p><p><a class="btn" href="/">Back to the game</a></p>`));
+    res.send(page('Unsubscribed', `<h1>You're unsubscribed</h1><p><b>${esc(email)}</b> won't get any more Let’s Move It emails. You can still play any time.</p><p><a class="btn" href="/">Back to the game</a></p>`));
   };
   app.get('/unsubscribe', unsub);
   app.post('/unsubscribe', unsub); // one-click unsubscribe from mail apps
@@ -120,6 +121,25 @@ export function signupRoutes(app, express, store) {
     res.json({ games: p.games, wins: p.wins, loaded: p.loaded });
   });
 
+  // ---- business conversions: quote requests + confirmed bookings from the booking site ----
+  const convKey = () => process.env.CONVERSION_KEY || process.env.ADMIN_KEY;
+  const TYPES = new Set(['quote', 'booking']);
+  app.post('/api/conversion', json, async (req, res) => {
+    const key = req.get('x-conversion-key') || req.query.key;
+    if (!convKey() || !same(convKey(), String(key || ''))) return res.status(401).json({ error: 'bad key' });
+    const type = String(req.body?.type || '');
+    if (!TYPES.has(type)) return res.status(400).json({ error: 'type must be quote or booking' });
+    await store.addConversion({ type, email: cleanEmail(req.body?.email), name: cleanName(req.body?.name), value: Math.max(0, Math.round(Number(req.body?.value) || 0)), source: 'webhook', note: String(req.body?.note || '').slice(0, 200) });
+    res.json({ ok: true });
+  });
+  const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  app.get('/api/px', async (req, res) => { // <img src=".../api/px?t=booking&k=KEY&e=EMAIL&v=VALUE"> on a thank-you page
+    if (convKey() && same(convKey(), String(req.query.k || '')) && TYPES.has(req.query.t) && !limited('px', req.ip, 60)) {
+      await store.addConversion({ type: req.query.t, email: cleanEmail(req.query.e), name: '', value: Math.max(0, Math.round(Number(req.query.v) || 0)), source: 'pixel', note: '' }).catch(() => {});
+    }
+    res.set('Cache-Control', 'no-store').type('image/gif').send(GIF);
+  });
+
   // ---- admin (only when ADMIN_KEY is set) ----
   const admin = (req) => !!process.env.ADMIN_KEY && same(process.env.ADMIN_KEY, String(req.query.key || ''));
 
@@ -133,18 +153,43 @@ export function signupRoutes(app, express, store) {
     ].join('\n'));
   });
 
+  app.post('/admin/conversion', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+    if (!admin(req)) return res.status(404).end();
+    const type = TYPES.has(req.body?.type) ? req.body.type : 'booking';
+    await store.addConversion({ type, email: cleanEmail(req.body?.email), name: cleanName(req.body?.name) || 'Manual entry', value: Math.max(0, Math.round(Number(req.body?.value) || 0)), source: 'manual', note: String(req.body?.note || '').slice(0, 200) });
+    res.redirect(303, `/admin?key=${encodeURIComponent(req.query.key)}#conversions`);
+  });
+
   app.get('/admin', async (req, res) => {
     if (!admin(req)) return res.status(404).send(page('Not found', '<h1>Not found</h1>'));
-    const [signups, funnel, errors] = await Promise.all([store.listSignups(), store.funnel(14), store.recentErrors(20)]);
+    const [signups, funnel, errors, conversions] = await Promise.all([store.listSignups(), store.funnel(30), store.recentErrors(20), store.listConversions(50)]);
+    const total = (name) => funnel.filter(f => f.name === name).reduce((a, f) => a + f.n, 0);
+    const steps = [['Visits', 'visit'], ['Sign-ups', 'signup'], ['Email opt-ins', 'optin'], ['Game starts', 'round_start'], ['Completed rounds', 'round_end'], ['Book-a-move clicks', ['book_click_home', 'book_click_results', 'book_click_gate']], ['Quote requests', 'quote'], ['Confirmed bookings', 'booking']]
+      .map(([label, names]) => ({ label, n: [].concat(names).reduce((a, nm) => a + total(nm), 0) }));
+    const revenue = conversions.filter(c => c.type === 'booking').reduce((a, c) => a + (c.value || 0), 0);
+    const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '–');
     const marketing = signups.filter(s => s.marketing && !s.unsubscribed).length;
     const days = [...new Set(funnel.map(f => f.day))].sort().reverse();
-    const cols = ['visit', 'gate_view', 'signup', 'signin', 'solo_click', 'quickplay_click', 'round_start', 'round_end', 'tutorial_done', 'share_click', 'feedback_up', 'feedback_down'];
+    const cols = ['visit', 'signup', 'optin', 'round_start', 'round_end', 'book_click_home', 'book_click_results', 'quote', 'booking', 'tutorial_done', 'quickplay_click', 'share_click', 'feedback_up', 'feedback_down'];
     const n = (day, name) => funnel.find(f => f.day === day && f.name === name)?.n || 0;
     const k = encodeURIComponent(req.query.key);
-    res.send(page('Starside admin', `<h1>★ Starside Movers admin</h1>
+    res.send(page('Let’s Move It admin', `<h1>Let’s Move It admin</h1>
       <p><b>${signups.length}</b> sign-ups · <b>${marketing}</b> OK to email · <b>${signups.filter(s => s.confirmed).length}</b> confirmed · <b>${signups.filter(s => s.unsubscribed).length}</b> unsubscribed</p>
       <p><a class="btn" href="/api/signups.csv?key=${k}">Download sign-ups (CSV)</a> · email confirmations: ${mailerEnabled() ? 'on' : 'off (set RESEND_API_KEY + MAIL_FROM)'} · storage: ${process.env.DATABASE_URL ? 'Postgres' : 'disk file'}</p>
-      <h2>Funnel, last 14 days</h2><div style="overflow-x:auto"><table><tr><th>Day</th>${cols.map(c => `<th class="n">${c.replace('_', ' ')}</th>`).join('')}</tr>
+      <h2>Is the game bringing in business? (last 30 days)</h2>
+      <table><tr><th>Step</th><th class="n">Count</th><th class="n">From previous step</th></tr>
+      ${steps.map((st, i) => `<tr><td>${st.label}</td><td class="n">${st.n}</td><td class="n">${i ? pct(st.n, steps[i - 1].n) : ''}</td></tr>`).join('')}
+      <tr><td><b>Booking value logged</b></td><td class="n"><b>$${revenue.toLocaleString()}</b></td><td></td></tr></table>
+      <h2 id="conversions">Quote requests &amp; bookings</h2>
+      <form method="post" action="/admin/conversion?key=${k}" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;margin-bottom:10px">
+        <select name="type"><option value="booking">Booking</option><option value="quote">Quote request</option></select>
+        <input name="name" placeholder="Customer name"><input name="email" placeholder="Email (optional)"><input name="value" placeholder="$ value" inputmode="numeric">
+        <input name="note" placeholder="Note (e.g. mentioned the game)"><button class="btn" type="submit">Log it</button>
+      </form>
+      <table><tr><th>When</th><th>Type</th><th>Customer</th><th class="n">Value</th><th>Source</th><th>Played the game?</th></tr>
+      ${conversions.map(c => `<tr><td>${esc(c.at).slice(0, 16)}</td><td>${esc(c.type)}</td><td>${esc(c.name || c.email)}</td><td class="n">${c.value ? '$' + c.value : ''}</td><td>${esc(c.source)}</td><td>${c.player ? 'yes' : '–'}</td></tr>`).join('') || '<tr><td colspan="6">None yet</td></tr>'}</table>
+      <p style="font-size:13px">Automate it: POST <code>/api/conversion</code> with header <code>x-conversion-key</code> and JSON <code>{"type":"booking","email":"…","value":950}</code>, or put <code>&lt;img src="/api/px?t=booking&amp;k=KEY&amp;e=EMAIL&amp;v=VALUE"&gt;</code> on the booking confirmation page.</p>
+      <h2>Daily funnel</h2><div style="overflow-x:auto"><table><tr><th>Day</th>${cols.map(c => `<th class="n">${c.replace('_', ' ')}</th>`).join('')}</tr>
       ${days.map(d => `<tr><td>${d}</td>${cols.map(c => `<td class="n">${n(d, c)}</td>`).join('')}</tr>`).join('') || '<tr><td colspan="9">No traffic yet</td></tr>'}</table></div>
       <h2>Recent errors</h2><table><tr><th>When</th><th>Where</th><th>Message</th></tr>
       ${errors.map(e => `<tr><td>${esc(e.at).slice(0, 19)}</td><td>${esc(e.where)}</td><td>${esc(e.message)}</td></tr>`).join('') || '<tr><td colspan="3">None 🎉</td></tr>'}</table>`));

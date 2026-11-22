@@ -71,3 +71,39 @@ test('leaderboard never exposes emails', async () => {
   assert.ok(!JSON.stringify(j).includes('@'));
   s.close();
 });
+
+test('conversion webhook needs the key, records quote/booking and counts it in the funnel', async () => {
+  process.env.CONVERSION_KEY = 'conv';
+  const s = await serve();
+  const hook = (body, key) => fetch(`${s.base}/api/conversion`, { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { 'x-conversion-key': key } : {}) }, body: JSON.stringify(body) });
+  assert.equal((await hook({ type: 'booking', email: 'a@x.io' })).status, 401);
+  assert.equal((await hook({ type: 'nonsense' }, 'conv')).status, 400);
+  assert.equal((await hook({ type: 'booking', email: 'a@x.io', value: 950 }, 'conv')).status, 200);
+  const px = await fetch(`${s.base}/api/px?t=quote&k=conv`);
+  assert.equal(px.headers.get('content-type'), 'image/gif');
+  const rows = await s.store.listConversions(10);
+  assert.deepEqual(rows.map(r => r.type).sort(), ['booking', 'quote']);
+  const f = await s.store.funnel(1);
+  assert.ok(f.some(r => r.name === 'booking') && f.some(r => r.name === 'quote'));
+  delete process.env.CONVERSION_KEY;
+  s.close();
+});
+
+test('opting in to emails is counted as an opt-in event', async () => {
+  const s = await serve();
+  await s.post('/api/signup', { name: 'Oo', email: 'oo@x.io', marketing: true });
+  await s.post('/api/signup', { name: 'Pp', email: 'pp@x.io', marketing: false });
+  const f = await s.store.funnel(1);
+  assert.equal(f.find(r => r.name === 'optin')?.n, 1);
+  s.close();
+});
+
+test('admin can log a booking by hand (customer mentioned the game)', async () => {
+  const s = await serve();
+  const r = await fetch(`${s.base}/admin/conversion?key=k3y`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'type=booking&name=Phone+Lead&email=&value=800&note=mentioned+game', redirect: 'manual' });
+  assert.ok([302, 303].includes(r.status));
+  const rows = await s.store.listConversions(5);
+  assert.equal(rows[0].value, 800);
+  assert.equal(rows[0].source, 'manual');
+  s.close();
+});

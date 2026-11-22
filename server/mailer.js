@@ -18,12 +18,12 @@ export async function sendMail({ to, subject, html, text, unsubscribeUrl }) {
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function confirmEmail({ name, confirmUrl, unsubscribeUrl, playUrl }) {
-  const subject = 'Confirm your Starside Movers news';
-  const text = `Hi ${name},\n\nThanks for clocking in at Starside Movers! Confirm you'd like game news and offers:\n${confirmUrl}\n\nJump back in any time: ${playUrl}\n\nDon't want these emails? Unsubscribe: ${unsubscribeUrl}\n`;
+  const subject = 'Confirm your Let’s Move It news from Starside Movers';
+  const text = `Hi ${name},\n\nThanks for clocking in at Let’s Move It! Confirm you'd like game news and offers:\n${confirmUrl}\n\nJump back in any time: ${playUrl}\n\nDon't want these emails? Unsubscribe: ${unsubscribeUrl}\n`;
   const html = `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:auto;color:#1b1640">
-  <h1 style="font-size:22px">★ Starside <span style="color:#ff8a3d">Movers</span></h1>
+  <h1 style="font-size:22px">Let’s <span style="color:#ff8a3d">Move It</span></h1><p style="margin-top:-8px;color:#666">by Starside Movers</p>
   <p>Hi ${esc(name)}, thanks for clocking in!</p>
-  <p>Tap below to confirm you'd like Starside Movers news, new houses and offers.</p>
+  <p>Tap below to confirm you'd like game news, new houses and Starside Movers offers. Mention the game when you book a move and get 15% off.</p>
   <p><a href="${esc(confirmUrl)}" style="display:inline-block;background:#6b4dff;color:#fff;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700">Confirm my email</a></p>
   <p><a href="${esc(playUrl)}">Jump back into a move</a></p>
   <p style="font-size:12px;color:#777">Didn't sign up, or changed your mind? <a href="${esc(unsubscribeUrl)}">Unsubscribe</a>.</p></div>`;

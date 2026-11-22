@@ -1,4 +1,4 @@
-# ★ Starside Movers
+# Let’s Move It (by Starside Movers)
 
 A 3D multiplayer moving-day party game in the browser. Up to 4 movers (astronauts and aliens) load a
 Starside Movers truck Tetris-style. Heavy boxes crush fragile ones. When something breaks, call out the

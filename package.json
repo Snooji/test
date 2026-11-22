@@ -9,7 +9,7 @@
     "dev:client": "vite client",
     "build": "vite build client --outDir ../dist --emptyOutDir",
     "start": "node server/index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test --test-force-exit test/*.test.js"
   },
   "engines": {
     "node": ">=20"

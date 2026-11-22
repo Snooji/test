@@ -79,7 +79,7 @@ function astronaut(suit, visor) {
   g.add(v);
   g.add(mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.25), white, 0.18, 1.62, 0));
   g.add(mesh(new THREE.SphereGeometry(0.06), mat(suit, { emissive: suit, emissiveIntensity: 0.6 }), 0.18, 1.76, 0));
-  for (const s of [-1, 1]) g.add(mesh(new THREE.CapsuleGeometry(0.1, 0.25, 4, 8), white, s * 0.42, 0.7, 0.05)); // arms
+  for (const s of [-1, 1]) { const arm = mesh(new THREE.CapsuleGeometry(0.1, 0.25, 4, 8), white, s * 0.42, 0.7, 0.05); arm.userData.arm = s; g.add(arm); } // arms
   for (const s of [-1, 1]) g.add(mesh(new THREE.CapsuleGeometry(0.11, 0.15, 4, 8), white, s * 0.15, 0.16, 0));   // boots
   return g;
 }
@@ -96,7 +96,7 @@ function glorp(tint) {
     const a = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4), mat(0x5aa832), s * 0.2, 1.35, 0);
     a.rotation.z = -s * 0.4; g.add(a);
     g.add(mesh(new THREE.SphereGeometry(0.08), mat(0xc6ff8f, { emissive: 0x88ff44, emissiveIntensity: 0.6 }), s * 0.29, 1.54, 0));
-    g.add(mesh(new THREE.CapsuleGeometry(0.09, 0.22, 4, 8), green, s * 0.52, 0.55, 0.05));
+    { const arm = mesh(new THREE.CapsuleGeometry(0.09, 0.22, 4, 8), green, s * 0.52, 0.55, 0.05); arm.userData.arm = s; g.add(arm); }
   }
   const belt = mesh(new THREE.TorusGeometry(0.42, 0.06, 8, 20), mat(0xff8a3d), 0, 0.3, 0); // tool belt
   belt.rotation.x = Math.PI / 2;
@@ -119,7 +119,7 @@ function zibble(tint) {
     const a = mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.45), mat(0x7d45d9), s * 0.18, 1.65, 0);
     a.rotation.z = -s * 0.5; g.add(a);
     g.add(mesh(new THREE.SphereGeometry(0.08), mat(0xffd166, { emissive: 0xffaa00, emissiveIntensity: 0.7 }), s * 0.3, 1.85, 0));
-    g.add(mesh(new THREE.CapsuleGeometry(0.08, 0.25, 4, 8), purple, s * 0.38, 0.55, 0.05));
+    { const arm = mesh(new THREE.CapsuleGeometry(0.08, 0.25, 4, 8), purple, s * 0.38, 0.55, 0.05); arm.userData.arm = s; g.add(arm); }
   }
   g.add(mesh(new THREE.BoxGeometry(0.34, 0.18, 0.05), mat(0xffd166), 0, 0.55, 0.3));
   return g;

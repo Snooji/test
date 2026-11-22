@@ -348,7 +348,7 @@ export class MoveRoom extends Room {
     }
     this.phase = 'countdown';
     this.countdown = 3;
-    MoveRoom.store?.event('round_start').catch(() => {});
+    if (!this.demo) MoveRoom.store?.event('round_start').catch(() => {});
     this.roundHumans = [...this.players.values()].filter(p => !p.bot && !p.spectator).length;
     this.event({ kind: 'start' });
   }
@@ -388,7 +388,8 @@ export class MoveRoom extends Room {
       if (this.quick && this.autoStartAt > 0 && (this.autoStartAt -= dt) <= 0) { this.autoStartAt = 0; this.startRound(); }
     }
     for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; }
-    this.broadcast('snap', this.snapshot());
+    // the menu's demo game streams at ~7 Hz; real games at 20 Hz
+    if (!this.demo || (this.demoTick = (this.demoTick || 0) + 1) % 3 === 0) this.broadcast('snap', this.snapshot());
   }
 
   /** Zero-G twist: every 25 s gravity cuts out for 6 s; loose items drift and movers float faster. */
@@ -932,7 +933,7 @@ export class MoveRoom extends Room {
   /** Save stats + leaderboard entries for human players (never blocks the game). */
   recordResults() {
     const store = MoveRoom.store, r = this.results;
-    if (!store || !r) return;
+    if (!store || !r || this.demo) return;
     store.event('round_end').catch(() => {});
     for (const p of this.players.values()) {
       if (p.bot || p.spectator || !p.email) continue;

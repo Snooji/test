@@ -90,3 +90,17 @@ test('file store imports the old signups.jsonl once', async () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].name, 'Old2');
 });
+
+for (const [label, make] of [['file', fileStore], ['postgres', pgStore]]) {
+  test(`${label}: conversions are stored, matched to game players by email, newest first`, async () => {
+    const s = await make();
+    await s.upsertSignup({ name: 'Ada', email: 'ada@x.io', marketing: true });
+    await s.addConversion({ type: 'quote', email: 'ADA@x.io', name: 'Ada', value: 0, source: 'webhook', note: '' });
+    await s.addConversion({ type: 'booking', email: 'stranger@x.io', name: 'Zed', value: 1200, source: 'manual', note: 'phone' });
+    const rows = await s.listConversions(10);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].type, 'booking');
+    assert.equal(rows[1].player, true, 'quote matched to a game player');
+    assert.equal(rows[0].player, false);
+  });
+}

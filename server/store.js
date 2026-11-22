@@ -12,7 +12,7 @@ export class FileStore {
     this.dir = dir;
     fs.mkdirSync(dir, { recursive: true });
     this.file = path.join(dir, 'store.json');
-    this.d = { signups: {}, events: {}, scores: {}, profiles: {}, errors: [] };
+    this.d = { signups: {}, events: {}, scores: {}, profiles: {}, errors: [], conversions: [] };
     if (fs.existsSync(this.file)) {
       try { Object.assign(this.d, JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch { /* corrupt: start fresh, keep the file */ fs.copyFileSync(this.file, this.file + '.bad'); }
     } else {
@@ -63,6 +63,14 @@ export class FileStore {
     this.save();
   }
   async logError(e) { this.d.errors.unshift({ ...e, at: now() }); this.d.errors.length = Math.min(this.d.errors.length, MAX_ERRORS); this.save(); }
+  async addConversion({ type, email, name, value, source, note }) {
+    (this.d.conversions ||= []).unshift({ at: now(), type, email: (email || '').toLowerCase(), name: name || '', value: Number(value) || 0, source, note: note || '' });
+    await this.event(type);
+    this.save();
+  }
+  async listConversions(limit) {
+    return (this.d.conversions || []).slice(0, limit).map(c => ({ ...c, player: !!(c.email && this.d.signups[c.email]) }));
+  }
   async recentErrors(limit) { return this.d.errors.slice(0, limit); }
 }
 
@@ -75,6 +83,7 @@ export class PgStore {
     await this.q(`create table if not exists scores (day text, email text, name text, score integer, detail text, at text, primary key (day, email))`);
     await this.q(`create table if not exists profiles (email text primary key, games integer, wins integer, loaded integer)`);
     await this.q(`create table if not exists errors (id serial primary key, at text, where_ text, message text, stack text, ua text)`);
+    await this.q(`create table if not exists conversions (id serial primary key, at text, type text, email text, name text, value integer, source text, note text)`);
   }
   async flush() {}
   async upsertSignup({ name, email, marketing }) {
@@ -118,6 +127,16 @@ export class PgStore {
     await this.q('insert into errors (at, where_, message, stack, ua) values ($1, $2, $3, $4, $5)', [now(), where, String(message).slice(0, 500), String(stack || '').slice(0, 2000), String(ua || '').slice(0, 300)]);
   }
   async recentErrors(limit) { return (await this.q('select at, where_ as "where", message, stack, ua from errors order by id desc limit $1', [limit])).rows; }
+  async addConversion({ type, email, name, value, source, note }) {
+    await this.q('insert into conversions (at, type, email, name, value, source, note) values ($1, $2, $3, $4, $5, $6, $7)', [now(), type, (email || '').toLowerCase(), name || '', Number(value) || 0, source, note || '']);
+    await this.event(type);
+  }
+  async listConversions(limit) {
+    const { rows } = await this.q('select id, at, type, email, name, value, source, note from conversions order by id desc limit $1', [limit]);
+    const known = new Set();
+    for (const r of rows) if (r.email) { const x = await this.q('select 1 from signups where email = $1', [r.email]); if (x.rows.length) known.add(r.email); }
+    return rows.map(r => ({ ...r, player: known.has(r.email) }));
+  }
 }
 
 /** Pick the store for this deployment. */

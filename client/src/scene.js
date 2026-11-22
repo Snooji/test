@@ -54,6 +54,8 @@ export class GameScene {
     this.scene.add(this.ghost);
     this.emotes = [];
     this.pings = [];
+    this.parts = [];
+    this.partGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
     // guide arrow at your feet: to the truck when carrying, else to the nearest item
     const arrowShape = new THREE.Shape();
     arrowShape.moveTo(0, 0.9); arrowShape.lineTo(0.45, 0.25); arrowShape.lineTo(0.16, 0.25); arrowShape.lineTo(0.16, -0.4);
@@ -338,6 +340,20 @@ export class GameScene {
 
   shake() { this.shakeT = 0.4; }
 
+  /** little physics particles: shards, dust, confetti */
+  burst(x, y, z, colors, n = 18, speed = 4, life = 1.2, size = 1) {
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(this.partGeo, new THREE.MeshBasicMaterial({ color: colors[i % colors.length], transparent: true }));
+      m.position.set(x, y, z); m.scale.setScalar(size * (0.6 + Math.random() * 0.8));
+      const a = Math.random() * Math.PI * 2, up = 0.5 + Math.random();
+      m.userData = { v: new THREE.Vector3(Math.cos(a) * speed * Math.random(), up * speed, Math.sin(a) * speed * Math.random()), life, t: 0, spin: (Math.random() - 0.5) * 12 };
+      this.scene.add(m); this.parts.push(m);
+    }
+  }
+  crunchFx() { this.burst(15.4, 2.2, 0, [0xf2d16b, 0xffffff, 0xe63946], 26, 5, 1.1); }
+  dropFx(x, y, z) { this.burst(x, y, z, [0xbfb8d6, 0x8f88aa], 10, 1.6, 0.6, 0.7); }
+  confetti(x, z) { this.burst(x, 4, z, [0xff8a3d, 0x55ffcc, 0xffd166, 0xa66cff, 0x7bd84a], 80, 6, 2.6, 0.8); }
+
   /** 🆘 beacon: a pulsing ring + light pillar where someone needs a hand. */
   ping(x, z) {
     const g = new THREE.Group();
@@ -403,7 +419,11 @@ export class GameScene {
       if (!it) continue;
       const o = v.obj;
       if (it.state === 'loaded') {
-        if (o.userData.dropTo !== undefined) { o.position.y = Math.max(o.userData.dropTo, o.position.y - dt * 14); }
+        if (o.userData.dropTo !== undefined && !this.drive) {
+          const before = o.position.y;
+          o.position.y = Math.max(o.userData.dropTo, o.position.y - dt * 14);
+          if (before > o.userData.dropTo && o.position.y === o.userData.dropTo) this.dropFx(o.position.x, o.position.y + 0.1, o.position.z);
+        }
         continue;
       }
       const solo = it.state === 'carried' && !ITEM_TYPES[it.type].teamCarry;
@@ -420,6 +440,32 @@ export class GameScene {
       this.cat.rotation.y = snap.cat.face;
       this.cat.position.y = Math.abs(Math.sin(t * 8)) * 0.05;
     }
+    // arms up while carrying, swinging while walking
+    for (const v of this.players.values()) {
+      const p = v.data; if (!p) continue;
+      const carrying = !!p.carry;
+      const walking = Math.hypot(v.root.position.x - p.x, v.root.position.z - p.z) > 0.03;
+      v.root.userData.body.traverse(o => {
+        if (o.userData.arm === undefined) return;
+        const target = carrying ? -2.7 : walking ? Math.sin(t * 12 + o.userData.arm) * 0.6 : 0;
+        o.rotation.x += (target - o.rotation.x) * Math.min(1, dt * 12);
+      });
+      if (carrying && !v.wasCarrying) v.squash = 0.25; // little squash when lifting
+      v.wasCarrying = carrying;
+      if (v.squash > 0) { v.squash = Math.max(0, v.squash - dt); const k = v.squash * 0.8; v.root.userData.body.scale.set(1 + k, 1 - k, 1 + k); }
+      if (p.task && Math.random() < dt * 14) this.burst(p.x, 1, p.z, p.task.kind === 'wrap' ? [0x6f95ff, 0x2f5fd0] : [0xffd166, 0xaaaaaa], 1, 1.4, 0.5, 0.6);
+    }
+    // particles
+    this.parts = this.parts.filter(m => {
+      const u = m.userData; u.t += dt;
+      u.v.y -= 9.8 * dt; m.position.addScaledVector(u.v, dt);
+      if (m.position.y < 0.05) { m.position.y = 0.05; u.v.y *= -0.3; u.v.x *= 0.7; u.v.z *= 0.7; }
+      m.rotation.x += u.spin * dt; m.rotation.y += u.spin * dt;
+      m.material.opacity = Math.max(0, 1 - u.t / u.life);
+      if (u.t > u.life) { this.scene.remove(m); m.material.dispose(); return false; }
+      return true;
+    });
+
     // emotes
     this.emotes = this.emotes.filter(e => {
       e.t += dt; e.s.position.y += dt * 1.2; e.s.material.opacity = 1 - e.t / 1.4;
@@ -556,6 +602,13 @@ export class GameScene {
     else if (me) {
       if (me.loadMode) { this.camTarget.set(15.2, 1.5, 0); this.camOff = [-6, 11, 9]; }
       else { this.camTarget.set(me.x, 0, me.z); this.camOff = [0, 20, 12]; }
+    } else if (this.demoMode && this.players.size) {
+      // menu backdrop: drift between the AI movers; nudge left on wide screens so the action sits beside the menu
+      const list = [...this.players.values()];
+      const v = list[Math.floor(performance.now() / 9000) % list.length];
+      const wide = innerWidth > 760;
+      this.camTarget.set(v.root.position.x - (wide ? 7 : 0), 0, v.root.position.z + (wide ? 0 : 3));
+      this.camOff = [-4, 15, 14];
     } else { this.camTarget.set(-2, 0, 0); this.camOff = [0, 34, 20]; }
     const [ox, oy, oz] = this.camOff;
     const k = 4;

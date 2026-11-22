@@ -4,7 +4,7 @@ import { Input } from './input.js';
 import { PORTRAITS, CHARACTERS } from './portraits.js';
 import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL, SUITS, suitUnlocked } from '../../shared/logic.js';
 import { inRamp } from '../../shared/world.js';
-import { sfx, setMuted, isMuted } from './audio.js';
+import { sfx, setMuted, isMuted, setMusic, isMusicOn, musicMood } from './audio.js';
 import { drawMinimap } from './minimap.js';
 
 const $ = (id) => document.getElementById(id);
@@ -104,8 +104,42 @@ $('home-diff').addEventListener('click', (e) => {
 });
 $('btn-join').onclick = () => { const c = parseCode($('join-code').value); if (c) { track('join_click'); connect(c); } };
 
+// ---------- live demo game behind the menu ----------
+let demoRoom = null, demoConnecting = false;
+async function startDemo() {
+  if (demoRoom || demoConnecting || room) return;
+  demoConnecting = true;
+  try {
+    const d = await client.joinOrCreate('demo');
+    if (room) { d.leave(true).catch(() => {}); return; }
+    demoRoom = d;
+    scene.demoMode = true;
+    d.onMessage('snap', (s) => { if (!room && s.phase !== 'lobby') scene.apply(s, null); });
+    d.onMessage('evt', (e) => {
+      if (room) return;
+      if (e.kind === 'driveoff') scene.startDriveOff(e.damaged.map(x => x.id));
+      else if (e.kind === 'start') scene.resetDrive();
+      else if (e.kind === 'crunch') scene.crunchFx();
+      else if (e.kind === 'emote') scene.emote(e.id, e.e);
+    });
+    d.onMessage('chat', () => {});
+    d.onLeave(() => { if (demoRoom === d) demoRoom = null; });
+  } catch { /* the menu still works without the demo */ }
+  finally { demoConnecting = false; }
+}
+function stopDemo() {
+  scene.demoMode = false;
+  const d = demoRoom; demoRoom = null;
+  d?.leave(true).catch(() => {});
+  scene.resetDrive();
+}
+
+// booking button: same link everywhere, counted per screen
+document.addEventListener('click', (e) => { const a = e.target.closest('.book-cta'); if (a) track('book_click_' + (a.dataset.where || 'home')); });
+
 function route() {
   for (const s of ['gate', 'home', 'lobby', 'meeting', 'results']) show(s, false);
+  startDemo();
   if (!gate?.token) { show('gate'); track('gate_view'); return; }
   const r = roomFromUrl();
   if (r && !room) { connect(r); return; }
@@ -117,6 +151,7 @@ function route() {
 
 async function connect(roomId, extra = {}) {
   $('home-err').textContent = '';
+  stopDemo();
   show('home', false); show('gate', false);
   const opts = { name: gate.name, email: gate.email, token: gate.token, char: prefChar, ...extra };
   try {
@@ -180,6 +215,8 @@ function onSnap(s) {
   const me = s.players.find(p => p.id === myId);
   if (s.phase !== lastPhase) onPhase(s.phase, lastPhase);
   lastPhase = s.phase;
+  musicMood(s.phase === 'meeting' ? 'tense' : s.phase === 'playing' && s.mode !== 'load' && s.timeLeft <= 20 && !s.level?.tutorial ? 'rush' : 'calm');
+  if (s.phase === 'lobby' || s.phase === 'meeting') renderQuickChat(s);
   if (s.phase === 'lobby') renderLobby(s, me);
   if (s.phase === 'playing' || s.phase === 'meeting' || s.phase === 'countdown' || s.phase === 'driveoff') renderHud(s, me);
   if (s.phase === 'countdown') { $('countdown').innerHTML = `${s.countdown}<small>${esc(s.level?.name || '')}</small>`; }
@@ -288,6 +325,27 @@ $('lobby-diff').addEventListener('click', (e) => { const b = e.target.closest('b
 $('hud-help').onclick = () => room?.send('help');
 $('btn-help').addEventListener('pointerdown', (e) => { e.preventDefault(); room?.send('help'); });
 $('chat-toggle').onclick = () => { $('chat').classList.toggle('collapsed'); if (!$('chat').classList.contains('collapsed')) $('chat-input').focus(); };
+const buzz = (pattern) => { try { navigator.vibrate?.(pattern); } catch {} };
+const syncMusic = () => { $('hud-music').style.opacity = isMusicOn() ? '1' : '.4'; };
+$('hud-music').onclick = () => { setMusic(!isMusicOn()); syncMusic(); };
+syncMusic();
+// quick chat: one-tap phrases for phones (meetings + lobby)
+function renderQuickChat(s) {
+  const others = (s?.players || []).filter(p => p.id !== myId && !p.spectator && !p.out);
+  const phrases = s?.phase === 'meeting'
+    ? [...others.slice(0, 3).map(p => `It was ${p.name}!`), 'Not me!', 'I saw it at the truck', 'Skip, no proof']
+    : ['Ready!', 'Let\'s go! 🚚', 'Wait for me', 'GG 🎉'];
+  const key = phrases.join('|');
+  if ($('quickchat').dataset.key === key) return;
+  $('quickchat').dataset.key = key;
+  $('quickchat').innerHTML = phrases.map(t => `<button>${esc(t)}</button>`).join('');
+}
+$('quickchat').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) { room.send('chat', { text: b.textContent }); buzz(10); } });
+// installable app
+let installPrompt = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; show('btn-install'); });
+$('btn-install').onclick = async () => { if (!installPrompt) return; installPrompt.prompt(); const r = await installPrompt.userChoice.catch(() => null); if (r?.outcome === 'accepted') track('install'); installPrompt = null; show('btn-install', false); };
+if ('serviceWorker' in navigator && location.port !== '5173') addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 const syncSound = () => { $('hud-sound').textContent = isMuted() ? '🔇' : '🔊'; };
 $('hud-sound').onclick = () => { setMuted(!isMuted()); syncSound(); };
 syncSound();
@@ -296,7 +354,7 @@ $('btn-copy').onclick = async () => {
   track('share_click');
   const link = $('share-link').value;
   try {
-    if (navigator.share && isTouch) await navigator.share({ title: 'Starside Movers', text: 'Join my moving crew!', url: link });
+    if (navigator.share && isTouch) await navigator.share({ title: 'Let’s Move It', text: 'Join my moving crew in Let’s Move It!', url: link });
     else { await navigator.clipboard.writeText(link); $('btn-copy').textContent = 'Copied!'; setTimeout(() => ($('btn-copy').textContent = 'Copy invite'), 1500); }
   } catch { $('share-link').select(); }
 };
@@ -402,16 +460,23 @@ function toast(text, cls = '') {
 }
 function onEvent(e) {
   if (e.kind === 'toast') toast(e.text);
-  else if (e.kind === 'emote') { scene.emote(e.id, e.e); if (e.e.startsWith('+')) sfx('coin'); else sfx('blip'); }
+  else if (e.kind === 'emote') { scene.emote(e.id, e.e); if (e.e.startsWith('+')) sfx('coin'); else sfx('blip'); if (e.id === myId) buzz(e.e.startsWith('+') ? 25 : 12); }
   else if (e.kind === 'crunch') {
-    toast(e.text, 'crunch'); scene.shake(); sfx('crunch');
+    toast(e.text, 'crunch'); scene.shake(); sfx('crunch'); scene.crunchFx(); buzz(200);
     $('flash').classList.add('on'); setTimeout(() => $('flash').classList.remove('on'), 80);
-  } else if (e.kind === 'meeting') toast(`📣 ${e.caller} called a crew meeting!`);
+  } else if (e.kind === 'meeting') { toast(`📣 ${e.caller} called a crew meeting!`); buzz([100, 60, 100]); }
   else if (e.kind === 'verdict') {
     const v = $('verdict'); v.textContent = e.text; show(v);
     sfx(e.guilty ? 'coin' : 'buzz');
     setTimeout(() => show(v, false), 4500);
-  } else if (e.kind === 'end') sfx('fanfare');
+  } else if (e.kind === 'end') {
+    sfx('fanfare');
+    setTimeout(() => {
+      const r = snap?.results, me = snap?.players.find(p => p.id === myId);
+      const won = r && (r.winnerId === myId || (r.game === 'sabotage' && ((r.winners === 'crew' && r.saboteurId !== myId) || (r.winners === 'saboteur' && r.saboteurId === myId))));
+      if (won || /Perfect load|Training complete/.test(r?.reason || '')) { scene.confetti(me?.x ?? 11, me?.z ?? 0); buzz([30, 30, 30, 30, 80]); }
+    }, 300);
+  }
   else if (e.kind === 'role') {
     myRole = !!e.saboteur;
     const r = $('role');
@@ -441,7 +506,7 @@ function onEvent(e) {
   else if (e.kind === 'go') { $('countdown').innerHTML = 'GO!'; show('countdown'); setTimeout(() => show('countdown', false), 600); sfx('fanfare'); }
   else if (e.kind === 'help') {
     scene.ping(e.x, e.z);
-    if (e.id !== myId) { toast(e.text, 'help'); sfx('alarm'); }
+    if (e.id !== myId) { toast(e.text, 'help'); sfx('alarm'); buzz([60, 40, 60]); }
     else toast('🆘 Help request sent to the crew');
     helpPings.push({ x: e.x, z: e.z, t: performance.now() });
   }

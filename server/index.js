@@ -5,6 +5,7 @@ import express from 'express';
 import { Server, matchMaker } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { MoveRoom } from './MoveRoom.js';
+import { DemoRoom } from './DemoRoom.js';
 import { signupRoutes } from './signups.js';
 import { openStore } from './store.js';
 
@@ -40,6 +41,7 @@ if (fs.existsSync(dist)) {
 const httpServer = http.createServer(app);
 const gameServer = new Server({ transport: new WebSocketTransport({ server: httpServer }) });
 gameServer.define('move', MoveRoom).filterBy(['quick']);
+gameServer.define('demo', DemoRoom);
 
 await gameServer.listen(PORT);
 console.log(`🚚 Starside Movers listening on http://localhost:${PORT}`);

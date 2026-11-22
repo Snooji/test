@@ -6,8 +6,8 @@ background:radial-gradient(900px 500px at 75% 10%,#3a2a9b 0%,#0b0820 70%);color:
 <div style="position:absolute;inset:0;background-image:radial-gradient(#fff 1px,transparent 1.5px);background-size:46px 46px;opacity:.18"></div>
 <div style="position:absolute;left:70px;top:70px;width:640px">
   <div style="font-size:26px;letter-spacing:6px;color:#55ffcc;font-weight:800">MOVING-DAY PARTY GAME</div>
-  <div style="font-size:104px;font-weight:900;line-height:.95;margin-top:14px">STARSIDE<br><span style="color:#ff8a3d">MOVERS</span></div>
-  <div style="font-size:30px;color:#cfc8f5;margin-top:24px;line-height:1.3">Stack the truck. Don’t crush the fragile box.<br>Vote out the saboteur.</div>
+  <div style="font-size:104px;font-weight:900;line-height:.95;margin-top:14px">LET’S<br><span style="color:#ff8a3d">MOVE IT</span></div><div style="font-size:24px;color:#cfc8f5;margin-top:10px">by Starside Movers</div>
+  <div style="font-size:30px;color:#cfc8f5;margin-top:24px;line-height:1.3">Stack the truck. Don’t crush the fragile box.</div>
   <div style="display:inline-block;margin-top:22px;background:#6b4dff;padding:14px 26px;border-radius:18px;font-size:26px;font-weight:800">Play free in your browser ▶</div>
 </div>
 <div style="position:absolute;right:40px;bottom:90px;width:430px;height:300px">
