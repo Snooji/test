@@ -17,6 +17,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 export class MoveRoom extends Room {
+  static store = null; // set by server/index.js; null in unit tests
   maxClients = 6; // 4 movers + 2 spectators
 
   onAuth(client, options) {
@@ -144,7 +145,7 @@ export class MoveRoom extends Room {
     const want = CHARS.includes(options?.char) && !used.has(options.char) ? options.char : CHARS.find(c => !used.has(c)) || 'nova';
     const movers = [...this.players.values()].filter(p => !p.spectator).length;
     const p = {
-      id: client.sessionId, name: auth.name, char: want,
+      id: client.sessionId, name: auth.name, email: auth.email, char: want,
       x: 0, z: 0, face: 0, score: 0, strikes: 0, out: false,
       spectator: movers >= MAX_MOVERS || this.inRound(),
       carry: null, loadMode: false, cursor: { gx: 1, gz: 0, rot: 0 }, cursorCd: 0,
@@ -301,6 +302,7 @@ export class MoveRoom extends Room {
     }
     this.phase = 'countdown';
     this.countdown = 3;
+    MoveRoom.store?.event('round_start').catch(() => {});
     this.roundHumans = [...this.players.values()].filter(p => !p.bot && !p.spectator).length;
     this.event({ kind: 'start' });
   }
@@ -780,6 +782,25 @@ export class MoveRoom extends Room {
       game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
     this.event({ kind: 'end' });
+    this.recordResults();
+  }
+
+  /** Save stats + leaderboard entries for human players (never blocks the game). */
+  recordResults() {
+    const store = MoveRoom.store, r = this.results;
+    if (!store || !r) return;
+    store.event('round_end').catch(() => {});
+    for (const p of this.players.values()) {
+      if (p.bot || p.spectator || !p.email) continue;
+      const won = r.game === 'sabotage' ? (r.winners === 'saboteur' ? p.id === r.saboteurId : p.id !== r.saboteurId && r.winners === 'crew') : r.winnerId === p.id;
+      store.recordGame(p.email, { won, loaded: p.loaded }).catch(() => {});
+      if (this.level?.daily) store.addScore({ day: this.level.daily, email: p.email, name: p.name, score: p.score, detail: `${this.level.name} · ${this.mode === 'load' ? 'Full load' : this.mode}` }).catch(() => {});
+    }
+  }
+
+  onUncaughtException(err, method) {
+    console.error('room error in', method, err);
+    MoveRoom.store?.logError({ where: 'room:' + method, message: err.message, stack: err.stack, ua: '' }).catch(() => {});
   }
 
   snapshot() {

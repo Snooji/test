@@ -24,6 +24,17 @@ try { prefChar = localStorage.getItem('sm_char'); prefDiff = localStorage.getIte
 let reconnecting = false;
 let myRole = null; // sabotage: true = saboteur, false = crew; told privately by the server
 
+// ---- funnel + error reporting (anonymous counters; no personal data) ----
+const track = (name) => { try { navigator.sendBeacon?.(httpBase + '/api/event', new Blob([JSON.stringify({ name })], { type: 'application/json' })) || fetch(httpBase + '/api/event', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }), keepalive: true }); } catch {} };
+let errorsSent = 0;
+const reportError = (message, stack) => {
+  if (errorsSent++ >= 5) return;
+  fetch(httpBase + '/api/error', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: String(message).slice(0, 500), stack: String(stack || '').slice(0, 2000) }), keepalive: true }).catch(() => {});
+};
+addEventListener('error', (e) => reportError(e.message, e.error?.stack));
+addEventListener('unhandledrejection', (e) => reportError(e.reason?.message || e.reason, e.reason?.stack));
+track('visit');
+
 const scene = new GameScene($('app'));
 const input = new Input({ onCallout: () => room?.send('callout'), onChatKey: () => focusChat(), onHelp: () => room?.send('help') });
 
@@ -34,7 +45,8 @@ $('gate-form').addEventListener('submit', async (e) => {
   $('gate-err').textContent = '';
   const name = $('gate-name').value.trim(), email = $('gate-email').value.trim();
   try {
-    const r = await fetch(httpBase + '/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email }) });
+    const marketing = $('gate-marketing').checked;
+    const r = await fetch(httpBase + '/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email, marketing }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Signup failed');
     gate = j;
@@ -51,8 +63,8 @@ function parseCode(v) {
   v = v.trim();
   try { const u = new URL(v); return u.searchParams.get('room') || ''; } catch { return v; }
 }
-$('btn-create').onclick = () => connect(null);
-$('btn-solo').onclick = () => connect(null, { solo: true, difficulty: prefDiff });
+$('btn-create').onclick = () => { track('create_click'); connect(null); };
+$('btn-solo').onclick = () => { track('solo_click'); connect(null, { solo: true, difficulty: prefDiff }); };
 const markDiff = (el, level) => { for (const b of el.children) b.classList.toggle('on', b.dataset.level === level); };
 markDiff($('home-diff'), prefDiff);
 $('home-diff').addEventListener('click', (e) => {
@@ -61,15 +73,16 @@ $('home-diff').addEventListener('click', (e) => {
   try { localStorage.setItem('sm_diff', prefDiff); } catch {}
   sfx('blip');
 });
-$('btn-join').onclick = () => { const c = parseCode($('join-code').value); if (c) connect(c); };
+$('btn-join').onclick = () => { const c = parseCode($('join-code').value); if (c) { track('join_click'); connect(c); } };
 
 function route() {
   for (const s of ['gate', 'home', 'lobby', 'meeting', 'results']) show(s, false);
-  if (!gate?.token) { show('gate'); return; }
+  if (!gate?.token) { show('gate'); track('gate_view'); return; }
   const r = roomFromUrl();
   if (r && !room) { connect(r); return; }
   $('home-hi').textContent = `Welcome, ${gate.name}! Ready to load some trucks?`;
   show('home');
+  track('home_view');
 }
 
 async function connect(roomId, extra = {}) {
@@ -229,6 +242,7 @@ $('hud-sound').onclick = () => { setMuted(!isMuted()); syncSound(); };
 syncSound();
 $('hud-callout').onclick = () => room?.send('callout');
 $('btn-copy').onclick = async () => {
+  track('share_click');
   const link = $('share-link').value;
   try {
     if (navigator.share && isTouch) await navigator.share({ title: 'Starside Movers', text: 'Join my moving crew!', url: link });

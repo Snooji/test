@@ -1,0 +1,136 @@
+// Persistence: signups (with consent), funnel counters, daily leaderboard, player profiles, error log.
+// PgStore when DATABASE_URL is set (survives redeploys anywhere); FileStore otherwise (a JSON file in DATA_DIR).
+import fs from 'node:fs';
+import path from 'node:path';
+
+const now = () => new Date().toISOString();
+const today = () => now().slice(0, 10);
+const MAX_ERRORS = 200;
+
+export class FileStore {
+  constructor(dir) {
+    this.dir = dir;
+    fs.mkdirSync(dir, { recursive: true });
+    this.file = path.join(dir, 'store.json');
+    this.d = { signups: {}, events: {}, scores: {}, profiles: {}, errors: [] };
+    if (fs.existsSync(this.file)) {
+      try { Object.assign(this.d, JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch { /* corrupt: start fresh, keep the file */ fs.copyFileSync(this.file, this.file + '.bad'); }
+    } else {
+      // one-time import of the original append-only signup log
+      const legacy = path.join(dir, 'signups.jsonl');
+      if (fs.existsSync(legacy)) {
+        for (const line of fs.readFileSync(legacy, 'utf8').split('\n')) {
+          try { const r = JSON.parse(line); this.d.signups[r.email] = { email: r.email, name: r.name, marketing: true, confirmed: null, unsubscribed: false, created_at: this.d.signups[r.email]?.created_at || r.ts, last_seen: r.ts }; } catch { /* skip blank lines */ }
+        }
+        this.save(true);
+      }
+    }
+  }
+  async init() {}
+  save(now_ = false) {
+    clearTimeout(this.timer);
+    const write = () => { const tmp = this.file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this.d)); fs.renameSync(tmp, this.file); };
+    if (now_) write(); else this.timer = setTimeout(write, 400);
+  }
+  async flush() { this.save(true); }
+
+  async upsertSignup({ name, email, marketing }) {
+    const r = this.d.signups[email];
+    if (r) Object.assign(r, { name, last_seen: now(), marketing: r.unsubscribed ? !!marketing : (r.marketing || !!marketing), unsubscribed: r.unsubscribed && !marketing });
+    else this.d.signups[email] = { email, name, marketing: !!marketing, confirmed: null, unsubscribed: false, created_at: now(), last_seen: now() };
+    this.save();
+    return { isNew: !r };
+  }
+  async listSignups() { return Object.values(this.d.signups).sort((a, b) => a.created_at.localeCompare(b.created_at)); }
+  async confirm(email) { const r = this.d.signups[email]; if (r) { r.confirmed = true; this.save(); } return !!r; }
+  async unsubscribe(email) { const r = this.d.signups[email]; if (r) { r.unsubscribed = true; r.marketing = false; this.save(); } return !!r; }
+  async event(name, n = 1) { const k = today() + '|' + name; this.d.events[k] = (this.d.events[k] || 0) + n; this.save(); }
+  async funnel(days) {
+    const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    return Object.entries(this.d.events).map(([k, n]) => { const [day, name] = k.split('|'); return { day, name, n }; }).filter(r => r.day >= since);
+  }
+  async addScore({ day, email, name, score, detail }) {
+    const byDay = (this.d.scores[day] ||= {});
+    const cur = byDay[email];
+    if (!cur || score > cur.score) byDay[email] = { email, name, score, detail, at: now() };
+    this.save();
+  }
+  async topScores(day, limit) { return Object.values(this.d.scores[day] || {}).sort((a, b) => b.score - a.score).slice(0, limit); }
+  async getProfile(email) { return { email, games: 0, wins: 0, loaded: 0, ...(this.d.profiles[email] || {}) }; }
+  async recordGame(email, { won, loaded }) {
+    const p = (this.d.profiles[email] ||= { games: 0, wins: 0, loaded: 0 });
+    p.games++; if (won) p.wins++; p.loaded += loaded || 0;
+    this.save();
+  }
+  async logError(e) { this.d.errors.unshift({ ...e, at: now() }); this.d.errors.length = Math.min(this.d.errors.length, MAX_ERRORS); this.save(); }
+  async recentErrors(limit) { return this.d.errors.slice(0, limit); }
+}
+
+export class PgStore {
+  constructor(pool) { this.pool = pool; }
+  q(sql, args = []) { return this.pool.query(sql, args); }
+  async init() {
+    await this.q(`create table if not exists signups (email text primary key, name text, marketing boolean, confirmed boolean, unsubscribed boolean default false, created_at text, last_seen text)`);
+    await this.q(`create table if not exists events (day text, name text, n integer, primary key (day, name))`);
+    await this.q(`create table if not exists scores (day text, email text, name text, score integer, detail text, at text, primary key (day, email))`);
+    await this.q(`create table if not exists profiles (email text primary key, games integer, wins integer, loaded integer)`);
+    await this.q(`create table if not exists errors (id serial primary key, at text, where_ text, message text, stack text, ua text)`);
+  }
+  async flush() {}
+  async upsertSignup({ name, email, marketing }) {
+    const { rows } = await this.q('select marketing, unsubscribed from signups where email = $1', [email]);
+    if (rows.length) {
+      const r = rows[0];
+      const m = r.unsubscribed ? !!marketing : (r.marketing || !!marketing);
+      await this.q('update signups set name = $2, last_seen = $3, marketing = $4, unsubscribed = $5 where email = $1', [email, name, now(), m, r.unsubscribed && !marketing]);
+      return { isNew: false };
+    }
+    await this.q('insert into signups (email, name, marketing, confirmed, unsubscribed, created_at, last_seen) values ($1, $2, $3, null, false, $4, $4)', [email, name, !!marketing, now()]);
+    return { isNew: true };
+  }
+  async listSignups() { return (await this.q('select * from signups order by created_at')).rows; }
+  async confirm(email) { return (await this.q('update signups set confirmed = true where email = $1', [email])).rowCount > 0; }
+  async unsubscribe(email) { return (await this.q('update signups set unsubscribed = true, marketing = false where email = $1', [email])).rowCount > 0; }
+  async event(name, n = 1) {
+    const day = today();
+    const { rowCount } = await this.q('update events set n = n + $3 where day = $1 and name = $2', [day, name, n]);
+    if (!rowCount) await this.q('insert into events (day, name, n) values ($1, $2, $3)', [day, name, n]).catch(() => this.q('update events set n = n + $3 where day = $1 and name = $2', [day, name, n]));
+  }
+  async funnel(days) {
+    const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    return (await this.q('select day, name, n from events where day >= $1', [since])).rows;
+  }
+  async addScore({ day, email, name, score, detail }) {
+    const { rows } = await this.q('select score from scores where day = $1 and email = $2', [day, email]);
+    if (!rows.length) await this.q('insert into scores (day, email, name, score, detail, at) values ($1, $2, $3, $4, $5, $6)', [day, email, name, score, detail, now()]);
+    else if (score > rows[0].score) await this.q('update scores set score = $3, name = $4, detail = $5, at = $6 where day = $1 and email = $2', [day, email, score, name, detail, now()]);
+  }
+  async topScores(day, limit) { return (await this.q('select name, score, detail, email from scores where day = $1 order by score desc limit $2', [day, limit])).rows; }
+  async getProfile(email) {
+    const { rows } = await this.q('select games, wins, loaded from profiles where email = $1', [email]);
+    return { email, games: 0, wins: 0, loaded: 0, ...(rows[0] || {}) };
+  }
+  async recordGame(email, { won, loaded }) {
+    const { rowCount } = await this.q('update profiles set games = games + 1, wins = wins + $2, loaded = loaded + $3 where email = $1', [email, won ? 1 : 0, loaded || 0]);
+    if (!rowCount) await this.q('insert into profiles (email, games, wins, loaded) values ($1, 1, $2, $3)', [email, won ? 1 : 0, loaded || 0]);
+  }
+  async logError({ where, message, stack, ua }) {
+    await this.q('insert into errors (at, where_, message, stack, ua) values ($1, $2, $3, $4, $5)', [now(), where, String(message).slice(0, 500), String(stack || '').slice(0, 2000), String(ua || '').slice(0, 300)]);
+  }
+  async recentErrors(limit) { return (await this.q('select at, where_ as "where", message, stack, ua from errors order by id desc limit $1', [limit])).rows; }
+}
+
+/** Pick the store for this deployment. */
+export async function openStore() {
+  if (process.env.DATABASE_URL) {
+    const { default: pg } = await import('pg');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false } });
+    const s = new PgStore(pool);
+    await s.init();
+    console.log('📦 store: Postgres');
+    return s;
+  }
+  const dir = process.env.DATA_DIR || path.resolve('data');
+  console.log('📦 store: file', dir);
+  return new FileStore(dir);
+}
