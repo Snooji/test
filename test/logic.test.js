@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGrid, dropHeight, placeItem, tallyVotes, ITEM_TYPES, footprint } from '../shared/logic.js';
+import { createGrid, dropHeight, placeItem, tallyVotes, ITEM_TYPES, footprint, orientations } from '../shared/logic.js';
 
 const mk = (id, type, extra = {}) => ({ id, type, wrapped: false, assembled: false, ...extra });
 
@@ -29,17 +29,66 @@ test('out of bounds footprint returns -1', () => {
   assert.equal(dropHeight(g, -1, 0, 1, 1), -1);
 });
 
-test('2x1 piece rests on max of its footprint', () => {
+test('multi-cell piece rests on max of its footprint', () => {
   const g = createGrid();
   placeItem(g, mk('a', 'standard'), 1, 0, 0);
   placeItem(g, mk('b', 'standard'), 1, 0, 0);
-  const r = placeItem(g, mk('c', 'couch', { wrapped: true }), 0, 0, 0); // covers x=0,1
+  const r = placeItem(g, mk('c', 'couch', { wrapped: true }), 0, 0, 0); // lying couch covers x=0,1,2
   assert.equal(r.y, 2);
 });
 
-test('rotation swaps footprint', () => {
-  assert.deepEqual(footprint('couch', 0), { w: 2, d: 1 });
-  assert.deepEqual(footprint('couch', 1), { w: 1, d: 2 });
+test('couch is 3 long and has 3 orientations including standing up 3 high', () => {
+  const o = orientations('couch');
+  assert.equal(o.length, 3);
+  assert.deepEqual(footprint('couch', 0), { w: 3, d: 1, h: 1 });
+  assert.ok(o.some(f => f.w === 1 && f.d === 1 && f.h === 3), 'standing orientation exists');
+});
+
+test('bed is 2x3x1 and can be rotated/flipped into all 6 orientations', () => {
+  assert.deepEqual(footprint('bed', 0), { w: 2, d: 3, h: 1 });
+  const o = orientations('bed');
+  assert.equal(o.length, 6);
+  const keys = new Set(o.map(f => `${f.w}${f.d}${f.h}`));
+  for (const k of ['231', '321', '213', '312', '123', '132']) assert.ok(keys.has(k), k);
+});
+
+test('boxes have a single orientation; rot wraps around', () => {
+  assert.equal(orientations('standard').length, 1);
+  assert.deepEqual(footprint('couch', 3), footprint('couch', 0));
+});
+
+test('standing couch fills 3 vertical cells', () => {
+  const g = createGrid();
+  const rot = orientations('couch').findIndex(f => f.h === 3);
+  const r = placeItem(g, mk('c', 'couch', { wrapped: true }), 2, 2, rot);
+  assert.ok(r.ok);
+  assert.equal(r.y, 0);
+  for (let y = 0; y < 3; y++) assert.equal(g.cells[2][2][y], 'c');
+  assert.equal(g.cells[2][2][3], null);
+  assert.equal(dropHeight(g, 2, 2, 1, 1, 1), 3);
+});
+
+test('standing couch will not fit on a stack of 2', () => {
+  const g = createGrid();
+  placeItem(g, mk('a', 'standard'), 0, 0, 0);
+  placeItem(g, mk('b', 'standard'), 0, 0, 0);
+  const rot = orientations('couch').findIndex(f => f.h === 3);
+  assert.equal(placeItem(g, mk('c', 'couch', { wrapped: true }), 0, 0, rot).ok, false);
+});
+
+test('a flat bed fits in the 4x4 truck; a lying 3-long couch does not fit rotated off the edge', () => {
+  const g = createGrid();
+  assert.ok(placeItem(g, mk('bed', 'bed', { wrapped: true }), 0, 0, 0).ok);
+  assert.equal(placeItem(createGrid(), mk('c', 'couch', { wrapped: true }), 2, 0, 0).ok, false);
+});
+
+test('standing couch on a fragile box crushes it', () => {
+  const g = createGrid();
+  placeItem(g, mk('f', 'fragile'), 1, 1, 0);
+  const rot = orientations('couch').findIndex(f => f.h === 3);
+  const r = placeItem(g, mk('c', 'couch', { wrapped: true }), 1, 1, rot);
+  assert.deepEqual(r.broken, ['f']);
+  assert.equal(r.y, 0);
 });
 
 test('heavy on fragile breaks the fragile box', () => {
@@ -94,7 +143,8 @@ test('point values match spec', () => {
   assert.equal(ITEM_TYPES.heavy.pts, 20);
   assert.equal(ITEM_TYPES.fragile.pts, 15);
   assert.equal(ITEM_TYPES.lamp.pts, 25);
-  assert.equal(ITEM_TYPES.couch.pts, 60);
+  assert.equal(ITEM_TYPES.couch.pts, 70);
+  assert.equal(ITEM_TYPES.bed.pts, 90);
   assert.equal(ITEM_TYPES.desk.pts, 50);
   assert.equal(ITEM_TYPES.table.pts, 40);
 });

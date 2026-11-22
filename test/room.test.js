@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MoveRoom } from '../server/MoveRoom.js';
 
-function makeRoom() {
+function makeRoom(opts = { level: 'classic' }) {
   const room = new MoveRoom();
   const handlers = {};
   const events = [];
@@ -10,13 +10,16 @@ function makeRoom() {
   room.setSimulationInterval = () => {};
   room.broadcast = (type, msg) => { if (type === 'evt') events.push(msg); };
   room.clients = [];
-  room.onCreate();
+  room.onCreate(opts);
   const join = (id, name) => {
     room.clients.push({ sessionId: id, send: (t, m) => events.push({ ...m, to: id }) });
     room.onJoin({ sessionId: id }, {}, { name, email: name + '@x.io' });
     return room.players.get(id);
   };
-  const send = (id, type, msg) => handlers[type]({ sessionId: id }, msg);
+  const send = (id, type, msg) => {
+    handlers[type]({ sessionId: id }, msg);
+    if (type === 'start') for (let i = 0; i < 80 && room.phase === 'countdown'; i++) room.tick(0.05); // skip 3-2-1
+  };
   return { room, join, send, events };
 }
 
@@ -84,7 +87,7 @@ test('unwrapped lamp shatters; unwrapped couch is scuffed for half', () => {
   assert.equal(lamp.state, 'broken');
   assert.equal(a.score, 0);
   load(room, a, firstOf(room, 'couch'), 0, 0);
-  assert.equal(a.score, 30);
+  assert.equal(a.score, 35);
 });
 
 test('full column refuses drop and keeps item carried', () => {
@@ -140,4 +143,106 @@ test('releasing a team carry next to a wall never leaves a carrier stuck inside 
   assert.ok(hitsWall(b.x, b.z, 0.45), 'precondition: B overlaps the wall');
   room.releaseCarry(a);
   for (const p of [a, b]) assert.equal(hitsWall(p.x, p.z, 0.45), false, `${p.name} stuck in wall at ${p.x},${p.z}`);
+});
+
+test('round starts with a 3-2-1 countdown where nobody can move', () => {
+  const { room, join } = makeRoom();
+  const a = join('A', 'Ada');
+  room.startRound();
+  assert.equal(room.phase, 'countdown');
+  a.in.mx = 1; const x0 = a.x;
+  room.tick(0.5);
+  assert.equal(a.x, x0);
+  for (let i = 0; i < 60; i++) room.tick(0.05);
+  assert.equal(room.phase, 'playing');
+});
+
+test('movers spawn spread out, not stacked', () => {
+  const { room, join } = makeRoom();
+  const ps = ['A', 'B', 'C', 'D'].map(id => join(id, id));
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++)
+    assert.ok(Math.hypot(ps[i].x - ps[j].x, ps[i].z - ps[j].z) > 1.5);
+});
+
+test('solo mode fills the crew with 3 AI movers at the chosen difficulty', () => {
+  const { room, join } = makeRoom({ level: 'classic', solo: true, difficulty: 'hard' });
+  join('A', 'Ada');
+  assert.equal(room.bots.size, 3);
+  assert.equal(room.movers().length, 4);
+  assert.ok([...room.bots.values()].every(b => b.difficulty === 'hard'));
+  assert.equal(room.hostId, 'A');
+});
+
+test('host can change bot difficulty and add/remove bots in the lobby', () => {
+  const { room, join, send } = makeRoom({ level: 'classic', solo: true });
+  join('A', 'Ada');
+  send('A', 'difficulty', { level: 'easy' });
+  assert.ok([...room.bots.values()].every(b => b.difficulty === 'easy'));
+  send('A', 'removeBot');
+  assert.equal(room.bots.size, 2);
+  send('A', 'addBot');
+  assert.equal(room.bots.size, 3);
+});
+
+test('a friend joining a full solo lobby takes a bot seat', () => {
+  const { room, join } = makeRoom({ level: 'classic', solo: true });
+  join('A', 'Ada');
+  const b = join('B', 'Bo');
+  assert.equal(b.spectator, false);
+  assert.equal(room.bots.size, 2);
+});
+
+test('host can re-roll the house in the lobby; play-again builds a fresh house', () => {
+  const { room, join, send } = makeRoom({});
+  join('A', 'Ada');
+  const s0 = room.level.seed;
+  send('A', 'reroll');
+  assert.notEqual(room.level.seed, s0);
+  const s1 = room.level.seed;
+  send('A', 'start');
+  assert.equal(room.level.seed, s1, 'the lobby house is the one you play');
+  room.endRound('test');
+  send('A', 'start');
+  assert.notEqual(room.level.seed, s1);
+});
+
+function simulate(room, seconds) {
+  for (let t = 0; t < seconds && room.phase !== 'results'; t += 0.05) room.tick(0.05);
+}
+
+test('4 hard AI movers load the classic house without breaking anything', () => {
+  const { room } = makeRoom({ level: 'classic' });
+  for (let i = 0; i < 4; i++) room.addBot();
+  room.difficulty = 'hard'; for (const b of room.bots.values()) b.setDifficulty('hard');
+  room.startRound();
+  simulate(room, 180);
+  const loaded = [...room.items.values()].filter(i => i.state === 'loaded').length;
+  assert.ok(loaded >= 12, `hard bots loaded only ${loaded}`);
+  assert.equal(room.breaks.length, 0, 'hard bots never crush');
+});
+
+test('AI movers can find and load items in randomly generated houses', () => {
+  for (const seed of [11, 222, 3333, 44444]) {
+    const { room } = makeRoom({ seed });
+    for (let i = 0; i < 4; i++) room.addBot();
+    room.startRound();
+    simulate(room, 120);
+    const loaded = [...room.items.values()].filter(i => i.state === 'loaded').length;
+    assert.ok(loaded >= 6, `seed ${seed}: only ${loaded} loaded`);
+  }
+});
+
+test('tapping to join a two-mover lift does not immediately drop it', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  couch.wrapped = true;
+  a.x = couch.x - 1; a.z = couch.z; b.x = couch.x + 1; b.z = couch.z;
+  a.pending.tapN = 1; room.tick(0.05);
+  assert.deepEqual(couch.carriers, ['A']);
+  b.pending.tapN = 1; room.tick(0.05);
+  assert.deepEqual(couch.carriers, ['A', 'B'], 'B joined and the lift held');
+  room.tick(0.05);
+  assert.equal(couch.state, 'carried');
 });

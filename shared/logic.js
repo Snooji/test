@@ -7,8 +7,9 @@ export const ITEM_TYPES = {
   heavy:    { label: 'Heavy Box',    w: 1, d: 1, pts: 20, heavy: true,  fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0x7a5534 },
   fragile:  { label: 'Fragile Box',  w: 1, d: 1, pts: 15, heavy: false, fragile: true,  furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0xf2d16b },
   lamp:     { label: 'Space Lamp',   w: 1, d: 1, pts: 25, heavy: false, fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0xff9ad5 },
-  couch:    { label: 'Couch',        w: 2, d: 1, pts: 60, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: true,  color: 0x5b7cfa },
+  couch:    { label: 'Couch',        w: 3, d: 1, h: 1, pts: 70, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: true,  color: 0x5b7cfa },
   desk:     { label: 'Desk',         w: 2, d: 1, pts: 50, heavy: true,  fragile: false, furniture: true,  needsWrap: false, needsDisassemble: true,  teamCarry: true,  color: 0x9c6b3c },
+  bed:      { label: 'Bed',          w: 2, d: 3, h: 1, pts: 90, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: true,  color: 0xa78bfa },
   table:    { label: 'Table',        w: 2, d: 1, pts: 40, heavy: true,  fragile: false, furniture: true,  needsWrap: false, needsDisassemble: true,  teamCarry: true,  color: 0xb07d4f },
 };
 
@@ -22,11 +23,26 @@ export const RULES = {
   MODES: { '3min': 180, '5min': 300, 'load': 900 },
 };
 
-/** Footprint of an item type at rotation 0/1. */
-export function footprint(type, rot = 0) {
+const orientCache = new Map();
+/** Every distinct way to set an item in the truck: all axis permutations of its w×d×h (rotate + flip/stand up). */
+export function orientations(type) {
+  if (orientCache.has(type)) return orientCache.get(type);
   const t = ITEM_TYPES[type];
-  return rot % 2 ? { w: t.d, d: t.w } : { w: t.w, d: t.d };
+  const [a, b, c] = [t.w, t.d, t.h || 1];
+  const perms = [[a, b, c], [b, a, c], [a, c, b], [c, a, b], [b, c, a], [c, b, a]];
+  const seen = new Set(), out = [];
+  for (const [w, d, h] of perms) { const k = `${w}${d}${h}`; if (!seen.has(k)) { seen.add(k); out.push({ w, d, h }); } }
+  orientCache.set(type, out);
+  return out;
 }
+
+/** Size of an item at orientation index `rot` (wraps around). */
+export function footprint(type, rot = 0) {
+  const o = orientations(type);
+  return { ...o[((rot % o.length) + o.length) % o.length] };
+}
+
+export const ORIENT_LABEL = (f) => f.h >= 3 ? 'standing up' : f.h === 2 ? 'on its side' : 'lying flat';
 
 export function createGrid() {
   const cells = [];
@@ -37,23 +53,32 @@ export function createGrid() {
   return { cells, items: new Map() };
 }
 
+/** Deep copy, so AI can try placements without touching the real truck. */
+export function cloneGrid(grid) {
+  return {
+    cells: grid.cells.map(col => col.map(stack => stack.slice())),
+    items: new Map([...grid.items].map(([k, v]) => [k, { ...v }])),
+  };
+}
+
 function colTop(grid, x, z) {
   const col = grid.cells[x][z];
   for (let y = GRID.H - 1; y >= 0; y--) if (col[y] !== null) return y + 1;
   return 0;
 }
 
-/** Resting y for a w×d footprint anchored at (x,z); -1 if out of bounds or too tall. */
-export function dropHeight(grid, x, z, w, d) {
+/** Resting y for a w×d×h block anchored at (x,z); -1 if out of bounds or it would poke out the top. */
+export function dropHeight(grid, x, z, w, d, h = 1) {
   if (x < 0 || z < 0 || x + w > GRID.W || z + d > GRID.D) return -1;
   let y = 0;
   for (let i = x; i < x + w; i++) for (let k = z; k < z + d; k++) y = Math.max(y, colTop(grid, i, k));
-  return y >= GRID.H ? -1 : y;
+  return y + h > GRID.H ? -1 : y;
 }
 
 function fill(grid, rec, val) {
   for (let i = rec.x; i < rec.x + rec.w; i++)
-    for (let k = rec.z; k < rec.z + rec.d; k++) grid.cells[i][k][rec.y] = val;
+    for (let k = rec.z; k < rec.z + rec.d; k++)
+      for (let y = rec.y; y < rec.y + (rec.h || 1); y++) grid.cells[i][k][y] = val;
 }
 
 function removeItem(grid, id) {
@@ -69,8 +94,8 @@ function removeItem(grid, id) {
  * returns {ok, y, broken: string[], reason?}
  */
 export function placeItem(grid, item, x, z, rot = 0) {
-  const { w, d } = footprint(item.type, rot);
-  let y = dropHeight(grid, x, z, w, d);
+  const { w, d, h } = footprint(item.type, rot);
+  let y = dropHeight(grid, x, z, w, d, h);
   if (y < 0) return { ok: false, y: -1, broken: [], reason: x < 0 || z < 0 || x + w > GRID.W || z + d > GRID.D ? 'out' : 'full' };
   const t = ITEM_TYPES[item.type];
 
@@ -88,10 +113,10 @@ export function placeItem(grid, item, x, z, rot = 0) {
       }
       if (!crushed.size) break;
       for (const id of crushed) { removeItem(grid, id); broken.push(id); }
-      y = dropHeight(grid, x, z, w, d);
+      y = dropHeight(grid, x, z, w, d, h);
     }
   }
-  const rec = { id: item.id, type: item.type, x, y, z, w, d, rot, wrapped: !!item.wrapped, loaderIds: item.loaderIds || [] };
+  const rec = { id: item.id, type: item.type, x, y, z, w, d, h, rot, wrapped: !!item.wrapped, loaderIds: item.loaderIds || [] };
   grid.items.set(item.id, rec);
   fill(grid, rec, item.id);
   return { ok: true, y, broken };

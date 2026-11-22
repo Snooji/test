@@ -1,6 +1,9 @@
 import { Room, ServerError } from 'colyseus';
-import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint } from '../shared/logic.js';
-import { ITEM_SPAWNS, PLAYER_SPAWNS, CAT_WAYPOINTS, hitsWall, inRamp, roomAt } from '../shared/world.js';
+import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL } from '../shared/logic.js';
+import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
+import { PLAYER_SPAWNS, inRamp } from '../shared/world.js';
+import { generateLevel, classicLevel, newSeed } from '../shared/level.js';
+import { createNav } from './nav.js';
 import { verifyToken, cleanName, cleanEmail } from './signups.js';
 
 const CHARS = ['nova', 'cosmo', 'glorp', 'zibble'];
@@ -22,9 +25,17 @@ export class MoveRoom extends Room {
     return { email, name: cleanName(options?.name) || 'Mover' };
   }
 
-  onCreate() {
+  onCreate(options = {}) {
     this.phase = 'lobby';
     this.mode = '3min';
+    this.difficulty = DIFFICULTY[options.difficulty] ? options.difficulty : 'normal';
+    this.bots = new Map();
+    this.botSeq = 0;
+    this.soloPending = !!options.solo;
+    this.solo = !!options.solo;
+    this.countdown = 0;
+    this.classic = options.level === 'classic';
+    this.seedOverride = Number.isInteger(options.seed) ? options.seed : null;
     this.players = new Map();
     this.items = new Map();
     this.breaks = [];
@@ -33,8 +44,8 @@ export class MoveRoom extends Room {
     this.meeting = null;
     this.results = null;
     this.timeLeft = 0;
-    this.cat = { x: -5, z: -6, wp: 0 };
     this.seq = 0;
+    this.newLevel();
     this.resetWorld();
 
     this.onMessage('input', (c, m) => {
@@ -45,6 +56,7 @@ export class MoveRoom extends Room {
       p.in.mx = len > 1 ? mx / len : mx;
       p.in.mz = len > 1 ? mz / len : mz;
       p.in.hold = !!m.hold;
+      if (p.resync) { p.resync = false; for (const k of ['tapN', 'dashN', 'rotN']) p.in[k] = Number(m[k]) | 0; return; }
       for (const k of ['tapN', 'dashN', 'rotN']) {
         const v = Number(m[k]) | 0;
         if (v > p.in[k]) { p.pending[k] += Math.min(3, v - p.in[k]); p.in[k] = v; }
@@ -59,11 +71,15 @@ export class MoveRoom extends Room {
       if (c.sessionId === this.hostId && RULES.MODES[m?.mode] && this.phase !== 'playing') this.mode = m.mode;
     });
     this.onMessage('start', (c) => {
-      if (c.sessionId !== this.hostId || this.phase === 'playing' || this.phase === 'meeting') return;
+      if (c.sessionId !== this.hostId || this.inRound()) return;
+      if (this.phase === 'results') this.newLevel(); // play again → fresh house
       this.startRound();
     });
     this.onMessage('lobby', (c) => {
-      if (c.sessionId === this.hostId && this.phase === 'results') { this.phase = 'lobby'; this.resetWorld(); }
+      if (c.sessionId === this.hostId && this.phase === 'results') { this.phase = 'lobby'; this.newLevel(); this.resetWorld(); }
+    });
+    this.onMessage('reroll', (c) => {
+      if (c.sessionId === this.hostId && this.phase === 'lobby' && !this.classic) { this.newLevel(); this.resetWorld(); }
     });
     if (process.env.DEBUG_HOOKS === '1') {
       this.onMessage('debug_break', (c) => {
@@ -72,34 +88,34 @@ export class MoveRoom extends Room {
       });
     }
     this.onMessage('callout', (c) => this.callMeeting(c.sessionId));
-    this.onMessage('vote', (c, m) => {
-      const p = this.players.get(c.sessionId);
-      if (!this.meeting || !p || !this.isActive(p) || this.meeting.votes[p.id]) return;
-      const t = m?.target;
-      if (t !== 'skip' && !this.players.has(t)) return;
-      this.meeting.votes[p.id] = t;
+    this.onMessage('vote', (c, m) => this.castVote(this.players.get(c.sessionId), m?.target));
+    this.onMessage('chat', (c, m) => this.say(this.players.get(c.sessionId), m?.text));
+    const hostInLobby = (c) => c.sessionId === this.hostId && (this.phase === 'lobby' || this.phase === 'results');
+    this.onMessage('difficulty', (c, m) => {
+      if (!hostInLobby(c) || !DIFFICULTY[m?.level]) return;
+      this.difficulty = m.level;
+      for (const b of this.bots.values()) b.setDifficulty(m.level);
     });
-    this.onMessage('chat', (c, m) => {
-      const p = this.players.get(c.sessionId);
-      const text = String(m?.text || '').replace(/[<>]/g, '').trim().slice(0, 120);
-      if (!p || !text) return;
-      const now = Date.now();
-      if (now - (p.lastChat || 0) < 600) return;
-      p.lastChat = now;
-      this.broadcast('chat', { from: p.name, char: p.char, text, meeting: !!this.meeting });
+    this.onMessage('addBot', (c) => { if (hostInLobby(c)) this.addBot(); });
+    this.onMessage('removeBot', (c) => {
+      if (!hostInLobby(c)) return;
+      const last = [...this.bots.keys()].pop();
+      if (last) this.removeBot(last);
     });
 
     this.setSimulationInterval((dt) => this.tick(Math.min(dt, 100) / 1000), TICK);
   }
 
   onJoin(client, options, auth) {
+    // a friend joining a full lobby takes a bot's seat
+    if (this.phase === 'lobby' && this.movers().length >= MAX_MOVERS && this.bots.size) this.removeBot([...this.bots.keys()].pop());
     const used = new Set([...this.players.values()].map(p => p.char));
     const want = CHARS.includes(options?.char) && !used.has(options.char) ? options.char : CHARS.find(c => !used.has(c)) || 'nova';
     const movers = [...this.players.values()].filter(p => !p.spectator).length;
     const p = {
       id: client.sessionId, name: auth.name, char: want,
       x: 0, z: 0, face: 0, score: 0, strikes: 0, out: false,
-      spectator: movers >= MAX_MOVERS || this.phase === 'playing' || this.phase === 'meeting',
+      spectator: movers >= MAX_MOVERS || this.inRound(),
       carry: null, loadMode: false, cursor: { gx: 1, gz: 0, rot: 0 }, cursorCd: 0,
       dashT: 0, dashCd: 0, loaded: 0, task: null,
       in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 },
@@ -109,24 +125,78 @@ export class MoveRoom extends Room {
     this.players.set(p.id, p);
     if (!this.hostId) this.hostId = p.id;
     this.event({ kind: 'toast', text: `${p.name} joined the crew${p.spectator ? ' (spectating this round)' : ''}` });
+    if (this.soloPending) { this.soloPending = false; for (let i = 0; i < 3; i++) this.addBot(); }
   }
 
-  onLeave(client) {
+  newPlayer(id, name, char, extra = {}) {
+    return {
+      id, name, char, x: 0, z: 0, face: 0, score: 0, strikes: 0, out: false, spectator: false,
+      carry: null, loadMode: false, cursor: { gx: 1, gz: 0, rot: 0 }, cursorCd: 0,
+      dashT: 0, dashCd: 0, loaded: 0, breaks: 0, task: null,
+      in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 },
+      pending: { tapN: 0, dashN: 0, rotN: 0 }, ...extra,
+    };
+  }
+
+  movers() { return [...this.players.values()].filter(p => !p.spectator); }
+  inRound() { return this.phase === 'playing' || this.phase === 'meeting' || this.phase === 'countdown'; }
+
+  addBot() {
+    if (this.movers().length >= MAX_MOVERS || this.inRound()) return null;
+    const used = new Set([...this.players.values()].map(p => p.char));
+    const usedNames = new Set([...this.players.values()].map(p => p.name));
+    const char = CHARS.find(c => !used.has(c)) || 'nova';
+    const name = BOT_NAMES.find(n => !usedNames.has(n)) || 'Bot';
+    const id = `bot-${++this.botSeq}`;
+    const p = this.newPlayer(id, name, char, { bot: true });
+    this.placeAtSpawn(p, this.players.size);
+    this.players.set(id, p);
+    this.bots.set(id, new Bot(this, p, this.difficulty));
+    return p;
+  }
+
+  removeBot(id) {
+    const p = this.players.get(id);
+    if (!p?.bot) return;
+    this.releaseCarry(p);
+    this.players.delete(id);
+    this.bots.delete(id);
+  }
+
+  async onLeave(client, consented) {
     const p = this.players.get(client.sessionId);
     if (!p) return;
+    if (!consented && this.inRound() && typeof this.allowReconnection === 'function') {
+      // phones drop connections when switching apps: hold their mover for 30 s
+      p.in.mx = 0; p.in.mz = 0; p.in.hold = false; p.away = true;
+      this.releaseCarry(p); // never leave a crewmate holding the other end
+      try {
+        await this.allowReconnection(client, 30);
+        p.away = false; p.resync = true;
+        this.event({ kind: 'toast', text: `${p.name} reconnected` });
+        return;
+      } catch { /* timed out */ }
+    }
     this.releaseCarry(p);
     this.players.delete(p.id);
-    if (this.hostId === p.id) this.hostId = this.players.keys().next().value || null;
+    if (this.hostId === p.id) this.hostId = [...this.players.values()].find(o => !o.bot)?.id || null;
     this.event({ kind: 'toast', text: `${p.name} left the crew` });
   }
 
   // ---------- world ----------
+  newLevel() {
+    this.level = this.classic ? classicLevel() : generateLevel(this.seedOverride ?? newSeed());
+    this.seedOverride = null;
+    this.nav = createNav(this.level);
+    this.cat = { x: this.level.cat[0][0], z: this.level.cat[0][1], wp: 0 };
+  }
+
   resetWorld() {
     this.items.clear();
     this.grid = createGrid();
     this.breaks = [];
     this.meeting = null;
-    ITEM_SPAWNS.forEach(([type, x, z], i) => {
+    this.level.items.forEach(([type, x, z], i) => {
       const t = ITEM_TYPES[type];
       this.items.set('i' + i, {
         id: 'i' + i, type, x, z, state: 'floor', wrapped: false,
@@ -146,13 +216,15 @@ export class MoveRoom extends Room {
     this.resetWorld();
     let i = 0;
     for (const p of this.players.values()) {
-      Object.assign(p, { score: 0, strikes: 0, out: false, carry: null, loadMode: false, loaded: 0, task: null, dashCd: 0, dashT: 0 });
+      Object.assign(p, { score: 0, strikes: 0, out: false, carry: null, loadMode: false, loaded: 0, breaks: 0, task: null, dashCd: 0, dashT: 0 });
       p.spectator = i >= MAX_MOVERS;
       this.placeAtSpawn(p, i++);
     }
     this.timeLeft = RULES.MODES[this.mode];
     this.results = null;
-    this.phase = 'playing';
+    for (const b of this.bots.values()) b.reset();
+    this.phase = 'countdown';
+    this.countdown = 3;
     this.event({ kind: 'start' });
   }
 
@@ -164,9 +236,14 @@ export class MoveRoom extends Room {
   // ---------- simulation ----------
   tick(dt) {
     this.moveCat(dt);
-    if (this.phase === 'playing') {
+    if (this.phase === 'countdown') {
+      this.countdown -= dt;
+      if (this.countdown <= 0) { this.phase = 'playing'; this.event({ kind: 'go' }); }
+    } else if (this.phase === 'playing') {
       this.timeLeft -= dt;
+      for (const b of this.bots.values()) b.think(dt);
       for (const p of this.players.values()) this.updatePlayer(p, dt);
+      this.separate();
       this.updateTeamCarries(dt);
       this.updateTasks(dt);
       this.checkEnd();
@@ -174,18 +251,34 @@ export class MoveRoom extends Room {
       this.updateMeeting(dt);
     } else if (this.phase === 'lobby') {
       for (const p of this.players.values()) this.freeMove(p, dt, 1);
+      this.separate();
     }
     for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; }
     this.broadcast('snap', this.snapshot());
   }
 
+  /** Soft push so movers never stand inside each other (names stay readable). */
+  separate() {
+    const ps = [...this.players.values()].filter(p => !p.out && !p.spectator && !p.loadMode && !(p.carry && this.items.get(p.carry)?.carriers.length > 1));
+    const MIN = 0.85;
+    for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+      const a = ps[i], b = ps[j];
+      let dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+      if (d >= MIN) continue;
+      if (d < 1e-3) { dx = 1; dz = 0; d = 1; }
+      const push = (MIN - d) / 2, ux = dx / d * push, uz = dz / d * push;
+      if (!this.level.hitsWall(a.x - ux, a.z - uz, R)) { a.x -= ux; a.z -= uz; }
+      if (!this.level.hitsWall(b.x + ux, b.z + uz, R)) { b.x += ux; b.z += uz; }
+    }
+  }
+
   moveCat(dt) {
-    const [tx, tz] = CAT_WAYPOINTS[this.cat.wp];
+    const [tx, tz] = this.level.cat[this.cat.wp];
     const dx = tx - this.cat.x, dz = tz - this.cat.z, d = Math.hypot(dx, dz);
-    if (d < 0.3) { this.cat.wp = Math.floor(Math.random() * CAT_WAYPOINTS.length); return; }
+    if (d < 0.3) { this.cat.wp = Math.floor(Math.random() * this.level.cat.length); return; }
     const sp = 1.4 * dt;
     const nx = this.cat.x + dx / d * sp, nz = this.cat.z + dz / d * sp;
-    if (hitsWall(nx, nz, 0.25)) { this.cat.wp = (this.cat.wp + 1) % CAT_WAYPOINTS.length; return; }
+    if (this.level.hitsWall(nx, nz, 0.25)) { this.cat.wp = (this.cat.wp + 1) % this.level.cat.length; return; }
     this.cat.x = nx; this.cat.z = nz; this.cat.face = Math.atan2(dx, dz);
   }
 
@@ -194,8 +287,8 @@ export class MoveRoom extends Room {
     if (Math.abs(mx) + Math.abs(mz) < 0.05) return;
     const sp = SPEED * mult * dt;
     const nx = p.x + mx * sp, nz = p.z + mz * sp;
-    if (!hitsWall(nx, p.z, R)) p.x = nx;
-    if (!hitsWall(p.x, nz, R)) p.z = nz;
+    if (!this.level.hitsWall(nx, p.z, R)) p.x = nx;
+    if (!this.level.hitsWall(p.x, nz, R)) p.z = nz;
     p.face = Math.atan2(mx, mz);
   }
 
@@ -232,7 +325,7 @@ export class MoveRoom extends Room {
       return;
     }
 
-    if (p.pending.tapN) this.onTap(p, item);
+    if (p.pending.tapN) { p.pending.tapN = 0; this.onTap(p, item); } // consume: one tap = one action
   }
 
   onTap(p, item) {
@@ -265,7 +358,8 @@ export class MoveRoom extends Room {
     let best = null, bd = REACH;
     for (const it of this.items.values()) {
       if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1)) continue;
-      const d = dist(p, it) - (ITEM_TYPES[it.type].w > 1 ? 0.6 : 0);
+      const t = ITEM_TYPES[it.type], len = Math.max(t.w, t.d);
+      const d = dist(p, it) - (len > 1 ? len * 0.35 : 0);
       if (d < bd) { bd = d; best = it; }
     }
     return best;
@@ -280,12 +374,12 @@ export class MoveRoom extends Room {
       if (!o) continue;
       o.carry = null; o.loadMode = false;
       // team-carry positions ignore walls; never leave a mover embedded in one
-      if (hitsWall(o.x, o.z, R)) { o.x = item.x; o.z = item.z; }
+      if (this.level.hitsWall(o.x, o.z, R)) { o.x = item.x; o.z = item.z; }
     }
     item.carriers = [];
     item.state = 'floor';
     // never drop inside a wall or on the ramp
-    if (hitsWall(item.x, item.z, 0.3) || inRamp(item.x, item.z)) { item.x = p.x - 1; item.z = p.z; }
+    if (this.level.hitsWall(item.x, item.z, 0.3) || inRamp(item.x, item.z)) { item.x = p.x - 1; item.z = p.z; }
   }
 
   updateTeamCarries(dt) {
@@ -298,15 +392,18 @@ export class MoveRoom extends Room {
       mx /= cs.length; mz /= cs.length;
       const sp = SPEED * 0.7 * dt;
       const nx = item.x + mx * sp, nz = item.z + mz * sp;
-      if (!hitsWall(nx, item.z, 0.7)) item.x = nx;
-      if (!hitsWall(item.x, nz, 0.7)) item.z = nz;
-      cs[0].x = item.x - 0.95; cs[0].z = item.z; cs[0].face = Math.PI / 2;
-      cs[1].x = item.x + 0.95; cs[1].z = item.z; cs[1].face = -Math.PI / 2;
+      if (!this.level.hitsWall(nx, item.z, 0.7)) item.x = nx;
+      if (!this.level.hitsWall(item.x, nz, 0.7)) item.z = nz;
+      const off = this.carryOffset(item);
+      cs[0].x = item.x - off; cs[0].z = item.z; cs[0].face = Math.PI / 2;
+      cs[1].x = item.x + off; cs[1].z = item.z; cs[1].face = -Math.PI / 2;
       if (Math.abs(mx) + Math.abs(mz) > 0.05) { cs[0].face = cs[1].face = Math.atan2(mx, mz); }
       // a tap from either carrier sets it down
       if (cs.some(c => c.pending.tapN)) this.releaseCarry(cs[0]);
     }
   }
+
+  carryOffset(item) { const t = ITEM_TYPES[item.type]; return Math.max(t.w, t.d) * 0.48 + 0.1; }
 
   updateTasks(dt) {
     for (const it of this.items.values()) it.helpers = [];
@@ -343,7 +440,12 @@ export class MoveRoom extends Room {
       if (Math.abs(mx) > 0.5) c.gz -= Math.sign(mx); // pushing right = deeper toward the cab (gz 0)
       p.cursorCd = 0.18;
     }
-    if (p.pending.rotN && ITEM_TYPES[item.type].w > 1) c.rot = (c.rot + 1) % 2;
+    const nOr = orientations(item.type).length;
+    if (p.pending.rotN && nOr > 1) {
+      c.rot = (c.rot + 1) % nOr;
+      const f = footprint(item.type, c.rot);
+      this.tell(p, `↻ ${ITEM_TYPES[item.type].label} ${ORIENT_LABEL(f)} (${f.w}×${f.d}×${f.h})`);
+    }
     const { w, d } = footprint(item.type, c.rot);
     c.gx = clamp(c.gx, 0, GRID.W - w);
     c.gz = clamp(c.gz, 0, GRID.D - d);
@@ -351,7 +453,7 @@ export class MoveRoom extends Room {
     if (p.pending.dashN) { // BACK out of the truck
       p.loadMode = false;
       p.x -= 1.5; item.x = p.x; item.z = p.z;
-      if (item.carriers.length > 1) item.x += 0.95;
+      if (item.carriers.length > 1) item.x += this.carryOffset(item);
       return;
     }
     if (p.pending.tapN) this.dropIntoTruck(p, item);
@@ -374,7 +476,7 @@ export class MoveRoom extends Room {
     }
     item.state = 'loaded';
     const rec = this.grid.items.get(item.id);
-    item.g = { x: rec.x, y: rec.y, z: rec.z, w: rec.w, d: rec.d };
+    item.g = { x: rec.x, y: rec.y, z: rec.z, w: rec.w, d: rec.d, h: rec.h };
     let pts = t.pts;
     if (t.needsWrap && !item.wrapped) { pts = Math.round(pts / 2); this.event({ kind: 'toast', text: `😬 The ${t.label.toLowerCase()} got scuffed! Half points — pad-wrap next time.` }); }
     const share = Math.round(pts / loaderIds.length);
@@ -396,6 +498,8 @@ export class MoveRoom extends Room {
 
   recordBreak(item, culpritIds, how) {
     this.breaks.push({ id: item.id, type: item.type, culpritIds, resolved: false, at: Date.now() });
+    for (const id of culpritIds) { const o = this.players.get(id); if (o) o.breaks = (o.breaks || 0) + 1; }
+    for (const b of this.bots.values()) b.onCrunch(culpritIds);
     this.seq++;
     this.event({ kind: 'crunch', text: `💥 CRUNCH! A ${ITEM_TYPES[item.type].label.toLowerCase()} ${how}. Who did it? Hit CALL OUT!`, itemType: item.type });
   }
@@ -406,14 +510,40 @@ export class MoveRoom extends Room {
     if (this.phase !== 'playing' || this.meeting || !this.isActive(p)) return;
     if (!this.breaks.some(b => !b.resolved)) return this.tell(p, 'Nothing is broken… yet. Call out when you hear a CRUNCH!');
     this.phase = 'meeting';
-    this.meeting = { callerId, timeLeft: RULES.MEETING_SECONDS, votes: {} };
+    this.meeting = { callerId, timeLeft: RULES.MEETING_SECONDS, votes: {}, botAt: {} };
+    for (const id of this.bots.keys()) if (this.isActive(this.players.get(id))) this.meeting.botAt[id] = 3 + Math.random() * 9;
     for (const o of this.players.values()) { o.task = null; }
     this.event({ kind: 'meeting', caller: p.name });
+  }
+
+  castVote(p, t) {
+    if (!this.meeting || !p || !this.isActive(p) || this.meeting.votes[p.id]) return;
+    if (t !== 'skip' && !this.players.has(t)) return;
+    this.meeting.votes[p.id] = t;
+  }
+
+  say(p, raw) {
+    const text = String(raw || '').replace(/[<>]/g, '').trim().slice(0, 120);
+    if (!p || !text) return;
+    const now = Date.now();
+    if (!p.bot && now - (p.lastChat || 0) < 600) return;
+    p.lastChat = now;
+    this.broadcast('chat', { from: p.name, char: p.char, text, meeting: !!this.meeting, bot: !!p.bot });
   }
 
   updateMeeting(dt) {
     const m = this.meeting;
     m.timeLeft -= dt;
+    for (const [id, at] of Object.entries(m.botAt)) {
+      m.botAt[id] = at - dt;
+      if (m.botAt[id] > 0) continue;
+      delete m.botAt[id];
+      const bot = this.bots.get(id), p = this.players.get(id);
+      if (!bot || !p) continue;
+      const target = bot.meetingVote();
+      if (Math.random() < 0.6) this.say(p, bot.meetingLine(target));
+      this.castVote(p, target);
+    }
     const active = this.activePlayers();
     if (m.timeLeft > 0 && !active.every(a => m.votes[a.id])) return;
 
@@ -449,14 +579,15 @@ export class MoveRoom extends Room {
   checkEnd() {
     const all = [...this.items.values()];
     const done = all.every(i => i.state === 'loaded' || i.state === 'broken');
-    const noneLeft = this.activePlayers().length === 0 && this.players.size > 0;
+    const humans = [...this.players.values()].filter(p => !p.bot && !p.spectator);
+    const noneLeft = (this.activePlayers().length === 0 && this.players.size > 0) || (humans.length > 0 && humans.every(h => h.out) && this.bots.size > 0);
     if (this.timeLeft <= 0 || done || noneLeft) this.endRound(done ? 'Truck loaded!' : noneLeft ? 'Everyone got kicked off the truck!' : "Time's up!");
   }
 
   endRound(reason) {
     this.phase = 'results';
     const players = [...this.players.values()].filter(p => !p.spectator)
-      .map(p => ({ id: p.id, name: p.name, char: p.char, score: p.score, strikes: p.strikes, out: p.out, loaded: p.loaded }))
+      .map(p => ({ id: p.id, name: p.name, char: p.char, score: p.score, strikes: p.strikes, out: p.out, loaded: p.loaded, breaks: p.breaks || 0, bot: !!p.bot }))
       .sort((a, b) => b.score - a.score);
     const winner = players.find(p => !p.out) || null;
     const loaded = [...this.items.values()].filter(i => i.state === 'loaded');
@@ -465,7 +596,7 @@ export class MoveRoom extends Room {
       type: ITEM_TYPES[b.type].label,
       culprits: b.culpritIds.map(id => this.players.get(id)?.name || 'a mover who left').join(' + '),
     }));
-    this.results = { reason, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length };
+    this.results = { reason, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
     this.event({ kind: 'end' });
   }
@@ -475,7 +606,7 @@ export class MoveRoom extends Room {
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
       out: p.out, spectator: p.spectator, task: p.task, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
-      room: roomAt(p.x, p.z),
+      room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
       id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
@@ -484,6 +615,9 @@ export class MoveRoom extends Room {
     }));
     return {
       phase: this.phase, mode: this.mode, hostId: this.hostId, timeLeft: Math.max(0, Math.round(this.timeLeft)),
+      countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0,
+      level: { seed: this.level.seed, classic: !!this.level.classic, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
+      loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,
       meeting: this.meeting ? { callerId: this.meeting.callerId, timeLeft: Math.ceil(this.meeting.timeLeft), voted: Object.keys(this.meeting.votes) } : null,

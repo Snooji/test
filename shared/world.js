@@ -31,7 +31,7 @@ export const ROOMS = [
   { name: 'Star Office', x0: -22, x1: -11, z0: 0, z1: 12, floor: 0x33465e },
 ];
 
-export const WALLS = [
+export const HOUSE_WALLS = [
   // outer
   wallH(-22, 0, -12), wallH(-22, 0, 12), wallV(-22, -12, 12),
   wallV(0, -12, -6), wallV(0, -2, 12),          // front door gap z −6 → −2
@@ -39,30 +39,37 @@ export const WALLS = [
   wallV(-11, -12, -7), wallV(-11, -4, 4), wallV(-11, 7, 12),
   // interior horizontal z=0, doors x −17→−14 and −6→−3
   wallH(-22, -17, 0), wallH(-14, -6, 0), wallH(-3, 0, 0),
+];
+
+// Fixed for every level: the truck body and the edge of the world.
+export const WORLD = { x0: -44, x1: 24, z0: -16, z1: 16 };
+export const TRUCK_WALLS = [
   // truck body: side walls + cab; invisible lip stops walking into the bay
   { x0: 13, x1: TRUCK.cabX1, z0: -2.8, z1: -2.4 },
   { x0: 13, x1: TRUCK.cabX1, z0: 2.4, z1: 2.8 },
   { x0: 13, x1: 13.3, z0: -2.4, z1: 2.4, invisible: true },
-  // yard bounds
-  { x0: -24, x1: 24, z0: -15, z1: -14, invisible: true },
-  { x0: -24, x1: 24, z0: 14, z1: 15, invisible: true },
-  { x0: -24, x1: -23, z0: -15, z1: 15, invisible: true },
-  { x0: 23, x1: 24, z0: -15, z1: 15, invisible: true },
+  // world bounds
+  { x0: WORLD.x0, x1: WORLD.x1, z0: WORLD.z0 - 1, z1: WORLD.z0, invisible: true },
+  { x0: WORLD.x0, x1: WORLD.x1, z0: WORLD.z1, z1: WORLD.z1 + 1, invisible: true },
+  { x0: WORLD.x0 - 1, x1: WORLD.x0, z0: WORLD.z0, z1: WORLD.z1, invisible: true },
+  { x0: WORLD.x1 - 1, x1: WORLD.x1, z0: WORLD.z0, z1: WORLD.z1, invisible: true },
 ];
+
+export const WALLS = [...HOUSE_WALLS, ...TRUCK_WALLS];
 
 // Decorative props (client only; no collision so nothing gets stuck).
 export const PROPS = [
   { kind: 'rug', x: -5.5, z: -6, w: 5, d: 3.5, color: 0xe76f51 },
   { kind: 'rug', x: -16.5, z: -6, w: 4, d: 3, color: 0x8ecae6 },
   { kind: 'counter', x: -5.5, z: 11, w: 10, d: 1.2, color: 0xdddddd },
-  { kind: 'bed', x: -19, z: -9, w: 3, d: 4, color: 0xa78bfa },
   { kind: 'plant', x: -1.2, z: -11 }, { kind: 'plant', x: -21, z: 11 },
   { kind: 'plant', x: 2, z: -7 }, { kind: 'plant', x: 2, z: 7 },
   { kind: 'mailbox', x: 6, z: -9 },
 ];
 
+// spread out in the yard in front of the ramp so movers never start stacked
 export const PLAYER_SPAWNS = [
-  { x: 11.2, z: -1.6 }, { x: 11.2, z: -0.5 }, { x: 11.2, z: 0.6 }, { x: 11.2, z: 1.7 },
+  { x: 8.2, z: -3.3 }, { x: 8.2, z: -1.1 }, { x: 8.2, z: 1.1 }, { x: 8.2, z: 3.3 },
 ];
 
 // [type, x, z]
@@ -74,7 +81,7 @@ export const ITEM_SPAWNS = [
   ['table', -6, 6], ['fragile', -2, 10], ['fragile', -3.2, 10], ['fragile', -8.5, 9.5],
   ['heavy', -9.5, 2.5], ['standard', -1.5, 3], ['fragile', -4, 2.4],
   // Bedroom
-  ['lamp', -21, -1.5], ['standard', -15, -10.5], ['standard', -13, -10], ['heavy', -20.5, -4],
+  ['bed', -18.5, -8.5], ['lamp', -21, -1.5], ['standard', -13, -6], ['standard', -13, -10], ['heavy', -20.5, -4],
   ['fragile', -14, -2], ['standard', -16, -4],
   // Office
   ['desk', -16.5, 6], ['heavy', -20.5, 10.5], ['heavy', -20.5, 9], ['standard', -13, 2.5],
