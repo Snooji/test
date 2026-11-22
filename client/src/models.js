@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { ITEM_TYPES } from '../../shared/logic.js';
 import { CELL } from '../../shared/world.js';
+import { VOXEL } from './style.js';
+import * as VX from './voxel.js';
 
 const matCache = new Map();
 export function mat(color, opts = {}) {
@@ -127,6 +129,7 @@ function zibble(tint) {
 
 /** suit = colour from SUITS (null = the mover's classic colour) */
 export function makeMover(char, suit = null) {
+  if (VOXEL) return VX.makeMover(char, suit);
   const g = { nova: () => astronaut(suit ?? 0xff8a3d, 0x1d2b6b), cosmo: () => astronaut(suit ?? 0x2ec4b6, 0xe0a526), glorp: () => glorp(suit), zibble: () => zibble(suit) }[char]?.() || astronaut(suit ?? 0xff8a3d, 0x1d2b6b);
   const root = new THREE.Group();
   root.add(g);
@@ -153,6 +156,7 @@ function makeDolly() {
 }
 
 export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
+  if (VOXEL) return VX.makeItem(type, { wrapped, assembled, loaded, dims });
   const t = ITEM_TYPES[type];
   if (type === 'dolly') return makeDolly();
   const g = new THREE.Group();
@@ -212,6 +216,7 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
 }
 
 export function makeCat() {
+  if (VOXEL) return VX.makeCat();
   const g = new THREE.Group();
   const fur = mat(0xc9c3e6);
   const body = mesh(new THREE.SphereGeometry(0.22, 14, 10), fur, 0, 0.22, 0); body.scale.set(0.9, 0.8, 1.4); g.add(body);

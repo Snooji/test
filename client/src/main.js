@@ -6,6 +6,13 @@ import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL, SUITS, suitUnl
 import { inRamp } from '../../shared/world.js';
 import { sfx, setMuted, isMuted, setMusic, isMusicOn, musicMood } from './audio.js';
 import { drawMinimap } from './minimap.js';
+import { VOXEL } from './style.js';
+if (VOXEL) { // voxel trial: small tag so testers know which look they're on
+  document.body.classList.add('voxel');
+  const tag = document.createElement('a');
+  tag.className = 'voxel-tag'; tag.href = '/'; tag.textContent = '🧊 Voxel trial · classic look';
+  document.body.appendChild(tag);
+}
 
 const $ = (id) => document.getElementById(id);
 const show = (el, on = true) => (typeof el === 'string' ? $(el) : el).classList.toggle('hidden', !on);

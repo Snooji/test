@@ -35,7 +35,7 @@ if (fs.existsSync(dist)) {
       : 'use the unsubscribe link in any of our emails and ask us to delete it, and we’ll remove it';
     res.type('html').send(fs.readFileSync(path.join(dist, 'privacy.html'), 'utf8').replace('{{CONTACT}}', contact));
   });
-  app.get('/', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+  app.get(['/', '/voxel'], (_req, res) => res.sendFile(path.join(dist, 'index.html'))); // /voxel = same game, voxel look (trial)
 }
 
 const httpServer = http.createServer(app);

@@ -3,6 +3,8 @@ import { ITEM_TYPES, GRID, footprint, shapeCells, SUITS } from '../../shared/log
 import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
 import { levelFromSnapshot } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
+import { VOXEL } from './style.js';
+import * as VX from './voxel.js';
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 /** cells [x,y,z] a loaded item occupies relative to its grid anchor */
@@ -102,6 +104,7 @@ export class GameScene {
   }
 
   buildWorld() {
+    if (VOXEL) return VX.buildWorld(this);
     const s = this.scene;
     // lunar ground
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(170, 90), mat(0x3a3358));
@@ -129,7 +132,8 @@ export class GameScene {
 
   /** (Re)build the house for a level. Every round can be a different, generated house. */
   buildHouse(level) {
-    if (this.house) { this.scene.remove(this.house); this.house.traverse(o => { o.geometry?.dispose(); if (o.material?.map) o.material.map.dispose(); }); }
+    if (this.house) { this.scene.remove(this.house); this.house.traverse(o => { o.geometry?.dispose(); if (o.material?.map && !VOXEL) o.material.map.dispose(); else if (o.material?.map && o.material.transparent) o.material.map.dispose(); }); }
+    if (VOXEL) return VX.buildHouse(this, level);
     const s = new THREE.Group();
     this.house = s;
     this.level = level;
@@ -173,6 +177,7 @@ export class GameScene {
   }
 
   buildTruck() {
+    if (VOXEL) return VX.buildTruck(this);
     const s = this.scene;
     const g = new THREE.Group();
     const body = mat(0xf4f1ff), accent = mat(0x6b4dff), dark = mat(0x2a2640);
@@ -406,7 +411,7 @@ export class GameScene {
   }
   /** one soft billowing puff */
   puff(x, y, z, scale, color, life = 1.1, rise = 0.6) {
-    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, color, transparent: true, depthWrite: false, opacity: 0.9 }));
+    const m = VOXEL ? VX.puffMesh(color) : new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, color, transparent: true, depthWrite: false, opacity: 0.9 }));
     m.position.set(x + (Math.random() - 0.5) * scale * 1.4, y + Math.random() * 0.3 * scale, z + (Math.random() - 0.5) * scale * 1.4);
     const s0 = (0.4 + Math.random() * 0.4) * scale;
     m.scale.setScalar(s0);

@@ -125,3 +125,14 @@ Fixes:
 - [x] Full load: bots follow the packing plan less often (50/70/85%)
 - [x] No teleports: walk to the ramp spot, no post-drop shove, BACK just steps you out (ramp re-entry locked until you leave it), gentle separation, lift formation turns with the walking line and never stands a mover in a wall
 Verified: unit tests 150/150 (incl. new test/fair.test.js) · e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · audit: 0 teleports, 0 wall ticks, 0 over-speed ticks; hard bots average 3.0–3.8 m/s vs a person's 5 m/s
+
+## Round 7: voxel look trial (2026-11-22)
+- [x] Same game at /voxel (or ?style=voxel); / is untouched. Invite links keep the look you're on; both looks share rooms.
+- [x] client/src/voxel.js: greedy-meshed voxel models (movers, boxes, furniture, dolly, cat), one merged mesh each, vertex colours, one shared material with a faint block-grid texture; whole house, ground and truck = one mesh each; truck pieces show darker cell edges; dust puffs are little blocks
+- [x] Menu-only "Voxel trial" tag linking back to the classic look
+Measured (test/perf-compare.mjs, headless Chrome, solo round with 3 AI):
+| | classic draw calls | voxel draw calls | classic triangles | voxel triangles |
+|---|---|---|---|---|
+| desktop, in a round | 257 | 90 | 32.6k | 11.5k |
+| phone, in a round | 221 | 79 | 27.6k | 10.9k |
+Verified: e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS on /; e2e-solo, e2e-dolly, e2e-b PASS on /voxel

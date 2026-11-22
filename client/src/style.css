@@ -372,3 +372,6 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 .tally h4 { margin: 0 0 6px; font-size: 14px; }
 .tally .ln { display: flex; justify-content: space-between; } .tally .ln.neg span:last-child { color: var(--danger); } .tally .ln.tot { font-weight: 800; border-top: 1px solid rgba(255,255,255,.15); margin-top: 4px; padding-top: 4px; }
 .pod .tl { font-size: 10.5px; color: var(--mute); }
+
+.voxel-tag { position: fixed; right: 12px; top: calc(10px + env(safe-area-inset-top)); z-index: 60; font: 600 11px system-ui; color: #cfc7ff; background: rgba(26,20,64,.72); border: 1px solid rgba(143,123,255,.35); border-radius: 999px; padding: 4px 10px; text-decoration: none; pointer-events: auto; }
+body:has(#hud:not(.hidden)) .voxel-tag { display: none; } /* menu only: never over the game HUD */
