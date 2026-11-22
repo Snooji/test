@@ -282,16 +282,21 @@ export class GameScene {
     const seenI = new Set();
     for (const it of snap.items) {
       seenI.add(it.id);
-      const prevData = this.items.get(it.id)?.data; // before any rebuild below
+      const prevData = this.items.get(it.id)?.data; // before any rebuild below (for the before/after swap)
       const key = `${it.state === 'loaded'}|${it.wrapped}|${it.assembled}`;
       let v = this.items.get(it.id);
       if (!v || v.key !== key) {
-        if (v) this.scene.remove(v.obj);
+        // before → after under a dust cloud: keep the old look until the cloud is thick, then swap
+        const transform = v && prevData?.state === 'floor' && it.state === 'floor' && (prevData.assembled !== it.assembled || prevData.wrapped !== it.wrapped);
+        if (v && !transform) this.scene.remove(v.obj);
+        if (v?.oldObj) this.scene.remove(v.oldObj);
         const obj = makeItem(it.type, { wrapped: it.wrapped, assembled: it.assembled, loaded: it.state === 'loaded', dims: it.g });
         obj.position.set(it.x, 0, it.z);
         this.scene.add(obj);
         const bar = sprite('', {}, [1.4, 0.22]); bar.visible = false; bar.position.y = 1.9; obj.add(bar);
-        v = { obj, key, bar, barP: -1 };
+        const oldObj = transform ? v.obj : null;
+        if (oldObj) { obj.visible = false; oldObj.children.forEach(c => { if (c.isSprite) c.visible = false; }); }
+        v = { obj, key, bar, barP: -1, oldObj, swapT: oldObj ? 0.45 : 0 };
         this.items.set(it.id, v);
         if (it.state === 'loaded' && it.g) {
           const wp = gridToWorld(it.g.x, it.g.z, it.g.y, it.g.w, it.g.d);
@@ -492,6 +497,19 @@ export class GameScene {
         }
         continue;
       }
+      // the "before" piece shudders while someone works on it, then disappears into the cloud
+      if (v.oldObj) {
+        v.swapT -= dt;
+        v.oldObj.position.set(o.position.x + (Math.random() - 0.5) * 0.12, Math.random() * 0.06, o.position.z + (Math.random() - 0.5) * 0.12);
+        if (v.swapT <= 0) {
+          this.scene.remove(v.oldObj); v.oldObj = null;
+          o.visible = true; o.userData.pop = 0.3;
+        }
+      }
+      if (o.userData.pop > 0) { o.userData.pop = Math.max(0, o.userData.pop - dt); const k = 1 - o.userData.pop / 0.3; o.scale.setScalar(0.75 + 0.25 * k + Math.sin(k * Math.PI) * 0.12); }
+      const worked = it.task && it.state === 'floor';
+      if (worked) o.rotation.z = Math.sin(performance.now() / 45) * 0.03 * (it.task.kind === 'disassemble' ? 1.6 : 0.8);
+      else if (o.rotation.z) o.rotation.z = 0;
       if (it.state === 'dolly') { // riding on a dolly: stacked in order, bottom first
         const d = this.snap.items.find(x => x.id === it.on), dv = d && this.items.get(d.id);
         if (dv) {
@@ -516,7 +534,7 @@ export class GameScene {
       o.position.x = damp(o.position.x, it.x, 14, dt);
       o.position.z = damp(o.position.z, it.z, 14, dt);
       o.position.y = damp(o.position.y, ty, 12, dt);
-      if (solo) o.scale.setScalar(0.75); else o.scale.setScalar(1);
+      if (!(o.userData.pop > 0)) { if (solo) o.scale.setScalar(0.75); else o.scale.setScalar(1); }
     }
     if (snap?.cat) {
       this.cat.position.x = damp(this.cat.position.x, snap.cat.x, 8, dt);
