@@ -62,3 +62,21 @@ test('roomAt names the room a point is in', () => {
   assert.equal(l.roomAt(-5, -6), 'Living Room');
   assert.equal(l.roomAt(5, 5), 'Yard');
 });
+
+test('Full load houses hold exactly the 64-cell inventory, all of it reachable', () => {
+  for (const s of SEEDS.slice(0, 25)) {
+    const l = generateLevel(s, { exact: true });
+    const total = l.items.reduce((a, [t]) => a + (ITEM_TYPES[t].cells ? ITEM_TYPES[t].cells.length : ITEM_TYPES[t].w * ITEM_TYPES[t].d * (ITEM_TYPES[t].h || 1)), 0);
+    assert.equal(total, 64, `seed ${s}: ${total} cells`);
+    assert.equal(l.exact, true);
+    const nav = createNav(l);
+    for (const [type, x, z] of l.items) {
+      assert.equal(l.hitsWall(x, z, 0.45), false, `seed ${s}: ${type} in wall`);
+      assert.ok(nav.findPath({ x: 11, z: 0 }, { x, z }), `seed ${s}: ${type} unreachable`);
+    }
+  }
+});
+
+test('same seed + exact flag is deterministic (clients rebuild the same house)', () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(generateLevel(9, { exact: true }))), JSON.parse(JSON.stringify(generateLevel(9, { exact: true }))));
+});

@@ -44,7 +44,8 @@ test('loading scores, heavy-on-fragile breaks, correct callout strikes culprit',
   assert.equal(a.score, 15);
 
   load(room, b, firstOf(room, 'heavy'), 0, 0);
-  assert.equal(f.state, 'broken');
+  assert.equal(room.breaks.length, 1);
+  assert.equal(f.state, 'floor', 'broken box respawned in the house');
   assert.equal(a.score, 0, 'fragile loader loses its points');
   assert.equal(b.score, 20);
   assert.ok(events.some(e => e.kind === 'crunch'));
@@ -83,8 +84,9 @@ test('unwrapped lamp shatters; unwrapped couch is scuffed for half', () => {
   const { room, join, send } = makeRoom();
   const a = join('A', 'Ada');
   send('A', 'start');
-  const lamp = load(room, a, firstOf(room, 'lamp'), 3, 3);
-  assert.equal(lamp.state, 'broken');
+  const lamp = load(room, a, firstOf(room, 'lamp'), 2, 3);
+  assert.equal(room.breaks.length, 1);
+  assert.equal(lamp.state, 'floor', 'respawned');
   assert.equal(a.score, 0);
   load(room, a, firstOf(room, 'couch'), 0, 0);
   assert.equal(a.score, 35);
@@ -312,4 +314,97 @@ test('nobody can join a two-mover lift that is already being placed in the truck
   b.x = couch.x + 0.5; b.z = couch.z;
   room.onTap(b, null);
   assert.deepEqual(couch.carriers, ['A']);
+});
+
+// ---- wave 2 ----
+import { placeItem as gridPlace } from '../shared/logic.js';
+
+test('an item crushed in the truck respawns somewhere in the house as a fresh floor item', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  const f = load(room, a, firstOf(room, 'fragile'), 0, 0);
+  load(room, b, firstOf(room, 'heavy'), 0, 0);
+  assert.equal(f.state, 'floor', 'respawned');
+  const h = room.level.house;
+  assert.ok(f.x > h.x0 && f.x < h.x1 && f.z > h.z0 && f.z < h.z1, `respawned inside the house (${f.x},${f.z})`);
+  assert.equal(room.level.hitsWall(f.x, f.z, 0.45), false);
+  assert.equal(room.breaks.length, 1, 'the break still counts for call-outs');
+});
+
+test('a shattered unwrapped lamp respawns unwrapped', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada');
+  send('A', 'start');
+  const l = load(room, a, firstOf(room, 'lamp'), 0, 0);
+  assert.equal(l.state, 'floor');
+  assert.equal(l.wrapped, false);
+});
+
+test('timed round ends as soon as nothing left in the house fits in the truck', () => {
+  const { room, join, send } = makeRoom();
+  join('A', 'Ada');
+  send('A', 'start');
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 4; y++) gridPlace(room.grid, { id: `d${x}${z}${y}`, type: 'standard' }, x, z, 0);
+  room.tick(0.05);
+  assert.equal(room.phase, 'results');
+  assert.match(room.results.reason, /Truck full/);
+});
+
+test('Full load mode: round ends only when all 64 cells are packed', () => {
+  const { room, join, send } = makeRoom({});
+  join('A', 'Ada');
+  send('A', 'mode', { mode: 'load' });
+  assert.equal(room.level.exact, true, 'switching to Full load builds an exact-fill house');
+  send('A', 'start');
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 3; y++) gridPlace(room.grid, { id: `d${x}${z}${y}`, type: 'standard' }, x, z, 0);
+  room.tick(0.05);
+  assert.equal(room.phase, 'playing', 'not finished with gaps left');
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) gridPlace(room.grid, { id: `e${x}${z}`, type: 'standard' }, x, z, 0);
+  room.tick(0.05);
+  assert.equal(room.phase, 'results');
+  assert.match(room.results.reason, /Perfect load/);
+});
+
+test('Full load mode: hold ACTION on the ramp to unload; pulling an item takes back its points', () => {
+  const { room, join, send } = makeRoom({});
+  const a = join('A', 'Ada');
+  send('A', 'mode', { mode: 'load' });
+  send('A', 'start');
+  const box = [...room.items.values()].find(i => i.type === 'standard');
+  load(room, a, box.id, 2, 2);
+  assert.equal(a.score, 10);
+  a.x = 11.2; a.z = 0; a.in.hold = true;
+  for (let i = 0; i < 20; i++) room.tick(0.05);
+  assert.ok(a.loadMode && a.unloading, 'holding on the ramp enters unload mode');
+  a.in.hold = false;
+  send('A', 'aim', { gx: 2, gz: 2 });
+  a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(a.carry, box.id, 'pulled the box');
+  assert.equal(box.state, 'carried');
+  assert.equal(a.score, 0, 'points come back off');
+  assert.equal(room.grid.cells[2][2][0], null);
+});
+
+test('unloading is only allowed in Full load (no point-stealing in competitive rounds)', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada');
+  send('A', 'start');
+  a.x = 11.2; a.z = 0; a.in.hold = true;
+  for (let i = 0; i < 20; i++) room.tick(0.05);
+  assert.ok(!a.unloading);
+});
+
+test('BACK really leaves the truck (you end up off the ramp, still holding the item)', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada');
+  send('A', 'start');
+  const box = room.items.get(firstOf(room, 'standard'));
+  box.state = 'carried'; box.carriers = ['A']; a.carry = box.id; a.x = 11.2; a.z = 0;
+  room.tick(0.05);
+  assert.equal(a.loadMode, true);
+  a.pending.dashN = 1; room.tick(0.05);
+  for (let i = 0; i < 5; i++) room.tick(0.05);
+  assert.equal(a.loadMode, false);
+  assert.equal(a.carry, box.id);
 });

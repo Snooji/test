@@ -1,8 +1,8 @@
 import { Room, ServerError } from 'colyseus';
-import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL } from '../shared/logic.js';
+import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
-import { PLAYER_SPAWNS, inRamp } from '../shared/world.js';
-import { generateLevel, classicLevel, newSeed } from '../shared/level.js';
+import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
+import { generateLevel, classicLevel, newSeed, freeSpot } from '../shared/level.js';
 import { createNav } from './nav.js';
 import { verifyToken, cleanName, cleanEmail } from './signups.js';
 
@@ -68,7 +68,10 @@ export class MoveRoom extends Room {
       if (CHARS.includes(m?.id) && ![...this.players.values()].some(o => o !== p && o.char === m.id)) p.char = m.id;
     });
     this.onMessage('mode', (c, m) => {
-      if (c.sessionId === this.hostId && RULES.MODES[m?.mode] && this.phase !== 'playing') this.mode = m.mode;
+      if (c.sessionId !== this.hostId || !RULES.MODES[m?.mode] || this.inRound()) return;
+      const wasExact = this.isExact();
+      this.mode = m.mode;
+      if (this.isExact() !== wasExact && !this.classic) { this.newLevel(); this.resetWorld(); } // Full load needs an exact-fill house
     });
     this.onMessage('start', (c) => {
       if (c.sessionId !== this.hostId || this.inRound()) return;
@@ -100,8 +103,8 @@ export class MoveRoom extends Room {
     this.onMessage('aim', (c, m) => {
       const p = this.players.get(c.sessionId);
       const item = p?.carry ? this.items.get(p.carry) : null;
-      if (!p?.loadMode || !item) return;
-      const { w, d } = footprint(item.type, p.cursor.rot);
+      if (!p?.loadMode || (!item && !p.unloading)) return;
+      const { w, d } = item ? footprint(item.type, p.cursor.rot) : { w: 1, d: 1 };
       p.cursor.gx = clamp(Number(m?.gx) | 0, 0, GRID.W - w);
       p.cursor.gz = clamp(Number(m?.gz) | 0, 0, GRID.D - d);
     });
@@ -221,14 +224,18 @@ export class MoveRoom extends Room {
 
   // ---------- world ----------
   newLevel() {
-    this.level = this.classic ? classicLevel() : generateLevel(this.seedOverride ?? newSeed());
+    this.level = this.classic ? classicLevel() : generateLevel(this.seedOverride ?? newSeed(), { exact: this.isExact() });
     this.seedOverride = null;
     this.nav = createNav(this.level);
     this.cat = { x: this.level.cat[0][0], z: this.level.cat[0][1], wp: 0 };
   }
 
+  isExact() { return this.mode === 'load' || this.game === 'sabotage'; }
+  allowsUnload() { return this.isExact(); }
+
   resetWorld() {
     this.items.clear();
+    this.gridVersion = 0; this.fitCache = null; this.stuckHinted = false;
     this.grid = createGrid();
     this.breaks = [];
     this.meeting = null;
@@ -353,6 +360,16 @@ export class MoveRoom extends Room {
       if (item) { item.x = p.x + Math.sin(p.face) * 0.2; item.z = p.z + Math.cos(p.face) * 0.2; }
     }
 
+    // empty-handed on the ramp: hold ACTION to start pulling items back out (Full load only)
+    if (!item && this.allowsUnload() && inRamp(p.x, p.z) && p.in.hold && this.grid.items.size) {
+      p.unloadT = (p.unloadT || 0) + dt;
+      if (p.unloadT > 0.6) {
+        p.unloadT = 0; p.loadMode = true; p.unloading = true; p.cursor = { gx: 1, gz: 1, rot: 0 }; p.cursorCd = 0.35;
+        this.tell(p, 'Unloading: aim at a stack, ACTION pulls the top piece, BACK to leave');
+      }
+      return;
+    } else p.unloadT = 0;
+
     // carrying into the ramp → load mode (leader only for team carries)
     if (item && item.carriers[0] === p.id && inRamp(item.x, item.z)) {
       p.loadMode = true;
@@ -469,10 +486,21 @@ export class MoveRoom extends Room {
   }
 
   updateLoadMode(p, item, dt) {
-    if (!item) { p.loadMode = false; return; }
+    if (!item && !p.unloading) { p.loadMode = false; return; }
     const c = p.cursor;
     p.cursorCd = Math.max(0, p.cursorCd - dt);
     const { mx, mz } = p.in;
+    if (!item) { // unloading: pick which item to pull back out
+      if (p.cursorCd <= 0 && (Math.abs(mx) > 0.5 || Math.abs(mz) > 0.5)) {
+        if (Math.abs(mz) > 0.5) c.gx += Math.sign(mz);
+        if (Math.abs(mx) > 0.5) c.gz -= Math.sign(mx);
+        p.cursorCd = 0.18;
+      }
+      c.gx = clamp(c.gx, 0, GRID.W - 1); c.gz = clamp(c.gz, 0, GRID.D - 1);
+      if (p.pending.dashN) { p.loadMode = false; p.unloading = false; p.x = TRUCK.ramp.x0 - 1.2; return; }
+      if (p.pending.tapN) this.pullFromTruck(p);
+      return;
+    }
     if (p.cursorCd <= 0 && (Math.abs(mx) > 0.5 || Math.abs(mz) > 0.5)) {
       if (Math.abs(mz) > 0.5) c.gx += Math.sign(mz);
       if (Math.abs(mx) > 0.5) c.gz -= Math.sign(mx); // pushing right = deeper toward the cab (gz 0)
@@ -488,13 +516,35 @@ export class MoveRoom extends Room {
     c.gx = clamp(c.gx, 0, GRID.W - w);
     c.gz = clamp(c.gz, 0, GRID.D - d);
 
-    if (p.pending.dashN) { // BACK out of the truck
+    if (p.pending.dashN) { // BACK out of the truck: step off the ramp so it doesn't re-trigger
       p.loadMode = false;
-      p.x -= 1.5; item.x = p.x; item.z = p.z;
+      p.x = TRUCK.ramp.x0 - 1.2; item.x = p.x; item.z = p.z;
       if (item.carriers.length > 1) item.x += this.carryOffset(item);
       return;
     }
     if (p.pending.tapN) this.dropIntoTruck(p, item);
+  }
+
+  pullFromTruck(p) {
+    const id = topItemAt(this.grid, p.cursor.gx, p.cursor.gz);
+    if (!id) return this.tell(p, 'That column is empty.');
+    if (!isRemovable(this.grid, id)) return this.tell(p, 'Something is resting on it. Pull the top piece first.');
+    const item = this.items.get(id);
+    removeFromGrid(this.grid, id);
+    this.gridVersion++;
+    for (const [pid, amt] of Object.entries(item.earned || {})) { const o = this.players.get(pid); if (o) { o.score -= amt; o.loaded = Math.max(0, o.loaded - 1); } }
+    item.earned = {}; item.g = null; item.state = 'carried'; item.carriers = [p.id]; item.x = p.x; item.z = p.z;
+    p.carry = id; p.unloading = false; p.cursor.rot = 0;
+    this.event({ kind: 'emote', id: p.id, e: '↩️' });
+    this.tell(p, `Pulled out the ${ITEM_TYPES[item.type].label.toLowerCase()}. Drop it somewhere better, or BACK to set it on the ground.`);
+  }
+
+  respawn(item) {
+    const t = ITEM_TYPES[item.type];
+    const taken = [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z }));
+    const spot = freeSpot(this.level, taken);
+    Object.assign(item, { state: 'floor', x: spot.x, z: spot.z, wrapped: false, assembled: !!t.needsDisassemble, carriers: [], earned: {}, g: null, task: null });
+    this.event({ kind: 'toast', text: `📦 A replacement ${t.label.toLowerCase()} turned up in the ${this.level.roomAt(spot.x, spot.z)}.` });
   }
 
   dropIntoTruck(p, item) {
@@ -510,11 +560,13 @@ export class MoveRoom extends Room {
     if (res.selfBroken) {
       item.state = 'broken';
       this.recordBreak(item, loaderIds, 'shattered (it was not pad-wrapped)');
+      this.respawn(item);
       return;
     }
+    this.gridVersion++;
     item.state = 'loaded';
     const rec = this.grid.items.get(item.id);
-    item.g = { x: rec.x, y: rec.y, z: rec.z, w: rec.w, d: rec.d, h: rec.h };
+    item.g = { x: rec.x, y: rec.y, z: rec.z, w: rec.w, d: rec.d, h: rec.h, ...(ITEM_TYPES[item.type].cells ? { cells: rec.cells } : {}) };
     let pts = t.pts;
     if (t.needsWrap && !item.wrapped) { pts = Math.round(pts / 2); this.event({ kind: 'toast', text: `😬 The ${t.label.toLowerCase()} got scuffed! Half points — pad-wrap next time.` }); }
     const share = Math.round(pts / loaderIds.length);
@@ -531,6 +583,7 @@ export class MoveRoom extends Room {
       b.state = 'broken'; b.g = null;
       for (const [id, amt] of Object.entries(b.earned || {})) { const o = this.players.get(id); if (o) o.score -= amt; }
       this.recordBreak(b, loaderIds, 'got crushed');
+      this.respawn(b);
     }
   }
 
@@ -616,10 +669,26 @@ export class MoveRoom extends Room {
   // ---------- end ----------
   checkEnd() {
     const all = [...this.items.values()];
-    const done = all.every(i => i.state === 'loaded' || i.state === 'broken');
+    const remaining = all.filter(i => i.state === 'floor' || i.state === 'carried');
+    let filled = 0;
+    for (const col of this.grid.cells) for (const stack of col) for (const c of stack) if (c) filled++;
+    if (this.fitCache?.v !== this.gridVersion || this.fitCache?.n !== remaining.length) {
+      this.fitCache = { v: this.gridVersion, n: remaining.length, fits: canFitAny(this.grid, remaining.map(i => i.type)) };
+    }
+    let doneReason = null;
+    if (this.isExact()) {
+      if (filled === GRID.W * GRID.D * GRID.H) doneReason = 'Perfect load! The truck is packed to the roof.';
+      else if (remaining.length && !this.fitCache.fits && !this.stuckHinted) {
+        this.stuckHinted = true;
+        this.event({ kind: 'toast', text: '🧩 Nothing else fits! Hold ACTION on the ramp to pull pieces back out and repack.' });
+      }
+      if (this.fitCache.fits) this.stuckHinted = false;
+    } else if (!remaining.length) doneReason = 'Truck loaded!';
+    else if (!this.fitCache.fits) doneReason = 'Truck full! Nothing else fits.';
+    const done = !!doneReason;
     const humans = [...this.players.values()].filter(p => !p.bot && !p.spectator);
     const noneLeft = (this.activePlayers().length === 0 && this.players.size > 0) || (humans.length > 0 && humans.every(h => h.out) && this.bots.size > 0);
-    if (this.timeLeft <= 0 || done || noneLeft) this.endRound(done ? 'Truck loaded!' : noneLeft ? 'Everyone got kicked off the truck!' : "Time's up!");
+    if (this.timeLeft <= 0 || done || noneLeft) this.endRound(done ? doneReason : noneLeft ? 'Everyone got kicked off the truck!' : "Time's up!");
   }
 
   endRound(reason, forcedWinnerId = null) {
@@ -643,7 +712,7 @@ export class MoveRoom extends Room {
     const players = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
-      out: p.out, spectator: p.spectator, task: p.task, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
+      out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
       room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
@@ -654,7 +723,7 @@ export class MoveRoom extends Room {
     return {
       phase: this.phase, mode: this.mode, hostId: this.hostId, timeLeft: Math.max(0, Math.round(this.timeLeft)),
       countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0,
-      level: { seed: this.level.seed, classic: !!this.level.classic, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
+      level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,

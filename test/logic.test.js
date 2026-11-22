@@ -142,9 +142,97 @@ test('point values match spec', () => {
   assert.equal(ITEM_TYPES.standard.pts, 10);
   assert.equal(ITEM_TYPES.heavy.pts, 20);
   assert.equal(ITEM_TYPES.fragile.pts, 15);
-  assert.equal(ITEM_TYPES.lamp.pts, 25);
+  assert.equal(ITEM_TYPES.lamp.pts, 30);
   assert.equal(ITEM_TYPES.couch.pts, 70);
   assert.equal(ITEM_TYPES.bed.pts, 90);
   assert.equal(ITEM_TYPES.desk.pts, 50);
   assert.equal(ITEM_TYPES.table.pts, 40);
+});
+
+// ---- wave 2: shaped items (the "r" floor lamp) ----
+import { shapeCells } from '../shared/logic.js';
+
+test('lamp is an r-shaped 3-block piece: a 2-high pole with an arm at the top', () => {
+  const cells = shapeCells('lamp', 0).map(c => c.join(',')).sort();
+  assert.deepEqual(cells, ['0,0,0', '0,1,0', '1,1,0']);
+  assert.equal(ITEM_TYPES.lamp.cells.length, 3);
+});
+
+test('lamp has 12 distinct orientations (every way to turn and flip an L of three)', () => {
+  assert.equal(orientations('lamp').length, 12);
+  for (const o of orientations('lamp')) assert.equal(o.cells.length, 3);
+});
+
+test('cuboid orientations are unchanged by the shape system', () => {
+  assert.equal(orientations('bed').length, 6);
+  assert.equal(orientations('couch').length, 3);
+  assert.deepEqual(footprint('couch', 0), { w: 3, d: 1, h: 1 });
+});
+
+test('upright lamp drops with its arm overhanging; arm rests on whatever is below it', () => {
+  const g = createGrid();
+  placeItem(g, mk('s', 'standard'), 1, 0, 0);              // box under where the arm goes
+  const r = placeItem(g, mk('l', 'lamp', { wrapped: true }), 0, 0, 0);
+  assert.ok(r.ok);
+  assert.equal(r.y, 0);                                     // pole on the floor, arm sits on the box
+  assert.equal(g.cells[0][0][0], 'l'); assert.equal(g.cells[0][0][1], 'l'); assert.equal(g.cells[1][0][1], 'l');
+});
+
+test('upright lamp over a taller stack lifts so the arm clears it', () => {
+  const g = createGrid();
+  placeItem(g, mk('a', 'standard'), 1, 0, 0);
+  placeItem(g, mk('b', 'standard'), 1, 0, 0);               // column x=1 is 2 high
+  const r = placeItem(g, mk('l', 'lamp', { wrapped: true }), 0, 0, 0);
+  assert.equal(r.y, 1);                                     // arm (local y=1) must sit at y=2
+});
+
+test('lamp that would poke out the top is refused', () => {
+  const g = createGrid();
+  for (let i = 0; i < 3; i++) placeItem(g, mk('s' + i, 'standard'), 0, 0, 0);
+  assert.equal(placeItem(g, mk('l', 'lamp', { wrapped: true }), 0, 0, 0).ok, false);
+});
+
+// ---- wave 2: exact-fill "Full load" inventories ----
+import { buildExactLoad, mulberryFor, canFitAny, isRemovable, removeFromGrid } from '../shared/logic.js';
+
+test('exact load: pieces fill all 64 cells and replaying the solution breaks nothing', () => {
+  for (let seed = 1; seed <= 60; seed++) {
+    const { pieces, solution } = buildExactLoad(mulberryFor(seed));
+    const cells = pieces.reduce((a, t) => a + orientations(t)[0].cells.length, 0);
+    assert.equal(cells, 64, `seed ${seed}`);
+    const g = createGrid();
+    for (const s of solution) {
+      const r = placeItem(g, { id: s.id, type: s.type, wrapped: true }, s.gx, s.gz, s.rot);
+      assert.ok(r.ok, `seed ${seed}: ${s.type} did not fit`);
+      assert.deepEqual(r.broken, [], `seed ${seed}: ${s.type} crushed something`);
+    }
+    for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 4; y++) assert.ok(g.cells[x][z][y], `seed ${seed}: hole at ${x},${y},${z}`);
+  }
+});
+
+test('exact load always includes the big furniture and a lamp', () => {
+  for (let seed = 1; seed <= 30; seed++) {
+    const { pieces } = buildExactLoad(mulberryFor(seed));
+    for (const t of ['bed', 'couch', 'lamp']) assert.ok(pieces.includes(t), `seed ${seed} missing ${t}`);
+    assert.ok(pieces.includes('fragile') && pieces.includes('heavy'));
+  }
+});
+
+test('canFitAny: false once nothing left fits anywhere', () => {
+  const g = createGrid();
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 3; y++) placeItem(g, mk(`s${x}${z}${y}`, 'standard'), x, z, 0);
+  assert.equal(canFitAny(g, ['couch']), true, 'a flat couch fits on the top layer');
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) placeItem(g, mk(`t${x}${z}`, 'standard'), x, z, 0);
+  assert.equal(canFitAny(g, ['standard']), false);
+});
+
+test('only an item with nothing on top of it can be pulled back out', () => {
+  const g = createGrid();
+  placeItem(g, mk('a', 'standard'), 0, 0, 0);
+  placeItem(g, mk('b', 'standard'), 0, 0, 0);
+  assert.equal(isRemovable(g, 'a'), false);
+  assert.equal(isRemovable(g, 'b'), true);
+  removeFromGrid(g, 'b');
+  assert.equal(isRemovable(g, 'a'), true);
+  assert.equal(g.cells[0][0][1], null);
 });

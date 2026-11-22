@@ -1,6 +1,6 @@
 // Procedural house generator. Deterministic from a seed, so the server and every
 // browser build the identical house from just one number.
-import { ITEM_TYPES } from './logic.js';
+import { ITEM_TYPES, buildExactLoad } from './logic.js';
 import { TRUCK_WALLS, HOUSE_WALLS, ROOMS, PROPS, ITEM_SPAWNS, CAT_WAYPOINTS, WORLD } from './world.js';
 
 const T = 0.4; // wall thickness
@@ -48,7 +48,8 @@ export function classicLevel() {
   });
 }
 
-export function generateLevel(seed) {
+export function generateLevel(seed, opts = {}) {
+  const exact = !!opts.exact;
   const rng = mulberry32(seed);
   const R = (a, b) => a + rng() * (b - a);
   const RI = (a, b) => Math.floor(R(a, b + 1));
@@ -56,7 +57,7 @@ export function generateLevel(seed) {
 
   // ---- house footprint: size and distance to the truck vary ----
   const x1 = RI(-8, 2);                 // right wall; the ramp starts at x=9.4
-  const W = RI(16, 30), D = RI(14, 24);
+  const W = exact ? RI(24, 32) : RI(16, 30), D = exact ? RI(18, 24) : RI(14, 24);
   const x0 = x1 - W;
   let z0 = Math.round(R(-2, 2) - D / 2);
   z0 = Math.max(-13, Math.min(13 - D, z0));
@@ -117,22 +118,23 @@ export function generateLevel(seed) {
   rooms.forEach((r, i) => { delete r.done; r.name = names[i % names.length]; r.floor = floors[i % floors.length]; });
 
   const level = finish({
-    seed, name: `${pick(PREFIX)} ${pick(SUFFIX)}`,
+    seed, exact, name: `${pick(PREFIX)} ${pick(SUFFIX)}`,
     house: { x0, x1, z0, z1 }, yardDistance: +(9.4 - x1).toFixed(1),
     rooms, walls: [...houseWalls, ...TRUCK_WALLS], houseWalls, props: [], items: [], cat: [],
     frontDoor: { x: x1, z: fd },
   });
 
-  // ---- pick the inventory (always fits in the 64-cell truck with slack) ----
-  const list = ['couch', 'bed'];
+  // ---- pick the inventory: Full load = exactly the 64 cells; otherwise fits with slack ----
+  const size = (t) => { const it = ITEM_TYPES[t]; return it.cells ? it.cells.length : it.w * it.d * (it.h || 1); };
+  let list = ['couch', 'bed'];
   if (rng() < 0.7) list.push('desk');
   if (rng() < 0.6) list.push('table');
   for (let i = RI(1, 2); i--;) list.push('lamp');
   for (let i = RI(4, 7); i--;) list.push('heavy');
   for (let i = RI(5, 8); i--;) list.push('fragile');
   for (let i = RI(8, 12); i--;) list.push('standard');
-  const size = (t) => { const it = ITEM_TYPES[t]; return it.w * it.d * (it.h || 1); };
   while (list.reduce((a, t) => a + size(t), 0) > 52) list.splice(list.lastIndexOf('standard'), 1);
+  if (exact) list = buildExactLoad(rng).pieces.sort((a, b) => size(b) - size(a)); // big pieces get first pick of space
 
   // ---- scatter items: clear of walls, doors and each other ----
   const doorPts = [...doors.map(d => d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }), level.frontDoor];
@@ -140,18 +142,19 @@ export function generateLevel(seed) {
   const areaOf = (r) => (r.x1 - r.x0) * (r.z1 - r.z0);
   const totalArea = rooms.reduce((a, r) => a + areaOf(r), 0);
   const roomByArea = () => { let t = rng() * totalArea; for (const r of rooms) { t -= areaOf(r); if (t <= 0) return r; } return rooms[0]; };
-  const yardBoxes = RI(1, 3);
+  const yardBoxes = exact ? 0 : RI(1, 3);
   list.forEach((type, idx) => {
     const t = ITEM_TYPES[type];
     const big = Math.max(t.w, t.d);
     const halfX = t.furniture ? t.w / 2 + 0.7 : 0.9, halfZ = t.furniture ? t.d / 2 + 0.7 : 0.9;
     const inYard = !t.furniture && type === 'standard' && idx >= list.length - yardBoxes;
-    for (let tries = 0; tries < 80; tries++) {
+    for (let tries = 0; tries < (exact ? 160 : 80); tries++) {
       let x, z;
-      if (inYard) { x = R(x1 + 2, 8); z = R(-12, 12); if (Math.abs(z) < 4 && x > 5) continue; }
+      const overflow = exact && tries >= 120 && !t.furniture; // a full house spills a few boxes onto the lawn
+      if (inYard || overflow) { x = R(x1 + 2, 8); z = R(-12, 12); if (Math.abs(z) < 4 && x > 5) continue; }
       else { const r = roomByArea(); x = R(r.x0 + halfX, r.x1 - halfX); z = R(r.z0 + halfZ, r.z1 - halfZ); }
       x = Math.round(x * 10) / 10; z = Math.round(z * 10) / 10;
-      if (!inYard && (x - halfX < x0 || x + halfX > x1 || z - halfZ < z0 || z + halfZ > z1)) continue;
+      if (!(inYard || overflow) && (x - halfX < x0 || x + halfX > x1 || z - halfZ < z0 || z + halfZ > z1)) continue;
       if (level.hitsWall(x, z, t.furniture ? big / 2 + 0.25 : 0.7)) continue;
       if (doorPts.some(p => Math.hypot(p.x - x, p.z - z) < 2.4 + (t.furniture ? big / 2 : 0))) continue;
       if (placed.some(([pt, px, pz]) => {
@@ -160,6 +163,14 @@ export function generateLevel(seed) {
       })) continue;
       placed.push([type, x, z]);
       return;
+    }
+    if (exact) { // never drop a piece of a Full load: scan the yard for any free spot
+      for (let x = x1 + 2; x < 8.6; x += 1.2) for (let z = -13; z <= 13; z += 1.2) {
+        if (Math.abs(z) < 3.4 && x > 5.4) continue;
+        if (level.hitsWall(x, z, 0.7) || placed.some(([, px, pz]) => Math.hypot(px - x, pz - z) < 1.3)) continue;
+        placed.push([type, +x.toFixed(1), +z.toFixed(1)]);
+        return;
+      }
     }
   });
   level.items = placed;
@@ -176,6 +187,17 @@ export function generateLevel(seed) {
   for (const p of doorPts) level.cat.push([p.x, p.z]);
   level.props.push({ kind: 'plant', x: x1 + 1.6, z: fd - 3 }, { kind: 'plant', x: x1 + 1.6, z: fd + 3 }, { kind: 'mailbox', x: Math.min(x1 + 5, 7), z: Math.max(-13, z0) + 1 });
   return level;
+}
+
+/** A random free floor spot inside the house (for respawning broken items). */
+export function freeSpot(level, taken, rng = Math.random) {
+  for (let i = 0; i < 200; i++) {
+    const r = level.rooms[Math.floor(rng() * level.rooms.length)];
+    const x = r.x0 + 1.1 + rng() * (r.x1 - r.x0 - 2.2), z = r.z0 + 1.1 + rng() * (r.z1 - r.z0 - 2.2);
+    if (level.hitsWall(x, z, 0.7) || taken.some(p => Math.hypot(p.x - x, p.z - z) < 1.2)) continue;
+    return { x: +x.toFixed(1), z: +z.toFixed(1) };
+  }
+  return { x: level.frontDoor.x + 2.5, z: level.frontDoor.z };
 }
 
 /** A fresh seed for the next round. */
