@@ -24,16 +24,27 @@ export const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
 // throwaway inbox services: not real customers
 const DISPOSABLE = new Set(['mailinator.com', 'guerrillamail.com', 'guerrillamail.net', '10minutemail.com', 'tempmail.com', 'temp-mail.org', 'yopmail.com', 'trashmail.com', 'getnada.com', 'sharklasers.com', 'dispostable.com', 'throwawaymail.com', 'maildrop.cc', 'fakeinbox.com', 'mintemail.com', 'mohmal.com', 'emailondeck.com', 'tempail.com', 'burnermail.io', 'spamgourmet.com']);
 const mxCache = new Map();
-/** can this domain receive email? (DNS MX lookup; on when EMAIL_MX_CHECK=on). Fails open on DNS hiccups. */
+const withTimeout = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })), 3000))]);
+// safety: if this server can't even resolve gmail.com's mail servers, DNS is broken here, so never block anyone
+let dnsWorks = null;
+const dnsHealthy = () => (dnsWorks ??= withTimeout(dns.resolveMx('gmail.com')).then(r => r.length > 0, () => false).then(ok => {
+  if (!ok) console.warn('⚠️ DNS lookups are failing on this server: the "can this email receive mail" check is switched off.');
+  return ok;
+}));
+/** can this domain receive email? MX records, or an A record (RFC 5321 fallback). On unless EMAIL_MX_CHECK=off. Fails open. */
 async function domainTakesMail(domain) {
-  if (process.env.EMAIL_MX_CHECK !== 'on') return true;
+  if (process.env.EMAIL_MX_CHECK === 'off') return true;
   if (mxCache.has(domain)) return mxCache.get(domain);
+  if (!(await dnsHealthy())) return true;
+  const gone = (err) => ['ENOTFOUND', 'ENODATA', 'ENOTIMP'].includes(err?.code);
   let ok = true;
   try {
-    const mx = await Promise.race([dns.resolveMx(domain), new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })), 3000))]);
+    const mx = await withTimeout(dns.resolveMx(domain));
     ok = mx.some(r => r.exchange && r.exchange !== '.');
   } catch (err) {
-    ok = !['ENOTFOUND', 'ENODATA', 'ENOTIMP'].includes(err.code); // the domain really doesn't exist / has no mail
+    if (gone(err)) {
+      try { ok = (await withTimeout(dns.resolve4(domain))).length > 0; } catch (e2) { ok = !gone(e2); }
+    }
   }
   mxCache.set(domain, ok);
   return ok;

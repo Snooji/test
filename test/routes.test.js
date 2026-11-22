@@ -9,6 +9,7 @@ import { signupRoutes, unsubToken, confirmToken } from '../server/signups.js';
 
 async function serve() {
   process.env.ADMIN_KEY = 'k3y';
+  process.env.EMAIL_MX_CHECK = 'off'; // test addresses use made-up domains
   const store = new FileStore(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-r-')));
   const app = express(); app.set('trust proxy', true);
   signupRoutes(app, express, store);

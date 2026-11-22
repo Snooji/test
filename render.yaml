@@ -18,8 +18,7 @@ services:
         generateValue: true
       - key: CONVERSION_KEY      # for the booking-site webhook / pixel
         generateValue: true
-      - key: EMAIL_MX_CHECK      # refuse emails whose domain can't receive mail
-        value: "on"
+      # EMAIL_MX_CHECK is on by default (refuses emails whose domain can't receive mail); set to "off" to disable
       # optional, set in the Render dashboard:
       # DATABASE_URL   - Postgres (Render Postgres or Neon) so sign-ups live in a real database
       # RESEND_API_KEY + MAIL_FROM - send the opt-in confirmation email
