@@ -2,7 +2,7 @@ import { Client } from 'colyseus.js';
 import { GameScene } from './scene.js';
 import { Input } from './input.js';
 import { PORTRAITS, CHARACTERS } from './portraits.js';
-import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL } from '../../shared/logic.js';
+import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL, SUITS, suitUnlocked } from '../../shared/logic.js';
 import { inRamp } from '../../shared/world.js';
 import { sfx, setMuted, isMuted } from './audio.js';
 import { drawMinimap } from './minimap.js';
@@ -23,6 +23,9 @@ let prefChar = null, prefDiff = 'normal';
 try { prefChar = localStorage.getItem('sm_char'); prefDiff = localStorage.getItem('sm_diff') || 'normal'; } catch {}
 let reconnecting = false;
 let myRole = null; // sabotage: true = saboteur, false = crew; told privately by the server
+let myProfile = { games: 0, wins: 0, loaded: 0 };
+let autoStartSent = false;
+const todayUTC = () => new Date().toISOString().slice(0, 10);
 
 // ---- funnel + error reporting (anonymous counters; no personal data) ----
 const track = (name) => { try { navigator.sendBeacon?.(httpBase + '/api/event', new Blob([JSON.stringify({ name })], { type: 'application/json' })) || fetch(httpBase + '/api/event', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }), keepalive: true }); } catch {} };
@@ -65,6 +68,32 @@ function parseCode(v) {
 }
 $('btn-create').onclick = () => { track('create_click'); connect(null); };
 $('btn-solo').onclick = () => { track('solo_click'); connect(null, { solo: true, difficulty: prefDiff }); };
+$('btn-quick').onclick = () => { track('quickplay_click'); connect(null, { quick: true }); };
+const startTraining = () => { track('tutorial_start'); connect(null, { tutorial: true }); };
+$('btn-train').onclick = startTraining;
+$('btn-train2').onclick = startTraining;
+$('btn-daily').onclick = () => connect(null, { daily: todayUTC(), difficulty: 'normal' });
+
+async function loadHome() {
+  $('daily-label').textContent = `${todayUTC()} · same house for everyone`;
+  try {
+    const r = await fetch(`${httpBase}/api/profile?email=${encodeURIComponent(gate.email)}&token=${gate.token}`);
+    if (r.ok) myProfile = await r.json();
+  } catch {}
+  const next = SUITS.find(x => !suitUnlocked(x.id, myProfile));
+  $('home-stats').innerHTML = myProfile.games
+    ? `<b>${myProfile.games}</b> moves · <b>${myProfile.wins}</b> wins · <b>${myProfile.loaded}</b> items loaded${next ? ` · next suit: ${next.label} (${next.games ? `${next.games} moves` : `${next.wins} wins`})` : ' · every suit unlocked ✨'}`
+    : '';
+  let trained = false; try { trained = localStorage.getItem('sm_trained') === '1'; } catch {}
+  show('btn-train', !myProfile.games && !trained);
+  renderBoard($('daily-board'), todayUTC(), 5);
+}
+async function renderBoard(el, day, n) {
+  try {
+    const j = await (await fetch(`${httpBase}/api/leaderboard?day=${day}`)).json();
+    el.innerHTML = j.rows.length ? `🏆 Today's Daily House<ol>${j.rows.slice(0, n).map(r => `<li class="${r.name === gate?.name ? 'me' : ''}">${esc(r.name)} · ${r.score} pts</li>`).join('')}</ol>` : '<span class="fine">No Daily House scores yet today. Be the first!</span>';
+  } catch { el.innerHTML = ''; }
+}
 const markDiff = (el, level) => { for (const b of el.children) b.classList.toggle('on', b.dataset.level === level); };
 markDiff($('home-diff'), prefDiff);
 $('home-diff').addEventListener('click', (e) => {
@@ -82,6 +111,7 @@ function route() {
   if (r && !room) { connect(r); return; }
   $('home-hi').textContent = `Welcome, ${gate.name}! Ready to load some trucks?`;
   show('home');
+  loadHome();
   track('home_view');
 }
 
@@ -94,7 +124,7 @@ async function connect(roomId, extra = {}) {
     let saved = null;
     try { saved = JSON.parse(sessionStorage.getItem('sm_rt') || 'null'); } catch {}
     if (roomId && saved?.roomId === roomId) { try { room = await client.reconnect(saved.token); } catch { room = null; } }
-    if (!room) room = roomId ? await client.joinById(roomId, opts) : await client.create('move', opts);
+    if (!room) room = roomId ? await client.joinById(roomId, opts) : opts.quick ? await client.joinOrCreate('move', opts) : await client.create('move', opts);
   } catch (err) {
     room = null;
     const msg = String(err?.message || err);
@@ -111,6 +141,7 @@ async function connect(roomId, extra = {}) {
 
 function attach(r) {
   room = r;
+  autoStartSent = false;
   myId = r.sessionId;
   try { sessionStorage.setItem('sm_rt', JSON.stringify({ roomId: r.roomId, token: r.reconnectionToken })); } catch {}
   r.onMessage('snap', onSnap);
@@ -150,15 +181,18 @@ function onSnap(s) {
   if (s.phase !== lastPhase) onPhase(s.phase, lastPhase);
   lastPhase = s.phase;
   if (s.phase === 'lobby') renderLobby(s, me);
-  if (s.phase === 'playing' || s.phase === 'meeting' || s.phase === 'countdown') renderHud(s, me);
+  if (s.phase === 'playing' || s.phase === 'meeting' || s.phase === 'countdown' || s.phase === 'driveoff') renderHud(s, me);
   if (s.phase === 'countdown') { $('countdown').innerHTML = `${s.countdown}<small>${esc(s.level?.name || '')}</small>`; }
   if (s.phase === 'meeting') renderMeeting(s, me);
   if (s.phase === 'results') renderResults(s, me);
 }
 
 function onPhase(phase, prev) {
-  const playing = phase === 'playing' || phase === 'meeting' || phase === 'countdown';
+  const playing = phase === 'playing' || phase === 'meeting' || phase === 'countdown' || phase === 'driveoff';
   show('countdown', phase === 'countdown');
+  if (phase !== 'driveoff') show('drive', false);
+  if (phase !== 'playing') show('coach', false);
+  if (phase === 'lobby' || phase === 'countdown') scene.resetDrive();
   show('lobby', phase === 'lobby');
   show('hud', playing);
   show('controls', playing && isTouch);
@@ -183,11 +217,13 @@ function onPhase(phase, prev) {
 
 // ---------- lobby ----------
 function renderLobby(s, me) {
+  if (s.level?.tutorial && s.hostId === myId && !autoStartSent) { autoStartSent = true; room.send('start'); return; } // training starts right away
   $('lobby-code').textContent = room.roomId;
+  $('quick-note').textContent = s.quick && s.autoStart ? `⚡ Quick Play: starting in ${s.autoStart}s. Friends who join take an AI's seat.` : s.daily ? `📅 Daily House ${s.daily}: best score today goes on the leaderboard.` : '';
   const link = `${location.origin}${location.pathname}?room=${room.roomId}`;
   if ($('share-link').value !== link) $('share-link').value = link;
   const host = s.hostId === myId;
-  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game]);
+  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
   $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
@@ -197,6 +233,14 @@ function renderLobby(s, me) {
   }).join('');
   for (const b of $('modes').children) { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = !host; }
   for (const b of $('games').children) { b.classList.toggle('on', b.dataset.game === s.game); b.disabled = !host; }
+  for (const b of $('twists').children) { b.classList.toggle('on', b.dataset.twist === s.twist); b.disabled = !host || !!s.daily; }
+  const mySuit = me?.suit || 'classic';
+  $('suits').innerHTML = SUITS.map(x => {
+    const open = suitUnlocked(x.id, myProfile);
+    const col = x.color === null ? 'conic-gradient(#ff8a3d 0 25%,#2ec4b6 0 50%,#7bd84a 0 75%,#a66cff 0)' : '#' + x.color.toString(16).padStart(6, '0');
+    const need = x.games ? `${x.games} moves` : `${x.wins} wins`;
+    return `<button class="suit ${x.id === mySuit ? 'on' : ''} ${open ? '' : 'locked'}" data-suit="${x.id}" style="background:${col}" title="${x.label}${open ? '' : ` · unlocks after ${need}`}" aria-label="${x.label} suit${open ? '' : ', locked'}">${open ? '' : '<span class="lk">🔒</span>'}</button>`;
+  }).join('');
   $('game-desc').textContent = s.game === 'sabotage'
     ? '🕵️ One mover is secretly a saboteur. Pack the truck perfectly before time runs out, or vote them out. Needs 3+ movers.'
     : s.mode === 'load' ? '🧩 Full load: the house holds exactly one truckload. Pack it perfectly. Hold ✋ on the ramp to pull pieces back out.'
@@ -227,6 +271,13 @@ $('chars').addEventListener('click', (e) => {
   try { localStorage.setItem('sm_char', b.dataset.char); } catch {}
   sfx('blip');
 });
+$('twists').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('twist', { twist: b.dataset.twist }); });
+$('suits').addEventListener('click', (e) => {
+  const b = e.target.closest('.suit');
+  if (!b || !room) return;
+  if (b.classList.contains('locked')) { toast(`🔒 ${b.title}`); return; }
+  room.send('suit', { id: b.dataset.suit }); sfx('blip');
+});
 $('games').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('game', { game: b.dataset.game }); });
 $('modes').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('mode', { mode: b.dataset.mode }); });
 $('btn-start').onclick = () => room?.send('start');
@@ -253,7 +304,14 @@ $('btn-copy').onclick = async () => {
 // ---------- HUD ----------
 const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 function renderHud(s, me) {
-  $('hud-timer').textContent = s.mode === 'load' ? `🚚 ${fmt(s.timeLeft)}` : fmt(s.timeLeft);
+  $('hud-timer').textContent = s.level?.tutorial ? '🎓 Training' : s.mode === 'load' ? `🚚 ${fmt(s.timeLeft)}` : fmt(s.timeLeft);
+  const tut = s.tutorial;
+  show('coach', !!tut && s.phase === 'playing');
+  if (tut) {
+    $('coach-text').textContent = tut.text || '';
+    $('coach-dots').innerHTML = Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join('');
+  }
+  scene.tutorialTarget = tut?.target || null;
   $('hud-timer').classList.toggle('low', s.mode !== 'load' && s.timeLeft <= 20);
   if (me) {
     $('hud-score').textContent = `${me.score} pts`;
@@ -364,6 +422,22 @@ function onEvent(e) {
     show(r); sfx(myRole ? 'buzz' : 'coin');
     setTimeout(() => show(r, false), 5000);
   }
+  else if (e.kind === 'tutorial') {
+    sfx(e.done ? 'fanfare' : 'coin');
+    if (e.done) { try { localStorage.setItem('sm_trained', '1'); } catch {} track('tutorial_done'); }
+  }
+  else if (e.kind === 'driveoff') {
+    scene.startDriveOff(e.damaged.map(d => d.id));
+    const d = $('drive');
+    $('drive-body').innerHTML = '<span class="fine">Closing the shutter…</span>';
+    show(d);
+    setTimeout(() => {
+      $('drive-body').innerHTML = `<div class="safety" style="color:${e.safety >= 90 ? 'var(--accent2)' : e.safety >= 70 ? 'var(--warn)' : 'var(--danger)'}">${e.safety}% safe</div>`
+        + (e.damaged.length ? e.damaged.map(x => `<div class="dmg">💥 ${esc(x.name)} ${esc(x.reason)}${x.by ? ` (−pts for ${esc(x.by)})` : ''}</div>`).join('') : '<div>Every piece arrived in one piece. Pro packing! ✨</div>');
+      sfx(e.damaged.length ? 'crunch' : 'fanfare');
+      if (e.damaged.length) { scene.shake(); try { navigator.vibrate?.(200); } catch {} }
+    }, 2600);
+  }
   else if (e.kind === 'go') { $('countdown').innerHTML = 'GO!'; show('countdown'); setTimeout(() => show('countdown', false), 600); sfx('fanfare'); }
   else if (e.kind === 'help') {
     scene.ping(e.x, e.z);
@@ -423,7 +497,7 @@ $('chat-form').addEventListener('submit', (e) => {
 function renderResults(s, me) {
   const r = s.results;
   if (!r) return;
-  const key = JSON.stringify(r) + s.hostId;
+  const key = JSON.stringify(r) + s.hostId + s.players.map(p => p.id + p.ready).join();
   if ($('results').dataset.key === key) return;
   $('results').dataset.key = key;
   $('res-reason').textContent = r.reason;
@@ -435,17 +509,63 @@ function renderResults(s, me) {
       + (sp ? `${PORTRAITS[sp.char]}<div class="w">The saboteur was ${esc(sp.name)}${sp.id === myId ? ' (you!)' : ''}</div>` : '')
       + `<div class="team">Final crew score: ${r.crewScore}</div>`;
   } else
-  $('res-winner').innerHTML = w ? `<span class="crown">👑</span>${PORTRAITS[w.char]}<div class="w">${esc(w.name)} is Mover of the Day!</div>` : '<div class="w">Nobody stayed on the truck… 🙃</div>';
-  $('res-table').innerHTML = r.players.map((p, i) => `
+  $('res-winner').innerHTML = w ? `<div class="w">👑 ${esc(w.name)}${w.id === myId ? ' (you!)' : ''} is Mover of the Day!</div>` : '<div class="w">Nobody stayed on the truck… 🙃</div>';
+  // podium: every mover with name on top, place, points, crown for the winner, ✅ when ready to restart
+  const live = new Map(s.players.map(p => [p.id, p]));
+  const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) ? 0 : n % 10] || 'th');
+  $('res-podium').innerHTML = r.players.map((p, i) => `
+    <div class="pod ${i === 0 && !p.out ? 'p1' : ''} ${p.id === myId ? 'me' : ''} ${p.out ? 'out' : ''}">
+      ${p.id === r.winnerId ? '<span class="crown">👑</span>' : ''}${live.get(p.id)?.ready ? '<span class="rd" title="Ready to restart">✅</span>' : ''}
+      <div class="nm">${esc(p.name)}${p.bot ? ' 🤖' : ''}</div>
+      ${PORTRAITS[p.char]}
+      <div class="place">${ordinal(i + 1)}${p.out ? ' · off the truck' : ''}</div>
+      <div class="pts">${p.score}</div>
+    </div>`).join('');
+  const humans = s.players.filter(p => !p.bot);
+  const readyN = humans.filter(p => p.ready).length;
+  const meReady = !!live.get(myId)?.ready;
+  $('btn-ready').textContent = meReady ? `✅ Ready (${readyN}/${humans.length})` : `🔁 Restart game${humans.length > 1 ? ` (${readyN}/${humans.length} ready)` : ''}`;
+  $('btn-ready').classList.toggle('on', meReady);
+  $('res-table') && ($('res-table').innerHTML = r.players.map((p, i) => `
     <div class="res-row ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}"><span>#${i + 1}</span>${PORTRAITS[p.char]}<span><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.out ? ' · off the truck' : ''}<br><small>${p.loaded} loaded · ${p.breaks} broken · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}</small></span><span class="s">${p.score}</span><span></span></div>`).join('') +
-    `<div class="team">🚚 Team truck value: ${r.teamTotal} pts · ${r.loadedCount}/${r.totalItems} items loaded · ${r.broken} broken${r.difficulty ? ` · AI: ${r.difficulty}` : ''}</div>`;
+    `<div class="team">🚚 Team truck value: ${r.teamTotal} pts · ${r.loadedCount}/${r.totalItems} items loaded · ${r.broken} broken${r.difficulty ? ` · AI: ${r.difficulty}` : ''}</div>`);
+  $('res-awards').innerHTML = (r.awards || []).filter(a => a.value > 0).map(a => `<div class="award">${a.title}: <b>${esc(a.name)}</b> (${a.value})</div>`).join('');
+  $('res-drive').innerHTML = r.driveoff ? `🚚 Drive-off safety: <b>${r.driveoff.safety}%</b>${r.driveoff.lost.length ? ' · ' + r.driveoff.lost.map(l => `${esc(l.name)} −${l.amt}`).join(', ') : ''}` : '';
+  $('res-board').innerHTML = '';
+  if (s.daily) renderBoard($('res-board'), s.daily, 10);
+  const training = s.level?.tutorial;
+  $('btn-again').textContent = '🤖 Play a real move vs AI ▶';
   $('res-truth').innerHTML = r.unresolved.length ? '🕵️ <b>The truth comes out…</b><br>' + r.unresolved.map(u => `${esc(u.culprits)} broke a ${esc(u.type.toLowerCase())} and got away with it.`).join('<br>') : '';
-  const host = s.hostId === myId;
-  show('btn-again', host); show('btn-tolobby', host);
-  $('res-wait').textContent = host ? '' : 'Waiting for the crew chief to start the next move…';
+  // training: declared above
+  show('btn-again', training);
+  show($('btn-ready').parentElement, !training);
+  $('res-wait').textContent = training ? '' : s.quick ? 'Quick Play heads back to the lobby on its own in a few seconds.' : humans.length > 1 ? 'The next round starts when everyone taps Restart.' : '';
 }
-$('btn-again').onclick = () => room?.send('start');
-$('btn-tolobby').onclick = () => room?.send('lobby');
+$('btn-again').onclick = async () => {
+  if (snap?.level?.tutorial) { const r = room; room = null; await r?.leave(true); connect(null, { solo: true, difficulty: 'easy' }); return; }
+  room?.send('start');
+};
+$('btn-ready').onclick = () => { room?.send('ready'); sfx('blip'); };
+$('btn-newgame').onclick = async () => {
+  const r = room; room = null;
+  try { sessionStorage.removeItem('sm_rt'); } catch {}
+  await r?.leave(true).catch(() => {});
+  snap = null; lastPhase = null;
+  history.replaceState(null, '', location.pathname);
+  for (const id of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach']) show(id, false);
+  scene.resetDrive();
+  route();
+  let asked = null; try { asked = localStorage.getItem('sm_fb_day'); } catch {}
+  if (asked !== todayUTC()) show('feedback');
+};
+const answerFeedback = (v) => {
+  if (v) { track(v); toast(v === 'feedback_up' ? '🙌 Thanks! Noted.' : '🙏 Thanks for the honesty!'); }
+  try { localStorage.setItem('sm_fb_day', todayUTC()); } catch {}
+  show('feedback', false);
+};
+$('fb-up').onclick = () => answerFeedback('feedback_up');
+$('fb-down').onclick = () => answerFeedback('feedback_down');
+$('fb-skip').onclick = () => answerFeedback(null);
 
 // ---------- truck aiming: D-pad + drag (drop still happens on ACTION) ----------
 const meNow = () => snap?.players.find(p => p.id === myId);
@@ -499,4 +619,4 @@ requestAnimationFrame(loop);
 route();
 
 // expose for automated smoke checks
-window.__sm = { get snap() { return snap; }, get myId() { return myId; }, inRamp, send: (t, m) => room?.send(t, m) };
+window.__sm = { get snap() { return snap; }, get myId() { return myId; }, inRamp, send: (t, m) => room?.send(t, m), scene };

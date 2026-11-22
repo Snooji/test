@@ -49,22 +49,22 @@ export function classicLevel() {
 }
 
 export function generateLevel(seed, opts = {}) {
-  const exact = !!opts.exact;
+  const exact = !!opts.exact, mansion = !!opts.mansion;
   const rng = mulberry32(seed);
   const R = (a, b) => a + rng() * (b - a);
   const RI = (a, b) => Math.floor(R(a, b + 1));
   const pick = (arr) => arr[Math.floor(rng() * arr.length)];
 
   // ---- house footprint: size and distance to the truck vary ----
-  const x1 = RI(-8, 2);                 // right wall; the ramp starts at x=9.4
-  const W = exact ? RI(24, 32) : RI(16, 30), D = exact ? RI(18, 24) : RI(14, 24);
+  const x1 = mansion ? RI(-6, 0) : RI(-8, 2);                 // right wall; the ramp starts at x=9.4
+  const W = mansion ? RI(30, 32) : exact ? RI(24, 32) : RI(16, 30), D = mansion ? RI(22, 24) : exact ? RI(18, 24) : RI(14, 24);
   const x0 = x1 - W;
   let z0 = Math.round(R(-2, 2) - D / 2);
   z0 = Math.max(-13, Math.min(13 - D, z0));
   const z1 = z0 + D;
 
   // ---- split into rooms (BSP); every split wall gets one door, so all rooms connect ----
-  const target = RI(3, 6);
+  const target = mansion ? 6 : RI(3, 6);
   let rooms, doors, innerWalls;
   for (let attempt = 0; attempt < 10; attempt++) {
     rooms = [{ x0, x1, z0, z1 }];
@@ -118,7 +118,7 @@ export function generateLevel(seed, opts = {}) {
   rooms.forEach((r, i) => { delete r.done; r.name = names[i % names.length]; r.floor = floors[i % floors.length]; });
 
   const level = finish({
-    seed, exact, name: `${pick(PREFIX)} ${pick(SUFFIX)}`,
+    seed, exact, mansion, name: mansion ? `${pick(PREFIX)} Moon Mansion` : `${pick(PREFIX)} ${pick(SUFFIX)}`,
     house: { x0, x1, z0, z1 }, yardDistance: +(9.4 - x1).toFixed(1),
     rooms, walls: [...houseWalls, ...TRUCK_WALLS], houseWalls, props: [], items: [], cat: [],
     frontDoor: { x: x1, z: fd },
@@ -199,6 +199,25 @@ export function generateLevel(seed, opts = {}) {
   return level;
 }
 
+/** Training house: two small rooms and one of each thing to learn. */
+export function tutorialLevel() {
+  const houseWalls = [
+    { x0: -14, x1: 0, z0: -7.2, z1: -6.8 }, { x0: -14, x1: 0, z0: 6.8, z1: 7.2 }, { x0: -14.2, x1: -13.8, z0: -7, z1: 7 },
+    { x0: -0.2, x1: 0.2, z0: -7, z1: -1.9 }, { x0: -0.2, x1: 0.2, z0: 1.9, z1: 7 },
+    { x0: -7.2, x1: -6.8, z0: -7, z1: -1.7 }, { x0: -7.2, x1: -6.8, z0: 1.7, z1: 7 },
+  ];
+  return finish({
+    seed: 1, name: 'Training House', tutorial: true,
+    house: { x0: -14, x1: 0, z0: -7, z1: 7 }, yardDistance: 9.4,
+    rooms: [{ name: 'Front Room', x0: -7, x1: 0, z0: -7, z1: 7, floor: 0x3b3561 }, { name: 'Back Room', x0: -14, x1: -7, z0: -7, z1: 7, floor: 0x2f4f5e }],
+    walls: [...houseWalls, ...TRUCK_WALLS], houseWalls,
+    items: [['standard', -3, -4], ['heavy', -3, 4], ['fragile', -10.5, -4.5], ['lamp', -10.5, 4.5], ['couch', -10.5, 0]],
+    props: [{ kind: 'rug', x: -3.5, z: 0, w: 4, d: 3, color: 0xe76f51 }, { kind: 'plant', x: -1, z: -6 }, { kind: 'plant', x: 1.6, z: -3 }, { kind: 'plant', x: 1.6, z: 3 }],
+    cat: [[-3.5, 0], [-10.5, 2], [-3.5, 5]],
+    frontDoor: { x: 0, z: 0 },
+  });
+}
+
 /** A random free floor spot inside the house (for respawning broken items). */
 export function freeSpot(level, taken, rng = Math.random) {
   for (let i = 0; i < 200; i++) {
@@ -208,6 +227,15 @@ export function freeSpot(level, taken, rng = Math.random) {
     return { x: +x.toFixed(1), z: +z.toFixed(1) };
   }
   return { x: level.frontDoor.x + 2.5, z: level.frontDoor.z };
+}
+
+/** Rebuild the server's house from the small description sent in every snapshot. */
+export function levelFromSnapshot(lv) {
+  if (lv.tutorial) return tutorialLevel();
+  if (lv.classic) return classicLevel();
+  const l = generateLevel(lv.seed, { exact: !!lv.exact, mansion: !!lv.mansion });
+  if (lv.daily) l.daily = lv.daily;
+  return l;
 }
 
 /** A fresh seed for the next round. */

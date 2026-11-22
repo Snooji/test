@@ -82,11 +82,17 @@
     <div class="card">
       <div class="logo"><span class="star">★</span> STARSIDE <b>MOVERS</b></div>
       <p class="tag" id="home-hi">Welcome back, mover!</p>
-      <button class="big" id="btn-solo">🤖 Solo vs 3 AI movers</button>
+      <div class="stats" id="home-stats"></div>
+      <button class="big train hidden" id="btn-train">🎓 New here? Start training (2 min)</button>
+      <button class="big" id="btn-quick">⚡ Quick Play <small>join an open game</small></button>
+      <button class="big alt" id="btn-solo">🤖 Solo vs 3 AI movers</button>
       <div class="diff" id="home-diff" role="group" aria-label="AI difficulty">
         <button data-level="easy">Easy</button><button data-level="normal">Normal</button><button data-level="hard">Hard</button>
       </div>
+      <button class="big alt" id="btn-daily">📅 Daily House <small id="daily-label"></small></button>
+      <div class="board" id="daily-board"></div>
       <button class="big alt" id="btn-create">🚚 Start a crew with friends</button>
+      <button class="link" id="btn-train2">🎓 Replay training</button>
       <div class="or">or join a friend's crew</div>
       <div class="row"><input id="join-code" placeholder="Paste invite link or crew code" /><button id="btn-join">Join</button></div>
       <p class="err" id="home-err"></p>
@@ -127,6 +133,15 @@
         <button data-mode="load">🧩 Full load</button>
       </div>
       <div class="house-row"><span id="lobby-house"></span><button class="ghost small" id="btn-reroll">🎲 New house</button></div>
+      <div id="twist-controls">
+        <h3>House twist</h3>
+        <div class="modes" id="twists">
+          <button data-twist="none">🏠 Normal</button><button data-twist="zerog">🪐 Zero-G</button><button data-twist="mansion">🏰 Moon Mansion</button>
+        </div>
+      </div>
+      <h3>Your suit</h3>
+      <div class="suits" id="suits"></div>
+      <p class="fine" id="quick-note"></p>
       <div id="bot-controls">
         <h3>AI movers</h3>
         <div class="diff" id="lobby-diff" role="group" aria-label="AI difficulty">
@@ -161,17 +176,34 @@
 
   <div id="verdict" class="hidden"></div>
   <div id="role" class="hidden"></div>
+  <div id="coach" class="hidden"><div class="coach-head">🎓 Coach</div><div id="coach-text"></div><div id="coach-dots"></div></div>
+  <div id="drive" class="hidden"><div class="drive-title">🚚 Driving off… load check</div><div id="drive-body"></div></div>
 
   <!-- Results -->
   <section id="results" class="screen hidden">
-    <div class="card wide">
+    <div class="card wide results-card">
       <div class="logo small" id="res-reason">Time's up!</div>
       <div id="res-winner"></div>
-      <div id="res-table"></div>
+      <div class="podium" id="res-podium"></div>
+      <div id="res-drive"></div>
+      <div id="res-awards"></div>
       <div id="res-truth"></div>
-      <button class="big" id="btn-again">Play again ▶</button>
-      <button class="ghost" id="btn-tolobby">Back to crew lobby</button>
+      <div id="res-board"></div>
+      <div class="res-buttons">
+        <button class="big" id="btn-ready">🔁 Restart game</button>
+        <button class="big alt" id="btn-newgame">🏠 New game</button>
+      </div>
+      <button class="big hidden" id="btn-again">Play again ▶</button>
       <p class="fine" id="res-wait"></p>
+    </div>
+  </section>
+
+  <section id="feedback" class="screen hidden">
+    <div class="card">
+      <div class="logo small">★ Quick question</div>
+      <p class="tag">Should <b>Starside Movers</b> become a full game?</p>
+      <div class="thumbs"><button id="fb-up" aria-label="Yes, make it a full game">👍</button><button id="fb-down" aria-label="No">👎</button></div>
+      <button class="link" id="fb-skip">Not now</button>
     </div>
   </section>
 

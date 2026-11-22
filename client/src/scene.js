@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { ITEM_TYPES, GRID, footprint, shapeCells } from '../../shared/logic.js';
+import { ITEM_TYPES, GRID, footprint, shapeCells, SUITS } from '../../shared/logic.js';
 import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
-import { generateLevel, classicLevel } from '../../shared/level.js';
+import { levelFromSnapshot } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
@@ -203,7 +203,26 @@ export class GameScene {
     this.rampZone = zone;
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.8), new THREE.MeshBasicMaterial({ map: labelTexture('LOAD ZONE ▶', { fg: '#55ffcc', font: 'bold 40px system-ui', w: 400, h: 96 }), transparent: true }));
     sign.rotation.x = -Math.PI / 2; sign.position.set((r.x0 + r.x1) / 2 - 0.3, 0.06, r.z1 + 0.7); g.add(sign);
+    // roll-down shutter for the drive-off
+    const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.12, GRID.H * CELL + 0.3, wid + 0.6), mat(0xd9d4f2, { metalness: 0.4 }));
+    shutter.position.set(TRUCK.bayX0 - 0.05, TRUCK.floorY + (GRID.H * CELL + 0.3) / 2, 0);
+    shutter.scale.y = 0.001; shutter.visible = false; g.add(shutter);
+    this.shutter = shutter;
+    this.truckGroup = g;
     s.add(g);
+  }
+
+  /** The truck rolls its shutter down and drives off; damaged pieces burst on the way. */
+  startDriveOff(damagedIds) {
+    this.drive = { t: 0, damaged: new Set(damagedIds), burst: false };
+    for (const v of this.items.values()) v.obj.userData.baseX = v.obj.position.x;
+    this.shutter.visible = true;
+  }
+  resetDrive() {
+    if (!this.drive && this.truckGroup.position.x === 0) return;
+    this.drive = null;
+    this.truckGroup.position.x = 0;
+    this.shutter.visible = false; this.shutter.scale.y = 0.001;
   }
 
   // ---------- sync ----------
@@ -211,8 +230,10 @@ export class GameScene {
     this.snap = snap;
     this.myId = myId;
     const lv = snap.level;
-    if (lv && (!this.level || this.level.seed !== lv.seed || !!this.level.classic !== lv.classic)) {
-      this.buildHouse(lv.classic ? classicLevel() : generateLevel(lv.seed));
+    const lvKey = lv && JSON.stringify([lv.seed, lv.classic, lv.exact, lv.mansion, lv.tutorial]);
+    if (lv && this.levelKey !== lvKey) {
+      this.levelKey = lvKey;
+      this.buildHouse(levelFromSnapshot(lv));
       for (const v of this.items.values()) this.scene.remove(v.obj);
       this.items.clear();
     }
@@ -221,16 +242,19 @@ export class GameScene {
     for (const p of snap.players) {
       seen.add(p.id);
       let v = this.players.get(p.id);
-      if (!v || v.char !== p.char) {
+      if (!v || v.char !== p.char || v.suit !== p.suit) {
         if (v) this.scene.remove(v.root);
-        const root = makeMover(p.char);
+        const root = makeMover(p.char, SUITS.find(x => x.id === p.suit)?.color ?? null);
         const label = sprite(p.name, { fg: '#fff', stroke: '#000', font: 'bold 40px system-ui' });
         label.position.y = 2.25; root.add(label);
+        const ready = sprite('✅ READY', { fg: '#55ffcc', stroke: '#0b0820', font: 'bold 40px system-ui' }, [2, 0.5]);
+        ready.position.y = 2.85; ready.visible = false; root.add(ready);
         root.position.set(p.x, 0, p.z);
         this.scene.add(root);
-        v = { root, char: p.char, label, face: p.face };
+        v = { root, char: p.char, suit: p.suit, label, ready, face: p.face };
         this.players.set(p.id, v);
       }
+      v.ready.visible = !!p.ready && snap.phase === 'results';
       v.data = p;
       v.root.traverse(o => { if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
     }
@@ -370,7 +394,7 @@ export class GameScene {
       v.root.userData.body.rotation.y = v.face;
       const moving = Math.hypot(r.position.x - p.x, r.position.z - p.z) > 0.03;
       const body = v.root.userData.body;
-      body.position.y = p.out ? 0.6 + Math.sin(t * 2) * 0.15 : moving ? Math.abs(Math.sin(t * 12)) * 0.12 : (p.char === 'glorp' ? Math.sin(t * 3) * 0.04 + 0.04 : 0);
+      body.position.y = snap?.zeroG && !p.out ? 0.45 + Math.sin(t * 2.5 + r.position.x) * 0.2 : p.out ? 0.6 + Math.sin(t * 2) * 0.15 : moving ? Math.abs(Math.sin(t * 12)) * 0.12 : (p.char === 'glorp' ? Math.sin(t * 3) * 0.04 + 0.04 : 0);
       body.rotation.z = moving ? Math.sin(t * 12) * 0.06 : 0;
       if (p.dashing) body.rotation.x = 0.3; else body.rotation.x = 0;
     }
@@ -384,7 +408,7 @@ export class GameScene {
       }
       const solo = it.state === 'carried' && !ITEM_TYPES[it.type].teamCarry;
       const team = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry;
-      const ty = solo ? 1.85 : team ? (it.n > 1 ? 0.9 : 0.25) : 0;
+      const ty = (solo ? 1.85 : team ? (it.n > 1 ? 0.9 : 0.25) : 0) + (snap?.zeroG && it.state === 'floor' ? 0.6 + Math.sin(t * 2 + it.x) * 0.3 : 0);
       o.position.x = damp(o.position.x, it.x, 14, dt);
       o.position.z = damp(o.position.z, it.z, 14, dt);
       o.position.y = damp(o.position.y, ty, 12, dt);
@@ -416,7 +440,9 @@ export class GameScene {
     this.arrow.visible = false;
     if (me && snap?.phase === 'playing' && !me.out && !me.spectator && !me.loadMode) {
       let tx = null, tz = null;
-      if (me.carry) { tx = 11.2; tz = 0; }
+      const tt = this.tutorialTarget && snap.items.find(i => i.id === this.tutorialTarget && i.state === 'floor');
+      if (tt && !me.carry) { tx = tt.x; tz = tt.z; }
+      else if (me.carry) { tx = 11.2; tz = 0; }
       else {
         let bd = Infinity;
         for (const it of snap.items) {
@@ -502,8 +528,32 @@ export class GameScene {
     }
     this.rampZone.material.opacity = me?.carry ? 0.2 + Math.sin(t * 4) * 0.1 : 0.1;
 
+    // drive-off: shutter down, then the truck pulls away with the load
+    if (this.drive) {
+      const d = this.drive;
+      d.t += dt;
+      this.shutter.scale.y = Math.min(1, d.t / 1.2);
+      const go = Math.max(0, d.t - 1.6);
+      const dx = Math.min(80, 3 * go * go);
+      this.truckGroup.position.x = dx;
+      this.truckGroup.position.y = go > 0 ? Math.abs(Math.sin(d.t * 18)) * 0.05 : 0;
+      for (const v of this.items.values()) {
+        if (v.data?.state !== 'loaded') continue;
+        v.obj.position.x = (v.obj.userData.baseX ?? v.obj.position.x) + dx;
+        if (d.damaged.has(v.data.id) && d.t > 2.3 && v.obj.visible) {
+          if (!d.burst) { d.burst = true; this.shakeT = 0.5; }
+          const b = sprite('💥', { font: 'bold 70px system-ui', w: 96, h: 96 }, [1.4, 1.4]);
+          b.position.copy(v.obj.position); b.position.y += 1.2;
+          this.scene.add(b); this.emotes.push({ s: b, t: 0 });
+          v.obj.visible = false;
+        }
+      }
+      this.camTarget.set(15.4 + dx * 0.6, 1, 0); this.camOff = [-9, 13, 14];
+    }
+
     // camera
-    if (me) {
+    if (this.drive) { /* following the truck (set above) */ }
+    else if (me) {
       if (me.loadMode) { this.camTarget.set(15.2, 1.5, 0); this.camOff = [-6, 11, 9]; }
       else { this.camTarget.set(me.x, 0, me.z); this.camOff = [0, 20, 12]; }
     } else { this.camTarget.set(-2, 0, 0); this.camOff = [0, 34, 20]; }

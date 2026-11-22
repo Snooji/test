@@ -275,6 +275,47 @@ export function buildExactLoad(rng) {
   throw new Error('could not build an exact load');
 }
 
+/**
+ * The truck drives off: how well does the load ride? Returns { damaged: [{id, type, reason, culpritIds}], safety: 0–100 }.
+ * - A piece resting on less than half of its underside slides off and smashes, and smashes any fragile box it lands on.
+ * - A fragile box or lamp that's only partly supported rattles loose and breaks.
+ * - A lone tower (4 high, no neighbour taller than 1, not against a truck wall) tips its fragile top.
+ * culpritIds = whoever loaded the piece that slid or toppled.
+ */
+export function driveOffCheck(grid) {
+  const damaged = new Map();
+  const add = (id, reason, culpritIds) => { if (!damaged.has(id)) damaged.set(id, { id, type: grid.items.get(id).type, reason, culpritIds: [...(culpritIds || [])] }); };
+  const breaksEasily = (type) => ITEM_TYPES[type].fragile || type === 'lamp';
+  for (const rec of grid.items.values()) {
+    const cols = columnsOf(rec.cells);
+    let supported = 0;
+    for (const [cx, cz, low] of cols) { const y = rec.y + low; if (y === 0 || grid.cells[rec.x + cx][rec.z + cz][y - 1]) supported++; }
+    const ratio = supported / cols.length;
+    const label = ITEM_TYPES[rec.type].label.toLowerCase();
+    if (ratio < 0.5) {
+      add(rec.id, 'slid off its stack and smashed', rec.loaderIds);
+      for (const [cx, cz, low] of cols) { // it falls into the gaps below
+        const x = rec.x + cx, z = rec.z + cz;
+        let y = rec.y + low - 1;
+        if (y < 0 || grid.cells[x][z][y]) continue;
+        while (y >= 0 && !grid.cells[x][z][y]) y--;
+        if (y >= 0) { const vid = grid.cells[x][z][y]; if (ITEM_TYPES[grid.items.get(vid).type].fragile) add(vid, `got smashed by a sliding ${label}`, rec.loaderIds); }
+      }
+    } else if (ratio < 1 && breaksEasily(rec.type)) add(rec.id, 'rattled loose over a gap and broke', rec.loaderIds);
+  }
+  for (let x = 0; x < GRID.W; x++) for (let z = 0; z < GRID.D; z++) {
+    if (colTop(grid, x, z) !== GRID.H) continue;
+    const nbrs = [[x - 1, z], [x + 1, z], [x, z - 1], [x, z + 1]];
+    const braced = nbrs.some(([nx, nz]) => nx < 0 || nz < 0 || nx >= GRID.W || nz >= GRID.D || colTop(grid, nx, nz) >= 2);
+    if (braced) continue;
+    const id = grid.cells[x][z][GRID.H - 1];
+    const rec = grid.items.get(id);
+    if (rec && breaksEasily(rec.type)) add(id, 'toppled off a wobbly tower', rec.loaderIds);
+  }
+  const total = grid.items.size;
+  return { damaged: [...damaged.values()], safety: total ? Math.round((100 * (total - damaged.size)) / total) : 100 };
+}
+
 /** Plurality vote; ties broken by caller's own vote; no votes → 'skip'. */
 export function tallyVotes(votes, callerId) {
   const counts = {};
@@ -286,6 +327,23 @@ export function tallyVotes(votes, callerId) {
   if (top.length === 1) return top[0];
   const cv = votes[callerId];
   return cv && top.includes(cv) ? cv : 'skip';
+}
+
+// Suit colours you unlock by playing (profile = { games, wins }).
+export const SUITS = [
+  { id: 'classic', label: 'Classic', color: null, games: 0, wins: 0 },
+  { id: 'gold', label: 'Gold', color: 0xffc43d, games: 3, wins: 0 },
+  { id: 'chrome', label: 'Chrome', color: 0xc9d2e3, games: 10, wins: 0 },
+  { id: 'galaxy', label: 'Galaxy', color: 0x4b2fd1, games: 0, wins: 3 },
+  { id: 'neon', label: 'Neon', color: 0x39ff88, games: 0, wins: 10 },
+];
+export const suitUnlocked = (id, profile) => { const s = SUITS.find(x => x.id === id); return !!s && (profile?.games || 0) >= s.games && (profile?.wins || 0) >= s.wins; };
+
+/** Everyone gets the same house on the same UTC day. */
+export function dailySeed(day) {
+  let h = 2166136261;
+  for (const ch of 'starside-daily-' + day) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }
 
 export const TIPS = [

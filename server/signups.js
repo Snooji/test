@@ -40,7 +40,7 @@ function limited(kind, ip, max, windowMs = 3600_000) {
   return arr.length > max;
 }
 
-const EVENTS = new Set(['visit', 'gate_view', 'home_view', 'solo_click', 'create_click', 'join_click', 'quickplay_click', 'tutorial_start', 'tutorial_done', 'share_click', 'install']);
+const EVENTS = new Set(['visit', 'gate_view', 'home_view', 'solo_click', 'create_click', 'join_click', 'quickplay_click', 'tutorial_start', 'tutorial_done', 'share_click', 'install', 'feedback_up', 'feedback_down']);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const baseUrl = (req) => process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
@@ -138,7 +138,7 @@ export function signupRoutes(app, express, store) {
     const [signups, funnel, errors] = await Promise.all([store.listSignups(), store.funnel(14), store.recentErrors(20)]);
     const marketing = signups.filter(s => s.marketing && !s.unsubscribed).length;
     const days = [...new Set(funnel.map(f => f.day))].sort().reverse();
-    const cols = ['visit', 'gate_view', 'signup', 'signin', 'solo_click', 'quickplay_click', 'round_start', 'round_end', 'tutorial_done', 'share_click'];
+    const cols = ['visit', 'gate_view', 'signup', 'signin', 'solo_click', 'quickplay_click', 'round_start', 'round_end', 'tutorial_done', 'share_click', 'feedback_up', 'feedback_down'];
     const n = (day, name) => funnel.find(f => f.day === day && f.name === name)?.n || 0;
     const k = encodeURIComponent(req.query.key);
     res.send(page('Starside admin', `<h1>★ Starside Movers admin</h1>

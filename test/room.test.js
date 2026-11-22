@@ -129,6 +129,7 @@ test('round ends on timeout with winner among non-eliminated', () => {
   load(room, a, firstOf(room, 'standard'), 0, 0);
   room.timeLeft = 0.01;
   room.tick(0.05);
+  driveAway(room);
   assert.equal(room.phase, 'results');
   assert.equal(room.results.winnerId, 'A');
 });
@@ -207,6 +208,8 @@ test('host can re-roll the house in the lobby; play-again builds a fresh house',
   send('A', 'start');
   assert.notEqual(room.level.seed, s1);
 });
+
+function driveAway(room) { for (let i = 0; i < 400 && room.phase === 'driveoff'; i++) room.tick(0.05); }
 
 function simulate(room, seconds) {
   for (let t = 0; t < seconds && room.phase !== 'results'; t += 0.05) room.tick(0.05);
@@ -347,6 +350,7 @@ test('timed round ends as soon as nothing left in the house fits in the truck', 
   send('A', 'start');
   for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 4; y++) gridPlace(room.grid, { id: `d${x}${z}${y}`, type: 'standard' }, x, z, 0);
   room.tick(0.05);
+  driveAway(room);
   assert.equal(room.phase, 'results');
   assert.match(room.results.reason, /Truck full/);
 });
@@ -362,6 +366,7 @@ test('Full load mode: round ends only when all 64 cells are packed', () => {
   assert.equal(room.phase, 'playing', 'not finished with gaps left');
   for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) gridPlace(room.grid, { id: `e${x}${z}`, type: 'standard' }, x, z, 0);
   room.tick(0.05);
+  driveAway(room);
   assert.equal(room.phase, 'results');
   assert.match(room.results.reason, /Perfect load/);
 });
@@ -486,4 +491,176 @@ test('sabotage: after time runs out the crew score drains; at zero the saboteur 
   for (let i = 0; i < 40 && room.phase === 'playing'; i++) room.tick(0.5);
   assert.equal(room.phase, 'results');
   assert.equal(room.results.winners, 'saboteur');
+});
+
+// ---- deploy B ----
+import { SUITS, dailySeed } from '../shared/logic.js';
+
+test('training: tiny house, a Coach AI, and steps that advance as you play', () => {
+  const { room, join, send, events } = makeRoom({ tutorial: true });
+  const a = join('A', 'Ada');
+  assert.equal(room.level.tutorial, true);
+  assert.equal(room.bots.size, 1);
+  assert.equal([...room.bots.values()][0].coach, true);
+  send('A', 'start');
+  const stepOf = () => room.tutorial.step;
+  assert.equal(stepOf(), 0);
+  const std = [...room.items.values()].find(i => i.type === 'standard');
+  std.state = 'carried'; std.carriers = ['A']; a.carry = std.id;
+  room.tick(0.05);
+  assert.equal(stepOf(), 1, 'picked up → carry to the truck');
+  a.x = 11.2; a.z = 0; room.tick(0.05);
+  assert.equal(stepOf(), 2, 'in the load zone → drop it');
+  a.pending.tapN = 1; room.tick(0.05);
+  assert.equal(stepOf(), 3);
+  assert.ok(events.some(e => e.kind === 'tutorial'), 'client is told about each step');
+});
+
+test('quick play: public lobby with AI fillers that auto-starts', () => {
+  const { room, join } = makeRoom({ level: 'classic', quick: true });
+  join('A', 'Ada');
+  assert.equal(room.bots.size, 3);
+  assert.ok(room.autoStartAt > 0);
+  for (let i = 0; i < 31 * 20 && room.phase === 'lobby'; i++) room.tick(0.05);
+  assert.equal(room.phase, 'countdown');
+});
+
+test('movers aiming in the truck get their own spots on the ramp', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  const [i1, i2] = [...room.items.values()].filter(i => i.type === 'standard');
+  for (const [p, it] of [[a, i1], [b, i2]]) { it.state = 'carried'; it.carriers = [p.id]; p.carry = it.id; p.x = 11.2; p.z = 0; }
+  room.tick(0.05);
+  assert.ok(a.loadMode && b.loadMode);
+  assert.ok(Math.hypot(a.x - b.x, a.z - b.z) > 0.9, 'not stacked on the ramp');
+});
+
+test('results carry MVP awards', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'); join('B', 'Bo');
+  send('A', 'start');
+  load(room, a, firstOf(room, 'standard'), 0, 0);
+  room.endRound('test');
+  driveAway(room);
+  assert.ok(Array.isArray(room.results.awards));
+  assert.ok(room.results.awards.some(w => w.id === 'A' && /loaded/i.test(w.title)));
+});
+
+test('daily house: same seed for everyone that day', () => {
+  assert.equal(dailySeed('2026-11-22'), dailySeed('2026-11-22'));
+  assert.notEqual(dailySeed('2026-11-22'), dailySeed('2026-11-23'));
+  const { room, join } = makeRoom({ daily: '2026-11-22' });
+  join('A', 'Ada');
+  assert.equal(room.level.seed, dailySeed('2026-11-22'));
+  assert.equal(room.level.daily, '2026-11-22');
+  assert.equal(room.bots.size, 3, 'daily is a solo run vs AI');
+});
+
+test('Moon Mansion twist builds a big 6-room house', () => {
+  const { room, join, send } = makeRoom({});
+  join('A', 'Ada');
+  send('A', 'twist', { twist: 'mansion' });
+  const h = room.level.house;
+  assert.ok(h.x1 - h.x0 >= 28 && room.level.rooms.length >= 5, `${h.x1 - h.x0} wide, ${room.level.rooms.length} rooms`);
+});
+
+test('Zero-G twist: gravity cuts out on a cycle and floor items drift', () => {
+  const { room, join, send } = makeRoom({});
+  join('A', 'Ada');
+  send('A', 'twist', { twist: 'zerog' });
+  send('A', 'start');
+  const it = [...room.items.values()].find(i => i.state === 'floor');
+  const x0 = it.x, z0 = it.z;
+  let sawZeroG = false;
+  for (let i = 0; i < 40 * 20; i++) { room.tick(0.05); if (room.zeroG) sawZeroG = true; }
+  assert.ok(sawZeroG);
+  assert.ok(Math.hypot(it.x - x0, it.z - z0) > 0.05, 'floor items drift in zero-G');
+  assert.equal(room.level.hitsWall(it.x, it.z, 0.4), false, 'never drift into walls');
+});
+
+test('suit colors: locked until earned', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada');
+  a.profile = { games: 0, wins: 0 };
+  send('A', 'suit', { id: 'gold' });
+  assert.equal(a.suit, 'classic');
+  a.profile = { games: 5, wins: 0 };
+  send('A', 'suit', { id: 'gold' });
+  assert.equal(a.suit, 'gold');
+  assert.ok(SUITS.find(s => s.id === 'neon').wins > 0);
+});
+
+test('drive-off: a badly loaded truck loses points for what slid and what it smashed', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada'), b = join('B', 'Bo');
+  send('A', 'start');
+  load(room, b, firstOf(room, 'fragile'), 1, 0);                 // Bo's fragile box in the gap
+  load(room, b, firstOf(room, 'standard'), 0, 0);
+  load(room, b, firstOf(room, 'standard'), 0, 0);
+  const couch = room.items.get(firstOf(room, 'couch')); couch.wrapped = true;
+  load(room, a, couch.id, 0, 0);                                  // Ada's couch balanced on one stack
+  const aBefore = a.score, bBefore = b.score;
+  room.timeLeft = 0.01; room.tick(0.05);
+  assert.equal(room.phase, 'driveoff', 'the truck drives off first');
+  assert.ok(room.driveoff.damaged.length >= 2);
+  for (let i = 0; i < 200 && room.phase === 'driveoff'; i++) room.tick(0.05);
+  assert.equal(room.phase, 'results');
+  assert.ok(room.results.driveoff.safety < 100);
+  assert.ok(a.score < aBefore - 60, 'Ada pays for her couch and the box it smashed');
+  assert.equal(b.score, bBefore, 'Bo loaded well and keeps his points');
+});
+
+test('drive-off: a neat load drives away clean', () => {
+  const { room, join, send } = makeRoom();
+  const a = join('A', 'Ada');
+  send('A', 'start');
+  load(room, a, firstOf(room, 'heavy'), 0, 0);
+  const before = a.score;
+  room.timeLeft = 0.01; room.tick(0.05);
+  for (let i = 0; i < 200 && room.phase === 'driveoff'; i++) room.tick(0.05);
+  assert.equal(room.results.driveoff.safety, 100);
+  assert.equal(a.score, before);
+});
+
+test('quick play returns to the lobby on its own after results', () => {
+  const { room, join } = makeRoom({ level: 'classic', quick: true });
+  join('A', 'Ada');
+  room.startRound();
+  room.endRound('test');
+  for (let i = 0; i < 40 * 20 && room.phase !== 'lobby'; i++) room.tick(0.05);
+  assert.equal(room.phase, 'lobby');
+});
+
+test('restart vote: the next round starts only when every human has confirmed', () => {
+  const { room, join, send } = makeRoom({});
+  join('A', 'Ada'); join('B', 'Bo'); room.addBot?.();
+  send('A', 'start');
+  room.endRound('test'); driveAway(room);
+  assert.equal(room.phase, 'results');
+  const seed = room.level.seed;
+  send('A', 'ready');
+  assert.equal(room.players.get('A').ready, true);
+  assert.equal(room.phase, 'results', 'still waiting for Bo');
+  assert.ok(room.snapshot().players.find(p => p.id === 'A').ready, 'ready shows on the character');
+  send('B', 'ready');
+  assert.equal(room.phase, 'countdown');
+  assert.notEqual(room.level.seed, seed, 'fresh house');
+  assert.equal(room.players.get('A').ready, false, 'ready resets for the new round');
+});
+
+import { levelFromSnapshot } from '../shared/level.js';
+test('browsers rebuild exactly the server house from the snapshot (every kind of house)', () => {
+  for (const opts of [{}, { tutorial: true }, { level: 'classic' }, { daily: '2026-11-22' }]) {
+    const { room, join, send } = makeRoom(opts);
+    join('A', 'Ada');
+    const variants = [() => {}];
+    if (!opts.tutorial && !opts.level && !opts.daily) variants.push(() => send('A', 'mode', { mode: 'load' }), () => send('A', 'twist', { twist: 'mansion' }), () => send('A', 'game', { game: 'sabotage' }));
+    for (const v of variants) {
+      v();
+      const rebuilt = levelFromSnapshot(room.snapshot().level);
+      assert.deepEqual(rebuilt.houseWalls, room.level.houseWalls, `walls differ for ${JSON.stringify(opts)} ${room.mode}/${room.twist}/${room.game}`);
+      assert.deepEqual(rebuilt.items, room.level.items);
+    }
+  }
 });

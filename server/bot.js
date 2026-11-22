@@ -4,8 +4,8 @@ import { ITEM_TYPES, GRID, footprint, cloneGrid, placeItem, shapeCells, shapeDro
 import { inRamp } from '../shared/world.js';
 
 export const DIFFICULTY = {
-  easy:   { speed: 0.7,  react: [0.9, 1.6],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.35, dash: false, follow: 0.45 },
-  normal: { speed: 0.88, react: [0.4, 0.9],  sloppy: 0.25, wrap: 0.7, help: 0.9, callout: 0.4,  accuracy: 0.6,  dash: true,  follow: 0.8 },
+  easy:   { speed: 0.7,  react: [0.9, 1.6],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.35, dash: false, follow: 0.6 },
+  normal: { speed: 0.88, react: [0.4, 0.9],  sloppy: 0.25, wrap: 0.7, help: 0.9, callout: 0.4,  accuracy: 0.6,  dash: true,  follow: 0.9 },
   hard:   { speed: 1,    react: [0.15, 0.4], sloppy: 0,    wrap: 1,   help: 1,   callout: 0.7,  accuracy: 0.85, dash: true,  follow: 1 },
 };
 
@@ -22,6 +22,7 @@ const pick = (arr, rng = Math.random) => arr[Math.floor(rng() * arr.length)];
 export function choosePlacement(grid, item, difficulty, rng = Math.random, evil = false) {
   const t = ITEM_TYPES[item.type];
   const opts = [];
+  const top = (x, z) => { const col = grid.cells[x][z]; for (let y = GRID.H - 1; y >= 0; y--) if (col[y]) return y + 1; return 0; };
   for (const rot of t.w !== t.d ? [0, 1] : [0]) {
     const { w, d } = footprint(item.type, rot);
     for (let gx = 0; gx <= GRID.W - w; gx++) for (let gz = 0; gz <= GRID.D - d; gz++) {
@@ -32,6 +33,12 @@ export function choosePlacement(grid, item, difficulty, rng = Math.random, evil 
       else if (t.fragile) score += res.y * 4;
       else score -= res.y * 2;
       score -= gz * 1.5;                 // fill from the cab end
+      // gaps left underneath make the load wobble on the drive (and can never be filled)
+      const low = new Map();
+      for (const [cx, cy, cz] of shapeCells(item.type, rot)) { const k = cx + ',' + cz; if (!low.has(k) || low.get(k)[2] > cy) low.set(k, [cx, cz, cy]); }
+      let gaps = 0;
+      for (const [cx, cz, lo] of low.values()) gaps += Math.max(0, res.y + lo - top(gx + cx, gz + cz));
+      score -= gaps * 9;
       score += rng() * 0.5;              // tie-break
       opts.push({ gx, gz, rot, score });
     }
@@ -226,6 +233,10 @@ export class Bot {
 
   chooseTarget() {
     const room = this.room, p = this.p, cfg = this.cfg;
+    if (this.coach) { // training Coach: only ever answers a 🆘 on a two-mover lift
+      for (const it of room.items.values()) if (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1 && !it.carriers.includes(p.id)) return it;
+      return null;
+    }
     const alone = room.activePlayers().length === 1;
     // 1) someone is holding one end of a two-mover lift: help them
     for (const it of room.items.values()) {
@@ -257,7 +268,10 @@ export class Bot {
     return best;
   }
 
-  wander(dt) { this.goTo({ x: 6, z: (this.p.id.charCodeAt(0) % 5) - 2 }, dt, false); }
+  wander(dt) {
+    if (this.coach) { const d = Math.hypot(this.p.x - 6, this.p.z - 4); if (d > 0.6) this.goTo({ x: 6, z: 4 }, dt, false); else this.idle(); return; }
+    this.goTo({ x: 6, z: (this.p.id.charCodeAt(0) % 5) - 2 }, dt, false);
+  }
 
   goTo(target, dt, heavy, mover = null) {
     const p = this.p;

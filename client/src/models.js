@@ -84,9 +84,9 @@ function astronaut(suit, visor) {
   return g;
 }
 
-function glorp() {
+function glorp(tint) {
   const g = new THREE.Group();
-  const green = mat(0x7bd84a);
+  const green = mat(tint ?? 0x7bd84a);
   const body = mesh(new THREE.SphereGeometry(0.5, 20, 16), green, 0, 0.6, 0);
   body.scale.set(1, 1.25, 0.95);
   g.add(body);
@@ -104,9 +104,9 @@ function glorp() {
   return g;
 }
 
-function zibble() {
+function zibble(tint) {
   const g = new THREE.Group();
-  const purple = mat(0xa66cff);
+  const purple = mat(tint ?? 0xa66cff);
   g.add(mesh(new THREE.CapsuleGeometry(0.3, 0.3, 6, 12), mat(0x7d45d9), 0, 0.5, 0));
   const head = mesh(new THREE.SphereGeometry(0.42, 20, 16), purple, 0, 1.15, 0);
   head.scale.set(1.15, 0.9, 1);
@@ -125,8 +125,9 @@ function zibble() {
   return g;
 }
 
-export function makeMover(char) {
-  const g = { nova: () => astronaut(0xff8a3d, 0x1d2b6b), cosmo: () => astronaut(0x2ec4b6, 0xe0a526), glorp, zibble }[char]?.() || astronaut(0xff8a3d, 0x1d2b6b);
+/** suit = colour from SUITS (null = the mover's classic colour) */
+export function makeMover(char, suit = null) {
+  const g = { nova: () => astronaut(suit ?? 0xff8a3d, 0x1d2b6b), cosmo: () => astronaut(suit ?? 0x2ec4b6, 0xe0a526), glorp: () => glorp(suit), zibble: () => zibble(suit) }[char]?.() || astronaut(suit ?? 0xff8a3d, 0x1d2b6b);
   const root = new THREE.Group();
   root.add(g);
   root.userData.body = g;

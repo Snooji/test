@@ -236,3 +236,48 @@ test('only an item with nothing on top of it can be pulled back out', () => {
   assert.equal(isRemovable(g, 'a'), true);
   assert.equal(g.cells[0][0][1], null);
 });
+
+// ---- drive-off safety check ----
+import { driveOffCheck } from '../shared/logic.js';
+
+const placeL = (g, id, type, x, z, rot = 0, loaderIds = ['A']) => placeItem(g, { id, type, wrapped: true, loaderIds }, x, z, rot);
+
+test('drive-off: a solid, gap-free stack travels safely', () => {
+  const g = createGrid();
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) placeL(g, `b${x}${z}`, x % 2 ? 'heavy' : 'standard', x, z);
+  for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) placeL(g, `f${x}${z}`, 'fragile', x, z);
+  const r = driveOffCheck(g);
+  assert.deepEqual(r.damaged, []);
+  assert.equal(r.safety, 100);
+});
+
+test('drive-off: a couch resting on one box slides off and smashes what is in the gap below', () => {
+  const g = createGrid();
+  placeL(g, 'f', 'fragile', 1, 0, 0, ['B']);      // fragile sitting in the gap
+  placeL(g, 's', 'standard', 0, 0, 0, ['B']);
+  placeL(g, 's2', 'standard', 0, 0, 0, ['B']);     // column x=0 is 2 high
+  placeL(g, 'c', 'couch', 0, 0, 0, ['A']);         // lying couch rests at y=2, supported only at x=0
+  const r = driveOffCheck(g);
+  const ids = r.damaged.map(d => d.id).sort();
+  assert.deepEqual(ids, ['c', 'f']);
+  assert.ok(r.damaged.every(d => d.culpritIds.includes('A')), 'the couch loader caused both');
+  assert.ok(r.safety < 100);
+});
+
+test('drive-off: a half-supported fragile box gets rattled and breaks; a half-supported standard box is fine', () => {
+  const g = createGrid();
+  placeL(g, 'a', 'standard', 0, 0);
+  placeL(g, 'a2', 'standard', 1, 0);
+  placeL(g, 'd', 'desk', 0, 0, 0);                 // desk across both, solid
+  const r1 = driveOffCheck(g);
+  assert.deepEqual(r1.damaged, []);
+});
+
+test('drive-off: a lone 4-high tower tips its fragile top', () => {
+  const g = createGrid();
+  placeL(g, 't1', 'standard', 2, 2); placeL(g, 't2', 'standard', 2, 2); placeL(g, 't3', 'heavy', 2, 2);
+  placeL(g, 'top', 'fragile', 2, 2);
+  const r = driveOffCheck(g);
+  assert.deepEqual(r.damaged.map(d => d.id), ['top']);
+  assert.match(r.damaged[0].reason, /tower|toppled/i);
+});

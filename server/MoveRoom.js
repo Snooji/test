@@ -1,8 +1,8 @@
 import { Room, ServerError } from 'colyseus';
-import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt } from '../shared/logic.js';
+import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
 import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
-import { generateLevel, classicLevel, newSeed, freeSpot } from '../shared/level.js';
+import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel } from '../shared/level.js';
 import { createNav } from './nav.js';
 import { verifyToken, cleanName, cleanEmail } from './signups.js';
 
@@ -38,6 +38,14 @@ export class MoveRoom extends Room {
     this.countdown = 0;
     this.classic = options.level === 'classic';
     this.seedOverride = Number.isInteger(options.seed) ? options.seed : null;
+    this.tutorialMode = !!options.tutorial;
+    this.quick = !!options.quick;
+    this.daily = /^\d{4}-\d{2}-\d{2}$/.test(options.daily || '') ? options.daily : null;
+    this.twist = ['zerog', 'mansion'].includes(options.twist) ? options.twist : 'none';
+    if (this.daily) { this.seedOverride = dailySeed(this.daily); this.soloPending = true; this.solo = true; }
+    if (this.quick) { this.soloPending = true; this.autoStartAt = 0; }
+    if (this.tutorialMode) { this.soloPending = false; this.solo = true; }
+    this.zeroG = false; this.zeroT = 0;
     this.players = new Map();
     this.items = new Map();
     this.breaks = [];
@@ -91,6 +99,15 @@ export class MoveRoom extends Room {
       if (c.sessionId === this.hostId && this.phase === 'lobby' && !this.classic) { this.newLevel(); this.resetWorld(); }
     });
     if (process.env.DEBUG_HOOKS === '1') {
+      this.onMessage('debug_end', () => { if (this.phase === 'playing') this.timeLeft = 0.01; });
+      this.onMessage('debug_place', (c, m) => { // load an item straight into the truck (for drive-off tests)
+        const p = this.players.get(c.sessionId);
+        const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === m?.type);
+        if (!p || !it) return;
+        it.wrapped = true; it.assembled = false; it.state = 'carried'; it.carriers = [p.id]; p.carry = it.id;
+        p.cursor = { gx: m.gx | 0, gz: m.gz | 0, rot: m.rot | 0 };
+        this.dropIntoTruck(p, it);
+      });
       this.onMessage('debug_give', (c, m) => {
         const p = this.players.get(c.sessionId);
         const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === m?.type);
@@ -104,6 +121,24 @@ export class MoveRoom extends Room {
       });
     }
     this.onMessage('callout', (c) => this.callMeeting(c.sessionId));
+    // results screen: everyone confirms "restart" → next round with a fresh house
+    this.onMessage('ready', (c) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || this.phase !== 'results') return;
+      p.ready = !p.ready;
+      const humans = [...this.players.values()].filter(o => !o.bot);
+      if (humans.length && humans.every(o => o.ready)) { this.newLevel(); this.startRound(); }
+    });
+    this.onMessage('twist', (c, m) => {
+      if (!hostInLobby(c) || !['none', 'zerog', 'mansion'].includes(m?.twist) || this.daily || this.tutorialMode) return;
+      const was = this.twist; this.twist = m.twist;
+      if ((was === 'mansion') !== (this.twist === 'mansion') && !this.classic) { this.newLevel(); this.resetWorld(); }
+      else this.level.twist = this.twist;
+    });
+    this.onMessage('suit', (c, m) => {
+      const p = this.players.get(c.sessionId);
+      if (p && suitUnlocked(m?.id, p.profile)) p.suit = m.id;
+    });
     this.onMessage('help', (c) => this.helpPing(this.players.get(c.sessionId)));
     // D-pad / drag-to-aim in the truck: set the drop column directly
     this.onMessage('aim', (c, m) => {
@@ -158,6 +193,10 @@ export class MoveRoom extends Room {
     if (!this.hostId) this.hostId = p.id;
     this.event({ kind: 'toast', text: `${p.name} joined the crew${p.spectator ? ' (spectating this round)' : ''}` });
     if (this.soloPending) { this.soloPending = false; for (let i = 0; i < 3; i++) this.addBot(); }
+    if (this.tutorialMode && !this.bots.size) { const c = this.addBot(); if (c) { c.name = 'Coach'; this.bots.get(c.id).coach = true; } }
+    if (this.quick && this.phase === 'lobby' && !this.autoStartAt) this.autoStartAt = 30;
+    p.suit = 'classic'; p.profile = { games: 0, wins: 0 };
+    if (MoveRoom.store && auth.email) MoveRoom.store.getProfile(auth.email).then(pr => { p.profile = pr; }).catch(() => {});
   }
 
   newPlayer(id, name, char, extra = {}) {
@@ -249,8 +288,11 @@ export class MoveRoom extends Room {
 
   // ---------- world ----------
   newLevel() {
-    this.level = this.classic ? classicLevel() : generateLevel(this.seedOverride ?? newSeed(), { exact: this.isExact() });
-    this.seedOverride = null;
+    this.level = this.tutorialMode ? tutorialLevel()
+      : this.classic ? classicLevel()
+      : generateLevel(this.seedOverride ?? newSeed(), { exact: this.isExact(), mansion: this.twist === 'mansion' });
+    if (this.daily) this.level.daily = this.daily; else this.seedOverride = null;
+    this.level.twist = this.twist;
     this.nav = createNav(this.level);
     this.cat = { x: this.level.cat[0][0], z: this.level.cat[0][1], wp: 0 };
   }
@@ -290,10 +332,14 @@ export class MoveRoom extends Room {
       p.spectator = i >= MAX_MOVERS;
       this.placeAtSpawn(p, i++);
     }
-    this.timeLeft = RULES.MODES[this.mode];
+    this.timeLeft = this.tutorialMode ? 3600 : RULES.MODES[this.mode] + (this.twist === 'mansion' && this.mode !== 'load' ? 60 : 0);
+    this.tutorial = this.tutorialMode ? { step: -1 } : null;
+    this.autoStartAt = 0; this.zeroG = false; this.zeroT = 0;
+    if (this.quick && this.listing) Promise.resolve().then(() => this.lock()).catch(() => {}); // stop Quick Play matching into a live round
+    for (const p of this.players.values()) Object.assign(p, { unloads: 0, helps: 0, wraps: 0, rampSlot: -1, ready: false });
     this.results = null;
     for (const b of this.bots.values()) b.reset();
-    this.overtime = false; this.drain = 0;
+    this.overtime = false; this.drain = 0; this.driveoff = null; this.pendingEnd = null; this.resultsT = 0;
     for (const p of this.players.values()) { p.saboteur = false; p.lastMeeting = 0; }
     if (this.game === 'sabotage') {
       const movers = this.movers();
@@ -318,7 +364,7 @@ export class MoveRoom extends Room {
     this.moveCat(dt);
     if (this.phase === 'countdown') {
       this.countdown -= dt;
-      if (this.countdown <= 0) { this.phase = 'playing'; this.event({ kind: 'go' }); }
+      if (this.countdown <= 0) { this.phase = 'playing'; this.event({ kind: 'go' }); if (this.tutorial) this.updateTutorial(); }
     } else if (this.phase === 'playing') {
       this.timeLeft -= dt;
       for (const b of this.bots.values()) b.think(dt);
@@ -326,15 +372,66 @@ export class MoveRoom extends Room {
       this.separate();
       this.updateTeamCarries(dt);
       this.updateTasks(dt);
+      if (this.twist === 'zerog') this.updateZeroG(dt);
+      if (this.tutorial) this.updateTutorial();
       this.checkEnd();
     } else if (this.phase === 'meeting') {
       this.updateMeeting(dt);
+    } else if (this.phase === 'driveoff') {
+      if ((this.driveT -= dt) <= 0) { const [r, f, w] = this.pendingEnd; this.finishRound(r, f, w); }
+    } else if (this.phase === 'results' && this.quick) {
+      this.resultsT = (this.resultsT || 0) + dt;
+      if (this.resultsT > 15) { this.resultsT = 0; this.phase = 'lobby'; this.newLevel(); this.resetWorld(); this.autoStartAt = 30; }
     } else if (this.phase === 'lobby') {
       for (const p of this.players.values()) this.freeMove(p, dt, 1);
       this.separate();
+      if (this.quick && this.autoStartAt > 0 && (this.autoStartAt -= dt) <= 0) { this.autoStartAt = 0; this.startRound(); }
     }
     for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; }
     this.broadcast('snap', this.snapshot());
+  }
+
+  /** Zero-G twist: every 25 s gravity cuts out for 6 s; loose items drift and movers float faster. */
+  updateZeroG(dt) {
+    this.zeroT += dt;
+    const was = this.zeroG;
+    this.zeroG = (this.zeroT % 25) > 19;
+    if (this.zeroG && !was) this.event({ kind: 'toast', text: '🪐 Gravity is failing! Loose boxes are drifting…' });
+    if (!this.zeroG) return;
+    for (const it of this.items.values()) {
+      if (it.state !== 'floor') continue;
+      it.vx = (it.vx || 0) * 0.98 + (Math.random() - 0.5) * 0.6 * dt; it.vz = (it.vz || 0) * 0.98 + (Math.random() - 0.5) * 0.6 * dt;
+      const nx = it.x + it.vx, nz = it.z + it.vz;
+      if (!this.level.hitsWall(nx, it.z, 0.55) && !inRamp(nx, it.z)) it.x = nx; else it.vx = -it.vx;
+      if (!this.level.hitsWall(it.x, nz, 0.55) && !inRamp(it.x, nz)) it.z = nz; else it.vz = -it.vz;
+    }
+  }
+
+  // ---------- training ----------
+  updateTutorial() {
+    const T = this.tutorial;
+    const human = [...this.players.values()].find(p => !p.bot);
+    if (!human) return;
+    const it = (type) => [...this.items.values()].find(i => i.type === type);
+    const steps = [
+      { text: 'Walk to the glowing box and TAP ✋ (E) to pick it up.', target: 'standard', done: () => human.carry === it('standard').id || it('standard').state === 'loaded' },
+      { text: 'Carry it to the 🚚 LOAD ZONE on the truck ramp.', target: null, done: () => human.loadMode || it('standard').state === 'loaded' },
+      { text: 'Aim with move (or the D-pad), then TAP ✋ to drop it into the truck.', target: null, done: () => it('standard').state === 'loaded' },
+      { text: 'Heavy boxes go on the BOTTOM. Load the heavy box (it slows you down).', target: 'heavy', done: () => it('heavy').state === 'loaded' },
+      { text: 'Fragile goes on TOP. Set the fragile box on top of another box.', target: 'fragile', done: () => it('fragile').state === 'loaded' },
+      { text: 'HOLD ✋ next to the floor lamp to pad-wrap it. Unwrapped lamps shatter.', target: 'lamp', done: () => it('lamp').wrapped || it('lamp').state === 'loaded' },
+      { text: 'Load the wrapped lamp. Press R (⟳ ROTATE) to turn and flip it.', target: 'lamp', done: () => it('lamp').state === 'loaded' },
+      { text: 'Couches are a two-mover lift. Grab one end, then hit 🆘 HELP (H) to call the Coach.', target: 'couch', done: () => it('couch').carriers.length === 2 || it('couch').state === 'loaded' },
+      { text: 'Carry the couch together to the truck and load it.', target: 'couch', done: () => it('couch').state === 'loaded' },
+    ];
+    let step = Math.max(0, T.step);
+    while (step < steps.length && steps[step].done()) step++;
+    if (step !== T.step) {
+      T.step = step;
+      if (step >= steps.length) { this.event({ kind: 'tutorial', step, total: steps.length, done: true }); return this.endRound('Training complete! You’re ready for a real move.'); }
+      T.text = steps[step].text; T.target = steps[step].target ? it(steps[step].target).id : null; T.total = steps.length;
+      this.event({ kind: 'tutorial', step, total: steps.length, text: T.text });
+    }
   }
 
   /** Soft push so movers never stand inside each other (names stay readable). */
@@ -401,6 +498,7 @@ export class MoveRoom extends Room {
       p.unloadT = (p.unloadT || 0) + dt;
       if (p.unloadT > 0.6) {
         p.unloadT = 0; p.loadMode = true; p.unloading = true; p.cursor = { gx: 1, gz: 1, rot: 0 }; p.cursorCd = 0.35;
+        this.takeRampSlot(p);
         this.tell(p, 'Unloading: aim at a stack, ACTION pulls the top piece, BACK to leave');
       }
       return;
@@ -410,6 +508,7 @@ export class MoveRoom extends Room {
     if (item && item.carriers[0] === p.id && inRamp(item.x, item.z)) {
       p.loadMode = true;
       p.cursor = { gx: 1, gz: 0, rot: 0 };
+      this.takeRampSlot(p);
       p.cursorCd = 0.35; // grace so held movement doesn't jerk the cursor on entry
       this.tell(p, 'Aim with move · ACTION to drop · ROTATE to turn · BACK to leave');
       return;
@@ -431,7 +530,7 @@ export class MoveRoom extends Room {
       if (target.state === 'carried') {
         if (target.carriers.length >= 2) return;
         if (this.players.get(target.carriers[0])?.loadMode) return; // already being placed in the truck
-        target.carriers.push(p.id); p.carry = target.id;
+        target.carriers.push(p.id); p.carry = target.id; p.helps = (p.helps || 0) + 1;
         this.event({ kind: 'emote', id: p.id, e: '💪' });
         this.event({ kind: 'toast', text: `Team lift! ${target.carriers.map(id => this.players.get(id)?.name).join(' + ')} carry the ${t.label.toLowerCase()}` });
         return;
@@ -520,7 +619,7 @@ export class MoveRoom extends Room {
       p.task = { id: it.id, kind };
       if (it.task.progress >= 1) {
         if (kind === 'wrap') it.wrapped = true; else it.assembled = false;
-        for (const id of it.task.contributors) { const h = this.players.get(id); if (h) h.score += RULES.HELPER_BONUS; }
+        for (const id of it.task.contributors) { const h = this.players.get(id); if (h) { h.score += RULES.HELPER_BONUS; h.wraps = (h.wraps || 0) + 1; } }
         this.event({ kind: 'toast', text: `${kind === 'wrap' ? '🧣 Pad-wrapped' : '🔧 Disassembled'} the ${t.label.toLowerCase()}! +${RULES.HELPER_BONUS} each` });
         it.task = null;
       }
@@ -567,6 +666,19 @@ export class MoveRoom extends Room {
     if (p.pending.tapN) this.dropIntoTruck(p, item);
   }
 
+  /** Movers aiming in the truck each stand in their own spot on the ramp. */
+  takeRampSlot(p) {
+    const SLOTS = [[11.4, -1.7], [11.4, -0.55], [11.4, 0.6], [11.4, 1.75]];
+    const used = new Set([...this.players.values()].filter(o => o !== p && o.loadMode).map(o => o.rampSlot));
+    const i = SLOTS.findIndex((_, k) => !used.has(k));
+    p.rampSlot = i;
+    if (i < 0) return;
+    const item = p.carry ? this.items.get(p.carry) : null;
+    if (item && item.carriers.length > 1) return; // team carries keep their formation
+    [p.x, p.z] = SLOTS[i];
+    if (item) { item.x = p.x; item.z = p.z; }
+  }
+
   pullFromTruck(p) {
     const id = topItemAt(this.grid, p.cursor.gx, p.cursor.gz);
     if (!id) return this.tell(p, 'That column is empty.');
@@ -576,7 +688,7 @@ export class MoveRoom extends Room {
     this.gridVersion++;
     for (const [pid, amt] of Object.entries(item.earned || {})) { const o = this.players.get(pid); if (o) { o.score -= amt; o.loaded = Math.max(0, o.loaded - 1); } }
     item.earned = {}; item.g = null; item.state = 'carried'; item.carriers = [p.id]; item.x = p.x; item.z = p.z;
-    p.carry = id; p.unloading = false; p.cursor.rot = 0;
+    p.carry = id; p.unloading = false; p.cursor.rot = 0; p.unloads = (p.unloads || 0) + 1;
     this.event({ kind: 'emote', id: p.id, e: '↩️' });
     this.tell(p, `Pulled out the ${ITEM_TYPES[item.type].label.toLowerCase()}. Drop it somewhere better, or BACK to set it on the ground.`);
   }
@@ -763,7 +875,32 @@ export class MoveRoom extends Room {
     if (this.timeLeft <= 0 || done || noneLeft) this.endRound(done ? doneReason : noneLeft ? 'Everyone got kicked off the truck!' : "Time's up!");
   }
 
+  /** Competitive rounds end with the truck driving off; a sloppy load costs whoever placed the wobbly pieces. */
   endRound(reason, forcedWinnerId = null, winners = null) {
+    if (this.phase === 'driveoff' || this.phase === 'results') return;
+    const drive = this.game === 'classic' && !this.tutorialMode && !forcedWinnerId && this.grid.items.size > 0;
+    if (!drive) return this.finishRound(reason, forcedWinnerId, winners);
+    for (const p of this.players.values()) { if (p.carry) this.releaseCarry(p); p.loadMode = false; p.task = null; }
+    const check = driveOffCheck(this.grid);
+    const lost = {};
+    for (const d of check.damaged) {
+      const it = this.items.get(d.id);
+      if (!it) continue;
+      it.damaged = d.reason;
+      const value = ITEM_TYPES[it.type].pts;
+      const payers = d.culpritIds.length ? d.culpritIds : Object.keys(it.earned || {});
+      for (const id of payers) { const o = this.players.get(id); if (o) { const amt = Math.round(value / payers.length); o.score -= amt; lost[id] = (lost[id] || 0) + amt; } }
+      d.name = ITEM_TYPES[it.type].label;
+      d.by = payers.map(id => this.players.get(id)?.name).filter(Boolean).join(' + ');
+    }
+    this.driveoff = { ...check, lost: Object.entries(lost).map(([id, amt]) => ({ id, name: this.players.get(id)?.name, amt })) };
+    this.pendingEnd = [reason, forcedWinnerId, winners];
+    this.phase = 'driveoff';
+    this.driveT = check.damaged.length ? 7 : 5;
+    this.event({ kind: 'driveoff', safety: check.safety, damaged: check.damaged.map(d => ({ id: d.id, name: d.name, reason: d.reason, by: d.by })) });
+  }
+
+  finishRound(reason, forcedWinnerId = null, winners = null) {
     this.phase = 'results';
     const players = [...this.players.values()].filter(p => !p.spectator)
       .map(p => ({ id: p.id, name: p.name, char: p.char, score: p.score, strikes: p.strikes, out: p.out, loaded: p.loaded, breaks: p.breaks || 0, bot: !!p.bot }))
@@ -772,17 +909,24 @@ export class MoveRoom extends Room {
     let winner = (forcedWinnerId && players.find(p => p.id === forcedWinnerId)) || players.find(p => !p.out) || null;
     if (winners === 'saboteur' && sab) winner = players.find(p => p.id === sab.id) || winner;
     if (winners === 'crew') winner = players.find(p => sab ? p.id !== sab.id : true) || winner;
-    const loaded = [...this.items.values()].filter(i => i.state === 'loaded');
+    const loaded = [...this.items.values()].filter(i => i.state === 'loaded' && !i.damaged);
     const teamTotal = loaded.reduce((s, i) => s + Object.values(i.earned || {}).reduce((a, b) => a + b, 0), 0);
     const unresolved = this.breaks.filter(b => !b.resolved).map(b => ({
       type: ITEM_TYPES[b.type].label,
       culprits: b.culpritIds.map(id => this.players.get(id)?.name || 'a mover who left').join(' + '),
     }));
-    this.results = { reason, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null,
+    const movers = [...this.players.values()].filter(p => !p.spectator);
+    const best = (key) => movers.reduce((b, p) => ((p[key] || 0) > (b?.[key] || 0) ? p : b), null);
+    const awards = [
+      ['loaded', '📦 Most loaded'], ['helps', '💪 Best lifting buddy'], ['wraps', '🧣 Wrap master'], ['unloads', '🧩 Repack hero'],
+    ].map(([k, title]) => { const p = best(k); return p ? { id: p.id, name: p.name, title, value: p[k] } : null; }).filter(Boolean);
+    this.results = { reason, awards, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null,
+      driveoff: this.driveoff ? { safety: this.driveoff.safety, damaged: this.driveoff.damaged.map(d => ({ name: d.name, reason: d.reason, by: d.by })), lost: this.driveoff.lost } : null,
       game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
     this.event({ kind: 'end' });
     this.recordResults();
+    if (this.quick) { if (this.listing) Promise.resolve().then(() => this.unlock()).catch(() => {}); this.autoStartAt = 30; }
   }
 
   /** Save stats + leaderboard entries for human players (never blocks the game). */
@@ -808,18 +952,20 @@ export class MoveRoom extends Room {
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
       out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
-      room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away,
+      room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
       id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
-      assembled: i.assembled, g: i.g, n: i.carriers.length,
+      assembled: i.assembled, g: i.g, n: i.carriers.length, damaged: i.damaged ? 1 : 0,
       task: i.task ? { kind: i.task.kind, p: +i.task.progress.toFixed(2) } : null,
     }));
     return {
       phase: this.phase, mode: this.mode, hostId: this.hostId, timeLeft: Math.max(0, Math.round(this.timeLeft)),
-      countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0,
+      countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0, driveT: this.phase === 'driveoff' ? +this.driveT.toFixed(2) : 0,
       game: this.game, overtime: !!this.overtime, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
-      level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
+      quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
+      daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
+      level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,
