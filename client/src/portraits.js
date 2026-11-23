@@ -48,3 +48,14 @@ export const PORTRAITS = {
   <path d="M50 60q10 7 20 0" stroke="#3e1f73" stroke-width="3.5" stroke-linecap="round" fill="none"/>
 </svg>`,
 };
+
+// ---- the voxel crew (rendered portraits in /chars) ----
+import { ROSTER, rosterEntry } from '../../shared/roster.js';
+/** Portrait for any mover id: classic SVG, or the voxel crew's rendered picture wrapped in an SVG so it sizes the same. */
+export function portrait(id) {
+  if (PORTRAITS[id]) return PORTRAITS[id];
+  if (rosterEntry(id)) return `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><image href="/chars/${id}.png" x="0" y="0" width="120" height="120"/></svg>`;
+  return PORTRAITS.nova;
+}
+export const charInfo = (id) => CHARACTERS[id] || rosterEntry(id) || CHARACTERS.nova;
+export const CREW_ORDER = [...Object.keys(CHARACTERS), ...ROSTER.map(r => r.id)];

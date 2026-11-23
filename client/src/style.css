@@ -375,3 +375,39 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 
 .voxel-tag { position: fixed; right: 12px; top: calc(10px + env(safe-area-inset-top)); z-index: 60; font: 600 11px system-ui; color: #cfc7ff; background: rgba(26,20,64,.72); border: 1px solid rgba(143,123,255,.35); border-radius: 999px; padding: 4px 10px; text-decoration: none; pointer-events: auto; }
 body:has(#hud:not(.hidden)) .voxel-tag { display: none; } /* menu only: never over the game HUD */
+
+/* voxel crew carousel */
+.chars.carousel { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; min-width: 0; align-items: center; gap: 4px; }
+.ctrack { display: flex; min-width: 0; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; padding: 4px 2px 6px; overscroll-behavior-x: contain; }
+.ctrack::-webkit-scrollbar { display: none; }
+.ccard { flex: 0 0 128px; scroll-snap-align: center; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 8px 6px; min-height: 196px; }
+.ccard svg { max-width: 84px; }
+.ccard .bl { font-size: 10.5px; line-height: 1.3; color: var(--mute); min-height: 28px; text-align: center; }
+.ccard .cf { margin-top: auto; font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.08); width: 100%; position: relative; overflow: hidden; }
+.ccard .cf.on { background: var(--accent2); color: #0b0820; }
+.ccard .cf.go { background: rgba(143,123,255,.3); }
+.ccard .cf.lockf i { position: absolute; left: 0; bottom: 0; height: 3px; width: var(--p); background: var(--accent2); }
+.ccard.locked svg { filter: grayscale(.85) brightness(.55); }
+.ccard.locked .n { color: var(--mute); }
+.carr { width: 28px; height: 56px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 22px; font-weight: 800; color: var(--ink); padding: 0; }
+.ccount { grid-column: 1 / -1; text-align: center; font-size: 11px; color: var(--mute); }
+@media (hover: none) { .carr { display: none; } .chars.carousel { grid-template-columns: minmax(0, 1fr); } }
+.voxel-tag a { color: inherit; text-decoration: none; } .voxel-tag a:hover { text-decoration: underline; }
+
+/* compact scoreboard (round 8): chips, not a column of rows */
+#scoreboard { gap: 3px; }
+#scoreboard .sb { position: relative; padding: 2px 7px 2px 3px; gap: 4px; border: 1px solid transparent; }
+#scoreboard .sb.me { border-color: var(--accent2); }
+#scoreboard .sb b { font-variant-numeric: tabular-nums; }
+#scoreboard .sb em { font-style: normal; color: var(--danger); font-size: 10px; }
+#scoreboard .crown { position: absolute; top: -9px; left: 0; font-size: 11px; font-style: normal; }
+@media (pointer: coarse) {
+  #scoreboard { display: flex; flex-direction: row; top: 50px; right: 8px; left: auto; font-size: 11px; }
+  #scoreboard .sb { padding: 2px 6px 2px 2px; border-radius: 999px; }
+  #scoreboard .sb svg { width: 18px; height: 18px; }
+  #scoreboard .sb .nm { display: none; }
+  #minimap { width: 112px; height: 66px; top: 84px; }
+}
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 520px) {
+  #scoreboard { top: 36px; } #minimap { top: 66px; width: 104px; height: 60px; }
+}

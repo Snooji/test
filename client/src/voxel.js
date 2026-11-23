@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { ITEM_TYPES, GRID } from '../../shared/logic.js';
 import { CELL, TRUCK } from '../../shared/world.js';
 import { sprite, labelTexture } from './models.js';
+import { rosterEntry } from '../../shared/roster.js';
+import { attachModel } from './assets.js';
 
 export const VS = 0.1; // model voxel size in metres
 
@@ -199,7 +201,20 @@ function zibble(tint, material) {
   return g;
 }
 
+function rosterMover(char) {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  attachModel(body, `/models/chars/${char}.glb`);
+  root.add(body);
+  root.userData.body = body;
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02;
+  root.add(shadow);
+  return root;
+}
+
 export function makeMover(char, suit = null) {
+  if (rosterEntry(char)) return rosterMover(char);
   const material = voxMat.clone(); // own copy: knocked-out movers fade without fading everyone
   const g = { nova: () => astronaut(suit ?? 0xff8a3d, 0x1d2b6b, material), cosmo: () => astronaut(suit ?? 0x2ec4b6, 0xe0a526, material), glorp: () => glorp(suit, material), zibble: () => zibble(suit, material) }[char]?.()
     || astronaut(suit ?? 0xff8a3d, 0x1d2b6b, material);
@@ -258,6 +273,23 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   if (type === 'dolly') return dolly();
   if (loaded && dims) return loadedPiece(type, wrapped, dims);
   const g = new THREE.Group();
+  // downloaded models (see /credits.html) for the pieces you carry around the house
+  // [file, tint, quarter turns, fit [x, z, y]]
+  const ASSET = {
+    standard: ['box', null, 0, [0.9, 0.9, 0.8]], heavy: ['box', 0x8a6a52, 0, [0.9, 0.9, 0.8]], fragile: ['box', 0xffe680, 0, [0.9, 0.9, 0.8]],
+    couch: ['couch', null, 2, [3.0, 0.95, 1.0]], bed: ['bed', null, -1, [2.0, 3.0, 1.0]], lamp: ['lamp', 0xff9ad5, 0, [1.4, 0.55, 1.95]],
+    desk: ['desk', null, 0, [2.0, 0.95, 1.25]], table: ['table', null, 0, [2.0, 1.1, 0.85]],
+  }[type];
+  const flatNow = t.needsDisassemble && !assembled;
+  if (ASSET && !flatNow) {
+    const tint = wrapped && t.furniture ? 0x5b86ff : ASSET[1] ?? null; // pad-wrapped = under a blue moving blanket
+    attachModel(g, `/models/items/${ASSET[0]}.glb`, { tint, rot: ASSET[2], fit: ASSET[3] });
+    if (type === 'fragile' || type === 'heavy') { // the tint alone is subtle from above: a small tag on top
+      const l = sprite(type === 'fragile' ? '🍷 FRAGILE' : '⚠ HEAVY', { fg: type === 'fragile' ? '#ff4d5e' : '#ffd166', stroke: '#1b1340', font: 'bold 34px system-ui' }, [0.95, 0.24]);
+      l.position.y = 1.0; l.material.depthTest = true; g.add(l);
+    }
+    return g;
+  }
   if (!t.furniture || (!assembled && t.needsDisassemble)) {
     const flat = t.needsDisassemble && !assembled;
     const w = t.w * 0.9, h = flat ? 0.3 : 0.8, d = Math.max(0.8, t.d * 0.9);

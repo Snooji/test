@@ -6,7 +6,8 @@ import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel } from '.
 import { createNav } from './nav.js';
 import { verifyToken, cleanName, cleanEmail } from './signups.js';
 
-const CHARS = ['nova', 'cosmo', 'glorp', 'zibble'];
+import { CLASSIC_IDS, ALL_CHAR_IDS, charUnlocked, rosterEntry, unlockText } from '../shared/roster.js';
+const CHARS = CLASSIC_IDS; // defaults + AI movers
 const SPEED = 5;
 const R = 0.45;           // player radius
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
@@ -77,7 +78,9 @@ export class MoveRoom extends Room {
     this.onMessage('char', (c, m) => {
       const p = this.players.get(c.sessionId);
       if (!p || this.phase === 'playing' || this.phase === 'meeting') return;
-      if (CHARS.includes(m?.id) && ![...this.players.values()].some(o => o !== p && o.char === m.id)) p.char = m.id;
+      if (!ALL_CHAR_IDS.includes(m?.id) || [...this.players.values()].some(o => o !== p && o.char === m.id)) return;
+      if (!charUnlocked(m.id, p.profile)) return this.tell(p, `🔒 ${rosterEntry(m.id)?.name} unlocks when you ${unlockText(m.id).toLowerCase()}.`);
+      p.char = m.id;
     });
     this.onMessage('mode', (c, m) => {
       if (c.sessionId !== this.hostId || !RULES.MODES[m?.mode] || this.inRound()) return;
@@ -186,7 +189,8 @@ export class MoveRoom extends Room {
     // a friend joining a full lobby takes a bot's seat
     if (this.phase === 'lobby' && this.movers().length >= MAX_MOVERS && this.bots.size) this.removeBot([...this.bots.keys()].pop());
     const used = new Set([...this.players.values()].map(p => p.char));
-    const want = CHARS.includes(options?.char) && !used.has(options.char) ? options.char : CHARS.find(c => !used.has(c)) || 'nova';
+    const asked = ALL_CHAR_IDS.includes(options?.char) && !used.has(options.char) ? options.char : null;
+    const want = asked && charUnlocked(asked, null) ? asked : CHARS.find(c => !used.has(c)) || 'nova';
     const movers = [...this.players.values()].filter(p => !p.spectator).length;
     const p = {
       id: client.sessionId, name: auth.name, email: auth.email, char: want,
@@ -205,7 +209,11 @@ export class MoveRoom extends Room {
     if (this.tutorialMode && !this.bots.size) { const c = this.addBot(); if (c) { c.name = 'Coach'; this.bots.get(c.id).coach = true; } }
     if (this.quick && this.phase === 'lobby' && !this.autoStartAt) this.autoStartAt = 30;
     p.suit = 'classic'; p.profile = { games: 0, wins: 0 };
-    if (MoveRoom.store && auth.email) MoveRoom.store.getProfile(auth.email).then(pr => { p.profile = pr; }).catch(() => {});
+    const wish = asked && asked !== want ? asked : null; // an unlockable mover: confirm once their profile has loaded
+    if (MoveRoom.store && auth.email) MoveRoom.store.getProfile(auth.email).then(pr => {
+      p.profile = pr;
+      if (wish && charUnlocked(wish, pr) && ![...this.players.values()].some(o => o !== p && o.char === wish) && this.phase !== 'playing') p.char = wish;
+    }).catch(() => {});
   }
 
   newPlayer(id, name, char, extra = {}) {

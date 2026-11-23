@@ -3,6 +3,7 @@ import { ITEM_TYPES } from '../../shared/logic.js';
 import { CELL } from '../../shared/world.js';
 import { VOXEL } from './style.js';
 import * as VX from './voxel.js';
+import { rosterEntry } from '../../shared/roster.js';
 
 const matCache = new Map();
 export function mat(color, opts = {}) {
@@ -129,7 +130,7 @@ function zibble(tint) {
 
 /** suit = colour from SUITS (null = the mover's classic colour) */
 export function makeMover(char, suit = null) {
-  if (VOXEL) return VX.makeMover(char, suit);
+  if (VOXEL || rosterEntry(char)) return VX.makeMover(char, suit); // voxel-crew movers look the same on every link
   const g = { nova: () => astronaut(suit ?? 0xff8a3d, 0x1d2b6b), cosmo: () => astronaut(suit ?? 0x2ec4b6, 0xe0a526), glorp: () => glorp(suit), zibble: () => zibble(suit) }[char]?.() || astronaut(suit ?? 0xff8a3d, 0x1d2b6b);
   const root = new THREE.Group();
   root.add(g);

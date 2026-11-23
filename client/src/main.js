@@ -1,7 +1,8 @@
 import { Client } from 'colyseus.js';
 import { GameScene } from './scene.js';
 import { Input } from './input.js';
-import { PORTRAITS, CHARACTERS } from './portraits.js';
+import { PORTRAITS, CHARACTERS, portrait, charInfo, CREW_ORDER } from './portraits.js';
+import { charUnlocked, unlockText, unlockProgress } from '../../shared/roster.js';
 import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL, SUITS, suitUnlocked } from '../../shared/logic.js';
 import { inRamp } from '../../shared/world.js';
 import { sfx, setMuted, isMuted, setMusic, isMusicOn, musicMood } from './audio.js';
@@ -9,8 +10,9 @@ import { drawMinimap } from './minimap.js';
 import { VOXEL } from './style.js';
 if (VOXEL) { // voxel trial: small tag so testers know which look they're on
   document.body.classList.add('voxel');
-  const tag = document.createElement('a');
-  tag.className = 'voxel-tag'; tag.href = '/'; tag.textContent = '🧊 Voxel trial · classic look';
+  const tag = document.createElement('div');
+  tag.className = 'voxel-tag';
+  tag.innerHTML = '<a href="/">🧊 Voxel trial · classic look</a> · <a href="/credits.html">Art credits</a>';
   document.body.appendChild(tag);
 }
 
@@ -272,7 +274,7 @@ function renderLobby(s, me) {
   const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
-  $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
+  if (VOXEL) renderCrewCarousel(s); else $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
     const who = s.players.find(p => p.char === k);
     const cls = who?.id === myId ? 'mine' : who ? 'taken' : '';
     return `<button class="char ${cls}" data-char="${k}" ${who?.bot ? 'disabled' : ''}>${who ? `<div class="who">${esc(who.name)}</div>` : ''}${who?.bot ? '<span class="bot" title="AI mover">🤖</span>' : ''}${PORTRAITS[k]}<div class="n">${c.name}</div><div class="k">${c.kind}</div></button>`;
@@ -318,7 +320,33 @@ function renderLobby(s, me) {
   $('btn-start').disabled = host && (waitingOn.length > 0 || (s.game === 'sabotage' && movers.length < 3));
   if (me && !me.spectator) prefChar = me.char;
 }
+// voxel look: a swipeable carousel of the whole crew; some movers unlock as you play
+function renderCrewCarousel(s) {
+  const el = $('chars');
+  const prev = el.querySelector('.ctrack')?.scrollLeft ?? null;
+  const mine = s.players.find(p => p.id === myId)?.char;
+  el.classList.add('carousel');
+  const cards = CREW_ORDER.map(k => {
+    const c = charInfo(k), who = s.players.find(p => p.char === k), open = charUnlocked(k, myProfile);
+    const cls = who?.id === myId ? 'mine' : who ? 'taken' : open ? '' : 'locked';
+    const foot = who?.id === myId ? '<div class="cf on">✓ Your mover</div>'
+      : who ? `<div class="cf">${who.bot ? '🤖 ' : ''}${esc(who.name)}</div>`
+      : open ? '<div class="cf go">Pick</div>'
+      : `<div class="cf lockf">🔒 ${unlockText(k)}<i style="--p:${Math.round(unlockProgress(k, myProfile) * 100)}%"></i></div>`;
+    return `<button class="char ccard ${cls}" data-char="${k}" ${who && who.id !== myId ? 'disabled' : ''}>${portrait(k)}<div class="n">${esc(c.name)}</div><div class="k">${esc(c.kind)}</div><div class="bl">${esc(c.blurb || '')}</div>${foot}</button>`;
+  }).join('');
+  const unlocked = CREW_ORDER.filter(k => charUnlocked(k, myProfile)).length;
+  el.innerHTML = `<button class="carr" data-dir="-1" aria-label="Previous movers">‹</button><div class="ctrack">${cards}</div><button class="carr" data-dir="1" aria-label="More movers">›</button><div class="ccount">${unlocked}/${CREW_ORDER.length} movers unlocked · swipe for more</div>`;
+  const track = el.querySelector('.ctrack');
+  if (prev !== null && el.dataset.mine === mine) track.scrollLeft = prev;
+  else { const sel = track.querySelector('.mine'); if (sel) track.scrollLeft = sel.offsetLeft - track.clientWidth / 2 + sel.clientWidth / 2; }
+  el.dataset.mine = mine || '';
+}
 $('chars').addEventListener('click', (e) => {
+  const arr = e.target.closest('.carr');
+  if (arr) { const t = $('chars').querySelector('.ctrack'); t.scrollBy({ left: Number(arr.dataset.dir) * t.clientWidth * 0.8, behavior: 'smooth' }); return; }
+  const lk = e.target.closest('.char.locked');
+  if (lk) { const c = charInfo(lk.dataset.char); toast(`🔒 ${c.name} unlocks when you ${unlockText(lk.dataset.char).toLowerCase()}.`); sfx('blip'); return; }
   const b = e.target.closest('.char');
   if (!b || !room) return;
   room.send('char', { id: b.dataset.char });
@@ -412,8 +440,9 @@ function renderHud(s, me) {
   show('btn-callout', canCall);
   show('btn-rot', !!me?.loadMode);
   $('dash-label').textContent = me?.loadMode ? 'BACK' : 'DASH';
+  // compact: a strip of avatar + score chips (names only where there's room); you're highlighted, leader gets a crown
   $('scoreboard').innerHTML = [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
-    .map(p => `<div class="sb ${p.out ? 'out' : ''}">${PORTRAITS[p.char]}<span>${esc(p.name)}${p.id === myId ? ' (you)' : ''}</span><b>${p.score}</b>${'✖'.repeat(p.strikes)}</div>`).join('');
+    .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}" title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join('');
   renderPrompt(s, me);
 }
 
@@ -553,7 +582,7 @@ function renderMeeting(s, me) {
     $('vote-grid').dataset.key = key;
     $('vote-grid').innerHTML = s.players.filter(p => !p.spectator).map(p => `
       <button class="vote ${myVote === p.id ? 'picked' : ''} ${m.voted.includes(p.id) ? 'voted' : ''}" data-id="${p.id}" ${!canVote || p.out ? 'disabled' : ''}>
-        ${PORTRAITS[p.char]}<div><div><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}</div><div class="sub">${p.out ? 'off the truck' : `${p.score} pts · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}`}</div></div>
+        ${portrait(p.char)}<div><div><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}</div><div class="sub">${p.out ? 'off the truck' : `${p.score} pts · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}`}</div></div>
       </button>`).join('');
   }
   $('btn-skip').disabled = !canVote;
@@ -596,7 +625,7 @@ function renderResults(s, me) {
   if (r.game === 'sabotage') {
     const sp = r.players.find(p => p.id === r.saboteurId);
     $('res-winner').innerHTML = `<div class="outcome ${r.winners}">${r.winners === 'crew' ? '🧰 CREW WINS' : '🕵️ SABOTEUR WINS'}</div>`
-      + (sp ? `${PORTRAITS[sp.char]}<div class="w">The saboteur was ${esc(sp.name)}${sp.id === myId ? ' (you!)' : ''}</div>` : '')
+      + (sp ? `${portrait(sp.char)}<div class="w">The saboteur was ${esc(sp.name)}${sp.id === myId ? ' (you!)' : ''}</div>` : '')
       + `<div class="team">Final crew score: ${r.crewScore}</div>`;
   } else
   $('res-winner').innerHTML = w ? `<div class="w">👑 ${esc(w.name)}${w.id === myId ? ' (you!)' : ''} is Mover of the Day!</div>` : '<div class="w">Nobody stayed on the truck… 🙃</div>';
@@ -607,7 +636,7 @@ function renderResults(s, me) {
     <div class="pod ${i === 0 && !p.out ? 'p1' : ''} ${p.id === myId ? 'me' : ''} ${p.out ? 'out' : ''}">
       ${p.id === r.winnerId ? '<span class="crown">👑</span>' : ''}${live.get(p.id)?.ready ? '<span class="rd" title="Ready to restart">✅</span>' : ''}
       <div class="nm">${esc(p.name)}${p.bot ? ' 🤖' : ''}</div>
-      ${PORTRAITS[p.char]}
+      ${portrait(p.char)}
       <div class="place">${ordinal(i + 1)}${p.out ? ' · off the truck' : ''}</div>
       <div class="pts">${p.score}</div>${r.tally?.[p.id] ? `<div class="tl">${r.tally[p.id].pieces} pcs${r.tally[p.id].placement ? ` · packing ${r.tally[p.id].placement}` : ''}</div>` : ''}
     </div>`).join('');
@@ -617,7 +646,7 @@ function renderResults(s, me) {
   $('btn-ready').textContent = meReady ? `✅ Ready (${readyN}/${humans.length})` : `🔁 Restart game${humans.length > 1 ? ` (${readyN}/${humans.length} ready)` : ''}`;
   $('btn-ready').classList.toggle('on', meReady);
   $('res-table') && ($('res-table').innerHTML = r.players.map((p, i) => `
-    <div class="res-row ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}"><span>#${i + 1}</span>${PORTRAITS[p.char]}<span><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.out ? ' · off the truck' : ''}<br><small>${p.loaded} loaded · ${p.breaks} broken · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}</small></span><span class="s">${p.score}</span><span></span></div>`).join('') +
+    <div class="res-row ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}"><span>#${i + 1}</span>${portrait(p.char)}<span><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.out ? ' · off the truck' : ''}<br><small>${p.loaded} loaded · ${p.breaks} broken · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}</small></span><span class="s">${p.score}</span><span></span></div>`).join('') +
     `<div class="team">🚚 Team truck value: ${r.teamTotal} pts · ${r.loadedCount}/${r.totalItems} items loaded · ${r.broken} broken${r.difficulty ? ` · AI: ${r.difficulty}` : ''}</div>`);
   $('res-awards').innerHTML = (r.awards || []).filter(a => a.value > 0).map(a => `<div class="award">${a.title}: <b>${esc(a.name)}</b> (${a.value})</div>`).join('');
   $('res-drive').innerHTML = (r.driveoff ? `🚚 Drive-off safety: <b>${r.driveoff.safety}%</b>${r.driveoff.lost.length ? ' · ' + r.driveoff.lost.map(l => `${esc(l.name)} −${l.amt}`).join(', ') : ''}` : '')
@@ -718,7 +747,7 @@ function renderTrainingDone(s) {
   if ($('train-done').dataset.done === '1') return;
   $('train-done').dataset.done = '1';
   const me = s.players.find(p => p.id === myId);
-  $('td-portrait').innerHTML = PORTRAITS[me?.char || 'nova'];
+  $('td-portrait').innerHTML = portrait(me?.char || 'nova');
   scene.setBanner(myId, '✅ TRAINING COMPLETE');
 }
 const leaveToMenu = async () => {

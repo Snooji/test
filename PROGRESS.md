@@ -136,3 +136,13 @@ Measured (test/perf-compare.mjs, headless Chrome, solo round with 3 AI):
 | desktop, in a round | 257 | 90 | 32.6k | 11.5k |
 | phone, in a round | 221 | 79 | 27.6k | 10.9k |
 Verified: e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS on /; e2e-solo, e2e-dolly, e2e-b PASS on /voxel
+
+## Round 8: voxel crew, real furniture, compact HUD (2026-11-23)
+- [x] Downloaded free CC BY models from Sketchfab (API token in the environment's secure settings); credits at /credits.html (linked from the /voxel menu)
+- [x] Crew carousel (/voxel lobby): 22 movers = 4 classics + 18 voxel crew with names; 7 free, the rest unlock by moves played / wins / items loaded (shared/roster.js, enforced on the server against the saved profile)
+- [x] Voxel crew render on every link (a classic-look player sees a voxel-crew mover correctly); rendered portraits in /chars for HUD, results, meetings
+- [x] Furniture you carry (/voxel): pink sofa, striped bed, computer desk, wooden table, arched floor lamp, cardboard boxes (heavy/fragile tinted + tag); originals shipped untouched and fitted at load (client/src/assets.js)
+- [x] Compact in-game scoreboard (both links): avatar + score chips, you highlighted, 👑 leader; one thin strip on phones; smaller phone minimap
+Verified: unit tests 154/154 (new test/roster.test.js) · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly PASS
+Known issue: voxel e2e-b (daily lobby step) intermittently loses the connection in headless software rendering; classic passes repeatedly. To investigate.
+Next: energy meter + injuries while carrying; AI stuck loops near some walls; replace the whole environment (grass, trees, flowers, walls, floors, truck) with downloaded assets on /voxel.
