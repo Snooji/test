@@ -91,7 +91,7 @@ export class Bot {
     this.lookT = 0.25;
     const room = this.room, p = this.p;
     for (const it of room.items.values()) {
-      if (it.type === 'dolly') continue;
+      if (it.type === 'dolly' || it.type === 'flatdolly') continue;
       const inView = this.canSee(it);
       if (inView && (it.state === 'floor' || it.state === 'carried')) this.known.set(it.id, { x: it.x, z: it.z, at: this.t });
       else if (inView) this.known.delete(it.id); // seen it: already in the truck (or broken), so forget the old floor spot
@@ -327,7 +327,7 @@ export class Bot {
     let best = null, bestScore = -Infinity;
     for (const it of knownItems) {
       const seen = this.seenAt(it);
-      if (!seen || (this.canSee(it) && it.state !== 'floor') || it.type === 'dolly' || this.skipping(it.id) || this.claimed(it)) continue;
+      if (!seen || (this.canSee(it) && it.state !== 'floor') || ITEM_TYPES[it.type].tool || this.skipping(it.id) || this.claimed(it)) continue;
       const t = ITEM_TYPES[it.type];
       if (t.teamCarry && !alone && someoneWaiting) continue;
       let score = -Math.hypot(seen.x - p.x, seen.z - p.z) - Math.hypot(seen.x - RAMP_TARGET.x, seen.z - RAMP_TARGET.z) * 0.4;

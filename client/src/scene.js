@@ -535,6 +535,17 @@ export class GameScene {
       const worked = it.task && it.state === 'floor';
       if (worked) o.rotation.z = Math.sin(performance.now() / 45) * 0.03 * (it.task.kind === 'disassemble' ? 1.6 : 0.8);
       else if (o.rotation.z) o.rotation.z = 0;
+      if (it.type === 'flatdolly') o.visible = it.state !== 'gone' && it.state !== 'parked'; // resetting / parked at the truck
+      if (it.state === 'flat') { // riding the furniture dolly
+        const dv = this.items.get(it.on);
+        if (dv) {
+          o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
+          o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
+          o.position.y = damp(o.position.y, 0.24, 14, dt);
+          o.rotation.y = dv.obj.rotation.y;
+        }
+        continue;
+      }
       if (it.state === 'dolly') { // riding on a dolly: stacked in order, bottom first
         const d = this.snap.items.find(x => x.id === it.on), dv = d && this.items.get(d.id);
         if (dv) {
@@ -546,6 +557,7 @@ export class GameScene {
         }
         continue;
       }
+      if (it.type === 'flatdolly') { const pu = it.pusher && this.players.get(it.pusher); if (pu) o.rotation.y = pu.face - Math.PI / 2; } // pushed lengthwise
       if (it.type === 'dolly') {
         const pusher = it.pusher && this.players.get(it.pusher);
         if (pusher) o.rotation.y = pusher.face + Math.PI;

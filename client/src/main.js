@@ -477,6 +477,11 @@ function renderPrompt(s, me) {
   } else if (!me.carry && !me.dolly && !s.level?.tutorial && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
     text = `🧩 Hold ${isTouch ? '✋' : 'E'} to unload pieces from the truck and repack`;
     action = 'HOLD ↩️';
+  } else if (me.flatDolly && !me.carry) {
+    const d = s.items.find(i => i.id === me.flatDolly), pc = d?.piece && s.items.find(i => i.id === d.piece);
+    text = pc ? `🛞 ${ITEM_TYPES[pc.type].label} on the furniture dolly · push it to the 🚚 truck and place it yourself`
+      : `🛞 Furniture dolly · tap ${isTouch ? '✋' : 'E'} next to a couch, bed, desk or table (take desks/tables apart first)`;
+    action = pc ? 'SET DOWN' : 'LOAD';
   } else if (me.dolly && !me.carry) {
     const d = s.items.find(i => i.id === me.dolly);
     const n = d?.stack?.length || 0;

@@ -271,6 +271,12 @@ function dolly() {
 export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
   const t = ITEM_TYPES[type];
   if (type === 'dolly') return dolly();
+  if (type === 'flatdolly') {
+    const v = new Vox().box(0, 0.16, 0, 2.0, 0.1, 1.0, (x, y, z) => (Math.round(x / VS) & 3) === 0 ? 0x7a5c3e : 0x8a6a4a);
+    for (const s of [-1, 1]) v.box(0, 0.24, s * 0.42, 2.0, 0.06, 0.14, 0x2f5fd0);
+    for (const sx of [-0.85, 0.85]) for (const sz of [-0.4, 0.4]) v.cyl(sx, 0.07, sz, 0.08, 0.1, 0x1a1a24, 'z');
+    const g = new THREE.Group(); g.add(v.mesh()); return g;
+  }
   if (loaded && dims) return loadedPiece(type, wrapped, dims);
   const g = new THREE.Group();
   // downloaded models (see /credits.html) for the pieces you carry around the house

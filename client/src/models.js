@@ -156,10 +156,21 @@ function makeDolly() {
   return g;
 }
 
+function makeFlatDolly() { // four-wheel furniture dolly: a padded board on casters
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.BoxGeometry(2.0, 0.08, 1.0), mat(0x8a6a4a), 0, 0.16, 0));
+  for (const s of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(2.0, 0.04, 0.12), mat(0x2f5fd0), 0, 0.21, s * 0.42)); // carpet strips
+  for (const sx of [-0.85, 0.85]) for (const sz of [-0.4, 0.4]) {
+    const w = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.07, 12), mat(0x1a1a24), sx, 0.08, sz); w.rotation.x = Math.PI / 2; g.add(w);
+  }
+  return g;
+}
+
 export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
   if (VOXEL) return VX.makeItem(type, { wrapped, assembled, loaded, dims });
   const t = ITEM_TYPES[type];
   if (type === 'dolly') return makeDolly();
+  if (type === 'flatdolly') return makeFlatDolly();
   const g = new THREE.Group();
   if (loaded && dims?.cells) { // shaped piece in the truck: one block per cell, centred on its bounding box
     const face = new THREE.MeshStandardMaterial({ map: boxFace(type, wrapped && t.furniture), roughness: 0.9 });
