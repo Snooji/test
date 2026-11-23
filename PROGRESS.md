@@ -167,3 +167,4 @@ Verified: unit tests 166/166 · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dol
 - [x] AI answers 🆘: nearest free bot heads straight over and says so in chat
 - [ ] Ghost furniture / walls in doorways: not reproduced in 5 voxel houses checked from above; waiting on a screenshot
 Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly, e2e-b PASS (input no longer sent into a closed socket)
+- [x] Fixed (from a player screenshot): the kitchen counter could sit across a doorway (walk-through, but looked like a wall). Counters now go on the first kitchen wall with no doorway (or are skipped); potted plants avoid doorway corners. Test over 300 houses (fails on the old generator, passes now)

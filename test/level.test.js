@@ -80,3 +80,27 @@ test('Full load houses hold exactly the 64-cell inventory, all of it reachable',
 test('same seed + exact flag is deterministic (clients rebuild the same house)', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(generateLevel(9, { exact: true }))), JSON.parse(JSON.stringify(generateLevel(9, { exact: true }))));
 });
+
+test('decorations never sit in a doorway (kitchen counters, potted plants)', async () => {
+  const { generateLevel } = await import('../shared/level.js');
+  let counters = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const L = generateLevel(seed * 7919);
+    // a doorway = a gap in an inner wall: sample points along every room edge that aren't wall and aren't the outside
+    for (const p of L.props) {
+      if (p.kind !== 'counter' && p.kind !== 'plant') continue;
+      if (p.kind === 'counter') counters++;
+      const w = p.w || 0.8, d = p.d || 0.8;
+      // walk a ring just outside the prop; if a door gap is right there, a mover would have to pass through the prop
+      for (const r of L.rooms) for (const [x0, z0, x1, z1] of [[r.x0, r.z0, r.x1, r.z0], [r.x0, r.z1, r.x1, r.z1], [r.x0, r.z0, r.x0, r.z1], [r.x1, r.z0, r.x1, r.z1]]) {
+        for (let t = 0; t <= 1; t += 0.02) {
+          const x = x0 + (x1 - x0) * t, z = z0 + (z1 - z0) * t;
+          const inside = Math.abs(x - p.x) < w / 2 + 0.5 && Math.abs(z - p.z) < d / 2 + 0.5;
+          const isGap = !L.hitsWall(x, z, 0.05) && L.rooms.filter(q => x >= q.x0 - 0.01 && x <= q.x1 + 0.01 && z >= q.z0 - 0.01 && z <= q.z1 + 0.01).length === 2;
+          assert.ok(!(inside && isGap), `seed ${seed * 7919}: ${p.kind} at ${p.x.toFixed(1)},${p.z.toFixed(1)} covers a doorway`);
+        }
+      }
+    }
+  }
+  assert.ok(counters > 20, 'kitchens still get counters');
+});

@@ -387,7 +387,7 @@ export function buildHouse(scene, level) {
   const pots = [], foods = [];
   for (const p of level.props) {
     if (p.kind === 'rug') b.box(p.x - p.w / 2, 0.04, p.z - p.d / 2, p.x + p.w / 2, 0.06, p.z + p.d / 2, p.color, 0.3);
-    else if (p.kind === 'counter') { b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3); for (let k = -1; k <= 1; k += 2) foods.push({ x: p.x + k * p.w * 0.25, y: 0.9, z: p.z, rot: rng() * 6.28, h: 0.32 }); }
+    else if (p.kind === 'counter') { b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3); const along = p.w >= p.d; for (let k = -1; k <= 1; k += 2) foods.push({ x: p.x + (along ? k * p.w * 0.25 : 0), y: 0.9, z: p.z + (along ? 0 : k * p.d * 0.25), rot: rng() * 6.28, h: 0.32 }); }
     else if (p.kind === 'plant') pots.push({ ...p, n: Math.floor(rng() * 4) });
     else if (p.kind === 'mailbox') new Vox().box(0, 0.5, 0, 0.1, 1, 0.1, 0xcccccc).box(0, 1.1, 0, 0.5, 0.36, 0.3, 0x2ec4b6).box(0.2, 1.36, 0, 0.06, 0.2, 0.06, 0xe63946).into(b, p.x, 0, p.z);
   }

@@ -77,8 +77,9 @@ let moved = false;
 for (const [fx, fy] of [[0.55, 0.45], [0.7, 0.55], [0.45, 0.6]]) {
   const before = JSON.stringify((await meOf(b)).cursor);
   await b.locator('#app canvas').dispatchEvent('pointerdown', { clientX: box.w * fx, clientY: box.h * fy, pointerType: 'touch', buttons: 1, pressure: 0.5 });
-  await wait(300);
-  if (JSON.stringify((await meOf(b)).cursor) !== before) moved = true;
+  // wait for the server's update rather than a fixed pause (slow software rendering can lag a few frames)
+  const changed = await b.waitForFunction((before) => JSON.stringify(window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor) !== before, before, { timeout: 3000 }).then(() => true).catch(() => false);
+  if (changed) moved = true;
 }
 log('drag moved aim:', moved);
 if (!moved) errors.push('dragging on the truck did not move the aim');
