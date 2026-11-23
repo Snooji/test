@@ -67,7 +67,7 @@ for (const dir of ['up', 'left', 'down', 'right']) {
 }
 if (dmoved < 2) errors.push('D-pad barely moves the aim');
 await b.locator('#btn-rot').dispatchEvent('pointerdown'); await b.locator('#btn-rot').dispatchEvent('pointerup');
-await wait(400);
+await b.waitForFunction((r) => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor?.rot !== r, c0.rot, { timeout: 4000 }).catch(() => {});
 const c1 = (await meOf(b)).cursor;
 log('rotate:', c0.rot, '→', c1.rot);
 if (c1.rot === c0.rot) errors.push('ROTATE did not change orientation');
@@ -84,7 +84,7 @@ log('drag moved aim:', moved);
 if (!moved) errors.push('dragging on the truck did not move the aim');
 await b.screenshot({ path: `${out}/s08-phone-aimed.png` });
 await b.locator('#btn-action').dispatchEvent('pointerdown'); await wait(60); await b.locator('#btn-action').dispatchEvent('pointerup');
-await wait(800);
+await b.waitForFunction(() => !window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.carry, null, { timeout: 4000 }).catch(() => {});
 const me = await meOf(b);
 log('after drop: carry', me.carry, 'score', me.score);
 if (me.carry) errors.push('drop with ACTION failed');

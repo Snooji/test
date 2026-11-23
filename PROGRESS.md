@@ -146,3 +146,13 @@ Verified: e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS on /; e2e-solo,
 Verified: unit tests 154/154 (new test/roster.test.js) · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly PASS
 Known issue: voxel e2e-b (daily lobby step) intermittently loses the connection in headless software rendering; classic passes repeatedly. To investigate.
 Next: energy meter + injuries while carrying; AI stuck loops near some walls; replace the whole environment (grass, trees, flowers, walls, floors, truck) with downloaded assets on /voxel.
+
+## Round 9: AI loops, energy, furniture dolly, full voxel environment (2026-11-23)
+- [x] AI loops fixed (reproduced with a stuck-bot detector over 28 seeded rounds: 30 episodes → 0): bots no longer dither at the edge of sight (seeing an item in the truck clears the old floor memory); wedged two-person lifts squeeze through doorways; carriers slide along walls and lose grip (piece set down) if left > 3 m behind; bots abandon a lift that goes nowhere for 10 s
+- [x] Energy meter while carrying: drains with load and speed² (careful = cheap), refills when still (slowly while walking empty-handed), box dolly/furniture dolly barely use it; empty = 7 s injury (slower, no dash, slower wrapping/disassembly), then half full; AI paces itself (easy bots occasionally get hurt); meter + 🤕 countdown over each mover, limp animation, one-time tip; injuries counted in the funnel (humans only, not the demo)
+- [x] Furniture dolly 🛞 (one per house): carry one two-mover piece solo (desks/tables taken apart first), pushed lengthwise and blocked by walls, placed by you for full points; BACK returns it to the dolly; single use, respawns elsewhere after 5 s
+- [x] /voxel environment: patterned floors per room type (planks, tiles, carpet, concrete), skirting boards, green lawn with downloaded trees, rocks, stumps, flowers, grass, benches, lamp posts along the path, a hotdog cart; potted plants and food on counters; hover-truck cab (tinted Starside) with glowing hover pads
+- [x] Asset pipeline: meshopt + WebP compression (all models ≈ 2.8 MB), one mesh per material on load, instancing for repeated yard models; ?lite=1 skips yard decorations
+- [x] Credits for all 15 Sketchfab models at /credits.html
+Measured (headless, solo round): voxel 143–193 draw calls (classic 218–247), ~140k triangles (classic ~30k); lite ~100 calls / 48k triangles
+Verified: unit tests 166/166 · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly PASS (tests now wait on game state instead of fixed pauses)

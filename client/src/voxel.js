@@ -7,9 +7,12 @@ import { ITEM_TYPES, GRID } from '../../shared/logic.js';
 import { CELL, TRUCK } from '../../shared/world.js';
 import { sprite, labelTexture } from './models.js';
 import { rosterEntry } from '../../shared/roster.js';
-import { attachModel } from './assets.js';
+import { attachModel, instanceModels } from './assets.js';
+import { mulberryFor } from '../../shared/logic.js';
 
 export const VS = 0.1; // model voxel size in metres
+/** ?lite=1: skip yard decorations (low-end phones; also handy for testing) */
+const LITE = typeof location !== 'undefined' && new URLSearchParams(location.search).get('lite') === '1';
 
 // ---------- shared materials ----------
 const gridTex = (() => {
@@ -367,19 +370,27 @@ export function buildHouse(scene, level) {
   b.box(fd.x, 0, fd.z - 1.5, fd.x + walkLen, 0.03, fd.z + 1.5, 0x57507a, 0.75);                        // walkway
   const dz = Math.abs(fd.z) + 2.6;
   b.box(5.4, 0, -dz, 9.4, 0.025, dz, 0x57507a, 0.75);                                                  // driveway
-  for (const r of level.rooms) b.box(r.x0, 0, r.z0, r.x1, 0.04, r.z1, r.floor, 1);                     // floor tiles
+  const rng = mulberryFor((level.seed ?? 7) * 31 + 5);
+  const fb = new Batch(); // floors: patterned per room type, no block grid
+  for (const r of level.rooms) { b.box(r.x0, 0, r.z0, r.x1, 0.035, r.z1, 0x2a2340, 1); floorPattern(fb, r, rng); }
   for (const w of level.houseWalls) {
-    b.box(w.x0, 0, w.z0, w.x1, 1.25, w.z1, 0xe9e4ff, 0.42);                                            // wall blocks
+    b.box(w.x0, 0, w.z0, w.x1, 1.25, w.z1, 0xeee8ff, 0.42);                                            // wall blocks
+    b.box(w.x0 - 0.02, 0, w.z0 - 0.02, w.x1 + 0.02, 0.14, w.z1 + 0.02, 0x5b4f96, 0.42);                // skirting board
     b.box(w.x0 - 0.01, 1.25, w.z0 - 0.01, w.x1 + 0.01, 1.35, w.z1 + 0.01, 0x8f7bff, 0.42);             // trim
   }
+  const pots = [], foods = [];
   for (const p of level.props) {
     if (p.kind === 'rug') b.box(p.x - p.w / 2, 0.04, p.z - p.d / 2, p.x + p.w / 2, 0.06, p.z + p.d / 2, p.color, 0.3);
-    else if (p.kind === 'counter') b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3);
-    else if (p.kind === 'plant') new Vox().cyl(0, 0.2, 0, 0.28, 0.4, 0xff8a3d).ell(0, 0.72, 0, 0.42, 0.4, 0.42, (x, y, z) => ((Math.round(x / VS) + Math.round(y / VS) + Math.round(z / VS)) % 3 ? 0x52d17c : 0x3fae64)).into(b, p.x, 0, p.z);
+    else if (p.kind === 'counter') { b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3); for (let k = -1; k <= 1; k += 2) foods.push({ x: p.x + k * p.w * 0.25, y: 0.9, z: p.z, rot: rng() * 6.28, h: 0.32 }); }
+    else if (p.kind === 'plant') pots.push({ ...p, n: Math.floor(rng() * 4) });
     else if (p.kind === 'mailbox') new Vox().box(0, 0.5, 0, 0.1, 1, 0.1, 0xcccccc).box(0, 1.1, 0, 0.5, 0.36, 0.3, 0x2ec4b6).box(0.2, 1.36, 0, 0.06, 0.2, 0.06, 0xe63946).into(b, p.x, 0, p.z);
   }
   b.box(fd.x + 0.2, 0.04, fd.z - 1.7, fd.x + 1.4, 0.06, fd.z + 1.7, 0xffd166, 0.3);                     // door mat
   const m = new THREE.Mesh(b.geometry(), voxMat); m.castShadow = m.receiveShadow = true; g.add(m);
+  const fm = new THREE.Mesh(fb.geometry(), plainMat); fm.receiveShadow = true; g.add(fm);
+  for (let n = 0; n < 4; n++) instanceModels(g, `/models/env/pot${n}.glb`, pots.filter(p => p.n === n).map(p => ({ x: p.x, z: p.z, rot: rng() * 6.28, h: 1.0 })));
+  instanceModels(g, '/models/env/food1.glb', foods);
+  if (!LITE) decorateYard(g, level, rng);
   for (const r of level.rooms) { // room names stay as soft floor decals
     const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
     l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.05, r.z0 + 1.3); g.add(l);
@@ -398,12 +409,16 @@ export function buildTruck(scene) {
     b.box(x0, fy + 1.2, zc - 0.11, x1, fy + 1.4, zc + 0.11, accent, 0.4);                               // stripe
     b.box(x0 + 0.05, fy, zc - 0.05, x0 + 0.15, fy + GRID.H * CELL, zc + 0.05, 0xbbbbcc, 0.1);           // height pole
     for (let y = 1; y <= GRID.H; y++) b.box(x0 + 0.03, fy + y * CELL - 0.03, zc - 0.07, x0 + 0.17, fy + y * CELL + 0.03, zc + 0.07, 0x55ffcc, 0.1);
-    for (const wx of [x0 + 1, TRUCK.cabX1 - 1.2]) new Vox().cyl(0, 0, 0, 0.5, 0.36, (x, y) => Math.hypot(x, y) < 0.22 ? 0x9aa3b8 : 0x1a1a24, 'z').into(b, wx, 0.5, sz * (wid / 2 + 0.45));
   }
   b.box(x1, fy, -(wid / 2 + 0.3), x1 + 0.2, fy + GRID.H * CELL + 0.3, wid / 2 + 0.3, body, 0.4);        // bulkhead
-  b.box(x1 + 0.2, 0.3, -(wid / 2 + 0.3), TRUCK.cabX1, 2.9, wid / 2 + 0.3, accent, 0.4);                 // cab
-  b.box(TRUCK.cabX1, 1.7, -wid / 2, TRUCK.cabX1 + 0.1, 2.7, wid / 2, 0x9ad7ff, 0.4);                    // windscreen
   const truck = new THREE.Mesh(b.geometry(), voxMat); truck.castShadow = truck.receiveShadow = true; g.add(truck);
+  // the cab is a hover-truck model (see /credits.html), tinted Starside purple; it hovers, so glowing pads instead of tyres
+  const cab = new THREE.Group(); cab.position.set((x1 + 0.2 + TRUCK.cabX1) / 2, 0.25, 0);
+  attachModel(cab, '/models/env/cab.glb', { tint: 0xc4b4ff, rot: 1, fit: [TRUCK.cabX1 - x1 - 0.2, wid + 0.6, 2.75] });
+  g.add(cab);
+  const pads = new Batch();
+  for (const px of [x0 + 0.8, x1 - 0.8, TRUCK.cabX1 - 1.2]) for (const sz of [-1, 1]) pads.box(px - 0.45, 0.12, sz * (wid / 2 + 0.15) - 0.3, px + 0.45, 0.22, sz * (wid / 2 + 0.15) + 0.3, 0x55ffcc, 0.3);
+  g.add(new THREE.Mesh(pads.geometry(), glowMat));
   const lines = [];
   for (let i = 0; i <= GRID.W; i++) { const z = TRUCK.z0 + i * CELL; lines.push(x0, fy + 0.01, z, x1, fy + 0.01, z); }
   for (let i = 0; i <= GRID.D; i++) { const x = x0 + i * CELL; lines.push(x, fy + 0.01, TRUCK.z0, x, fy + 0.01, TRUCK.z1); }
@@ -435,4 +450,62 @@ export function puffMesh(color) {
   const m = new THREE.Mesh(puffGeo, new THREE.MeshLambertMaterial({ color, transparent: true, depthWrite: false, opacity: 0.9 }));
   m.rotation.set(Math.random() * 3, Math.random() * 3, 0);
   return m;
+}
+
+// ---------- floors & yard ----------
+const FLOOR_STYLE = { 'Kitchen': 'tile', 'Laundry': 'tile2', 'Garage': 'concrete', 'Bedroom': 'carpet', 'Kids Room': 'carpet2', 'Game Room': 'carpet3', 'Library': 'darkwood', 'Observatory': 'darkwood' };
+const PAL = {
+  wood: [0xb07d4f, 0xa26f43, 0xbf8a59, 0x9c6a3f], darkwood: [0x6b4a33, 0x5d3f2b, 0x7a5539, 0x553a28],
+  tile: [0xeeeaf6, 0x9fb7d9], tile2: [0xe3eef2, 0xa8c8d8], concrete: [0x8a8a94, 0x7f7f8a],
+  carpet: [0x8f7bd6, 0x8673cc, 0x9883dc], carpet2: [0x6fc3b2, 0x66b8a8, 0x78ccbb], carpet3: [0xd9668a, 0xcf5f82, 0xe06e92],
+};
+/** top-of-floor quads: planks, checker tiles, carpet speckle or concrete slabs */
+function floorPattern(fb, r, rng) {
+  const style = FLOOR_STYLE[r.name] || 'wood', y = 0.04, top = (x0, z0, x1, z1, hex) => fb.face(1, 1, [x0, y, z0], z1 - z0, x1 - x0, hex, 1);
+  const pal = PAL[style];
+  if (style === 'wood' || style === 'darkwood') { // planks run along x, staggered
+    for (let z = r.z0; z < r.z1 - 1e-6; z += 0.3) {
+      let x = r.x0 - rng() * 1.2; const z1 = Math.min(r.z1, z + 0.3);
+      while (x < r.x1) { const l = 1.2 + rng() * 1.2, xa = Math.max(r.x0, x), xb = Math.min(r.x1, x + l); if (xb > xa) top(xa, z, xb, z1, pal[Math.floor(rng() * pal.length)]); x += l; }
+    }
+  } else if (style.startsWith('tile') || style === 'concrete') {
+    const s = style === 'concrete' ? 1.2 : 0.6;
+    for (let x = r.x0, i = 0; x < r.x1 - 1e-6; x += s, i++) for (let z = r.z0, j = 0; z < r.z1 - 1e-6; z += s, j++) top(x, z, Math.min(r.x1, x + s), Math.min(r.z1, z + s), pal[(i + j) % 2]);
+  } else { // carpet: soft speckle
+    for (let x = r.x0; x < r.x1 - 1e-6; x += 0.5) for (let z = r.z0; z < r.z1 - 1e-6; z += 0.5) top(x, z, Math.min(r.x1, x + 0.5), Math.min(r.z1, z + 0.5), pal[Math.floor(rng() * pal.length)]);
+  }
+}
+
+/** a lawn round the house and downloaded trees, rocks, flowers, benches and lamp posts (one draw call per model) */
+function decorateYard(g, level, rng) {
+  const xs = level.rooms.flatMap(r => [r.x0, r.x1]), zs = level.rooms.flatMap(r => [r.z0, r.z1]);
+  const hx0 = Math.min(...xs), hx1 = Math.max(...xs), hz0 = Math.min(...zs), hz1 = Math.max(...zs);
+  const L = { x0: hx0 - 8, x1: Math.min(hx1 + 9, 8.4), z0: hz0 - 8, z1: hz1 + 8 };
+  const lawn = new Batch(), G = [0x4f9a4a, 0x5aa654, 0x4a9145];
+  for (let x = L.x0; x < L.x1 - 1e-6; x += 1) for (let z = L.z0; z < L.z1 - 1e-6; z += 1) lawn.face(1, 1, [x, 0.012, z], Math.min(1, L.z1 - z), Math.min(1, L.x1 - x), G[Math.floor(rng() * G.length)], 1);
+  const lm = new THREE.Mesh(lawn.geometry(), plainMat); lm.receiveShadow = true; g.add(lm);
+  const fd = level.frontDoor, dz = Math.abs(fd.z) + 2.6;
+  const taken = [];
+  const free = (x, z, r) => {
+    if (x > hx0 - 0.9 - r && x < hx1 + 0.9 + r && z > hz0 - 0.9 - r && z < hz1 + 0.9 + r) return false;          // the house
+    if (x > fd.x - 1 && Math.abs(z - fd.z) < 2.4 + r) return false;                                              // front path
+    if (x > 4.6 - r && Math.abs(z) < dz + 1.2 + r) return false;                                                 // driveway, ramp, truck
+    for (const p of level.props) if (Math.hypot(p.x - x, p.z - z) < 1.2 + r) return false;
+    for (const t of taken) if (Math.hypot(t.x - x, t.z - z) < t.r + r) return false;
+    return true;
+  };
+  const place = (n, r, tries = 60) => { const out = []; for (let i = 0; i < n; i++) for (let k = 0; k < tries; k++) { const x = L.x0 + rng() * (L.x1 - L.x0), z = L.z0 + rng() * (L.z1 - L.z0); if (free(x, z, r)) { taken.push({ x, z, r }); out.push({ x, z, rot: rng() * 6.28 }); break; } } return out; };
+  const group = (list, n) => { const out = Array.from({ length: n }, () => []); list.forEach(p => out[Math.floor(rng() * n)].push(p)); return out; };
+  const add = (name, list, h, hv = 0, shadow = true) => instanceModels(g, `/models/env/${name}.glb`, list.map(p => ({ ...p, h: h + rng() * hv })), { shadow });
+  group(place(16, 1.6), 12).forEach((l, i) => add(`tree${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12][i]}`, l, 3.6, 1.8));
+  group(place(5, 0.9), 3).forEach((l, i) => add(['rock0', 'rock1', 'rock4'][i], l, 0.7, 0.6));
+  group(place(3, 0.8), 2).forEach((l, i) => add(['stump0', 'stump1'][i], l, 0.55, 0.2));
+  // flowers: mostly the light ones; small things cast no shadow
+  const fl = place(28, 0.35); add('flower2', fl.slice(0, 10), 0.55, 0.25, false); add('flower3', fl.slice(10, 20), 0.55, 0.25, false); add('flower1', fl.slice(20, 25), 0.55, 0.25, false); add('flower0', fl.slice(25), 0.55, 0.25, false);
+  add('grass0', place(12, 0.3), 0.45, 0.25, false);
+  group(place(2, 1.2), 2).forEach((l, i) => add(`bench${i}`, l, 0.9));
+  // lamp posts line the front path; the hotdog cart parks by the driveway
+  const lamps = []; for (let x = fd.x + 2.5; x < 4.4; x += 3.5) for (const s of [-1, 1]) lamps.push({ x, z: fd.z + s * 2.0, rot: 0 });
+  add('lamppost1', lamps, 2.4);
+  const cart = place(1, 1.4); if (cart.length) add('hotdog', [{ ...cart[0], rot: rng() * 6.28 }], 1.7);
 }

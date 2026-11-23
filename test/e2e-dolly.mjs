@@ -33,11 +33,21 @@ let s = await snap();
 const dolly = s.items.find(i => i.type === 'dolly');
 if (!dolly) errors.push('no dolly in the house');
 await tp(dolly.x + 0.05, dolly.z + 0.05); await wait(300); await tap();
-s = await snap();
 const id = await myId();
+// wait for the state instead of a fixed pause (slow software rendering in CI can lag a frame or two)
+await p.waitForFunction((id) => window.__sm.snap.players.find(x => x.id === id)?.dolly === 'dolly', id, { timeout: 4000 }).catch(() => {});
+s = await snap();
 if (s.players.find(x => x.id === id).dolly !== 'dolly') errors.push('could not grab the dolly');
-const boxes = s.items.filter(i => i.state === 'floor' && ['standard', 'heavy', 'fragile'].includes(i.type)).slice(0, 3);
-for (const b of boxes) { await tp(b.x + 0.05, b.z + 0.05); await wait(250); await tap(); }
+// stack 3 boxes: always the next box still on the floor (AI movers may grab one first), and wait for each to land
+for (let tries = 0; tries < 8; tries++) {
+  s = await snap();
+  const n = s.items.find(i => i.type === 'dolly').stack.length;
+  if (n >= 3) break;
+  const b = s.items.find(i => i.state === 'floor' && ['standard', 'heavy', 'fragile'].includes(i.type));
+  if (!b) break;
+  await tp(b.x + 0.05, b.z + 0.05); await wait(250); await tap();
+  await p.waitForFunction((n) => window.__sm.snap.items.find(i => i.type === 'dolly').stack.length > n, n, { timeout: 3000 }).catch(() => {});
+}
 s = await snap();
 const d2 = s.items.find(i => i.type === 'dolly');
 log('dolly stack:', d2.stack.length, d2.stack.map(x => s.items.find(i => i.id === x).type).join(' > '));
@@ -50,7 +60,10 @@ const meNow = s.players.find(x => x.id === id);
 log('at the truck: loadMode', meNow.loadMode, 'holding', meNow.carry, 'top was', d2.stack[2]);
 if (!meNow.loadMode || meNow.carry !== d2.stack[2]) errors.push('top box should come off the dolly first');
 await p.screenshot({ path: `${out}/d03-dolly-unload.png` });
-for (let i = 0; i < 3; i++) { await p.evaluate((gx) => window.__sm.send('aim', { gx, gz: 0 }), i); await wait(200); await tap(); await wait(300); }
+for (let i = 0; i < 3; i++) {
+  await p.evaluate((gx) => window.__sm.send('aim', { gx, gz: 0 }), i); await wait(200); await tap();
+  await p.waitForFunction((n) => window.__sm.snap.items.filter(it => it.state === 'loaded').length >= n, i + 1, { timeout: 4000 }).catch(() => {});
+}
 s = await snap();
 const loaded = d2.stack.filter(x => s.items.find(i => i.id === x)?.state === 'loaded').length;
 log('unloaded from dolly into truck:', loaded, '| dolly uses', s.items.find(i => i.type === 'dolly').uses);
