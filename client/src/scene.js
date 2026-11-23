@@ -279,6 +279,15 @@ export class GameScene {
       }
       v.ready.visible = !!p.ready && (snap.phase === 'results' || snap.phase === 'lobby');
       v.data = p;
+      // energy meter over the head: shows while it's below full, or while injured
+      const en = p.energy ?? 1, hurt = p.injured > 0;
+      const showE = (en < 0.99 || hurt) && snap.phase === 'playing' && !p.out;
+      if (showE) {
+        const bucket = hurt ? 'i' + Math.ceil(p.injured) : 'e' + Math.round(en * 20);
+        if (!v.energy) { v.energy = sprite('', {}, [1.7, 0.31]); v.energy.position.y = 3.35; v.energy.renderOrder = 12; v.root.add(v.energy); }
+        if (v.energyKey !== bucket) { v.energyKey = bucket; v.energy.material.map?.dispose(); v.energy.material.map = energyTexture(en, p.injured); v.energy.material.needsUpdate = true; }
+      }
+      if (v.energy) v.energy.visible = showE;
       v.root.traverse(o => { if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
     }
     for (const [id, v] of this.players) if (!seen.has(id)) { this.scene.remove(v.root); this.players.delete(id); }
@@ -498,7 +507,7 @@ export class GameScene {
       const moving = Math.hypot(r.position.x - p.x, r.position.z - p.z) > 0.03;
       const body = v.root.userData.body;
       body.position.y = snap?.zeroG && !p.out ? 0.45 + Math.sin(t * 2.5 + r.position.x) * 0.2 : p.out ? 0.6 + Math.sin(t * 2) * 0.15 : moving ? Math.abs(Math.sin(t * 12)) * 0.12 : (p.char === 'glorp' ? Math.sin(t * 3) * 0.04 + 0.04 : 0);
-      body.rotation.z = moving ? Math.sin(t * 12) * 0.06 : 0;
+      body.rotation.z = moving ? Math.sin(t * (p.injured > 0 ? 7 : 12)) * (p.injured > 0 ? 0.2 : 0.06) : 0; // injured: a limp
       if (p.dashing) body.rotation.x = 0.3; else body.rotation.x = 0;
     }
     for (const v of this.items.values()) {
@@ -772,6 +781,21 @@ export class GameScene {
   }
 }
 
+function energyTexture(e, injured) {
+  const c = document.createElement('canvas');
+  c.width = 220; c.height = 40;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(11,8,32,.75)'; g.beginPath(); g.roundRect(0, 0, 220, 40, 20); g.fill();
+  if (injured > 0) {
+    g.fillStyle = '#ff4d5e'; g.font = 'bold 24px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(`🤕 HURT ${Math.ceil(injured)}s`, 110, 21);
+  } else {
+    g.fillStyle = e > 0.5 ? '#55ffcc' : e > 0.25 ? '#ffd166' : '#ff4d5e';
+    g.beginPath(); g.roundRect(4, 4, Math.max(20, 212 * Math.max(0, e)), 32, 16); g.fill();
+    g.fillStyle = '#0b0820'; g.font = 'bold 20px system-ui'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText('⚡', 10, 21);
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 function progressTexture(p, kind) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 40;

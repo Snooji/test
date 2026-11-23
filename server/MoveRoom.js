@@ -10,6 +10,12 @@ import { CLASSIC_IDS, ALL_CHAR_IDS, charUnlocked, rosterEntry, unlockText } from
 const CHARS = CLASSIC_IDS; // defaults + AI movers
 const SPEED = 5;
 const R = 0.45;           // player radius
+// Energy while carrying (round 9): drain per second at full speed for that load; scales with speed², so careful = cheap.
+export const ENERGY = {
+  drain: { standard: 0.125, fragile: 0.125, lamp: 0.14, heavy: 0.2, team: 0.15, soloLift: 0.2, dolly: 0.02, flatDolly: 0.03 },
+  regenStill: 0.35, regenWalk: 0.1, injurySecs: 7, injuryMult: 0.55,
+  injuries: ['twisted an ankle', 'pulled a back muscle', 'stubbed a toe', 'tweaked a knee'],
+};
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
 const TICK = 50;          // ms (20 Hz)
@@ -350,7 +356,7 @@ export class MoveRoom extends Room {
     this.resetWorld();
     let i = 0;
     for (const p of this.players.values()) {
-      Object.assign(p, { score: 0, strikes: 0, out: false, carry: null, loadMode: false, loaded: 0, breaks: 0, task: null, dashCd: 0, dashT: 0 });
+      Object.assign(p, { score: 0, strikes: 0, out: false, carry: null, loadMode: false, loaded: 0, breaks: 0, task: null, dashCd: 0, dashT: 0, energy: 1, injuredT: 0 });
       p.spectator = i >= MAX_MOVERS;
       this.placeAtSpawn(p, i++);
     }
@@ -393,9 +399,11 @@ export class MoveRoom extends Room {
     } else if (this.phase === 'playing') {
       this.timeLeft -= dt;
       for (const b of this.bots.values()) b.think(dt);
+      for (const p of this.players.values()) { p.px = p.x; p.pz = p.z; }
       for (const p of this.players.values()) this.updatePlayer(p, dt);
       this.separate();
       this.updateTeamCarries(dt);
+      this.updateEnergy(dt);
       this.updateTasks(dt);
       this.updateDollies(dt);
       this.updateDecay(dt);
@@ -513,7 +521,8 @@ export class MoveRoom extends Room {
 
     if (p.loadMode) return this.updateLoadMode(p, item, dt);
 
-    if (p.pending.dashN && p.dashCd <= 0) { p.dashT = 0.6; p.dashCd = 5; this.event({ kind: 'emote', id: p.id, e: '🚀' }); }
+    if (p.pending.dashN && p.dashCd <= 0 && !(p.injuredT > 0)) { p.dashT = 0.6; p.dashCd = 5; this.event({ kind: 'emote', id: p.id, e: '🚀' }); }
+    if (p.injuredT > 0) p.dashT = 0; // hurt: no sprinting
 
     if (!team) {
       let mult = p.dashT > 0 ? 2 : 1;
@@ -523,6 +532,7 @@ export class MoveRoom extends Room {
         else if (t.heavy) mult *= 0.6;
       }
       if (p.task) mult = 0; // working on furniture
+      if (p.injuredT > 0) mult *= ENERGY.injuryMult;
       const dly = this.dollyOf(p);
       if (dly) mult *= dly.stack.some(id => ITEM_TYPES[this.items.get(id)?.type]?.heavy) ? 0.7 : 0.85;
       this.freeMove(p, dt, mult);
@@ -724,6 +734,44 @@ export class MoveRoom extends Room {
     if (this.level.hitsWall(item.x, item.z, 0.3) || inRamp(item.x, item.z)) { item.x = p.x - 1; item.z = p.z; }
   }
 
+  /** What a mover is hauling right now, for the energy meter: [drain key, top speed multiplier for that load]. */
+  loadOf(p) {
+    if (p.flatDolly) return ['flatDolly', 0.8];
+    const item = p.carry ? this.items.get(p.carry) : null;
+    if (!item) return this.dollyOf(p) ? ['dolly', 0.85] : null;
+    const t = ITEM_TYPES[item.type];
+    if (item.carriers.length > 1) return ['team', 0.7];
+    if (t.teamCarry) return ['soloLift', 0.4];
+    return [t.heavy ? 'heavy' : item.type === 'lamp' ? 'lamp' : item.type === 'fragile' ? 'fragile' : 'standard', t.heavy ? 0.6 : 1];
+  }
+
+  /** Energy: carrying drains it (faster the faster you go), standing still refills it; empty = a short injury. */
+  updateEnergy(dt) {
+    for (const p of this.players.values()) {
+      if (p.energy === undefined) p.energy = 1;
+      if (p.injuredT > 0) { p.injuredT = Math.max(0, p.injuredT - dt); if (!p.injuredT) this.tell(p, '💪 Feeling better. Back to full speed.'); }
+      if (!this.isActive(p)) continue;
+      const speed = Math.hypot(p.x - (p.px ?? p.x), p.z - (p.pz ?? p.z)) / dt;
+      const load = p.loadMode ? null : this.loadOf(p);
+      if (load && speed > 0.15) {
+        const ratio = speed / (SPEED * load[1]);
+        p.energy -= ENERGY.drain[load[0]] * ratio * ratio * dt;
+      } else {
+        p.energy += (speed > 0.15 ? ENERGY.regenWalk : ENERGY.regenStill) * dt;
+      }
+      p.energy = Math.min(1, p.energy);
+      if (p.energy <= 0) {
+        if (this.tutorialMode) { p.energy = 0.05; continue; } // training: no injuries, just a warning bar
+        p.energy = 0.5;
+        p.injuredT = ENERGY.injurySecs;
+        const what = ENERGY.injuries[Math.floor(Math.random() * ENERGY.injuries.length)];
+        this.event({ kind: 'emote', id: p.id, e: '🤕' });
+        this.event({ kind: 'toast', text: `🤕 ${p.name} ${what}! Slowed down for ${ENERGY.injurySecs} s. Pace yourselves.` });
+        if (!this.demo && !p.bot) MoveRoom.store?.event('injury').catch(() => {});
+      }
+    }
+  }
+
   updateTeamCarries(dt) {
     for (const item of this.items.values()) {
       if (item.state !== 'carried') continue;
@@ -793,7 +841,7 @@ export class MoveRoom extends Room {
         p.task = { id: it.id, kind };
         continue;
       }
-      const secs = kind === 'wrap' ? RULES.WRAP_SECONDS : RULES.DISASSEMBLE_SECONDS + (it.jam || 0);
+      const secs = (kind === 'wrap' ? RULES.WRAP_SECONDS : RULES.DISASSEMBLE_SECONDS + (it.jam || 0)) * (p.injuredT > 0 ? 1.6 : 1);
       it.task.progress += dt / secs;
       it.helpers.push(p.id);
       if (!it.task.contributors.includes(p.id)) it.task.contributors.push(p.id);
@@ -1180,7 +1228,7 @@ export class MoveRoom extends Room {
     const players = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
-      out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dolly: p.dolly || null, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0,
+      out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dolly: p.dolly || null, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0, energy: +(p.energy ?? 1).toFixed(2), injured: +(p.injuredT || 0).toFixed(1),
       room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({

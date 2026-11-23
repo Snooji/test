@@ -6,9 +6,9 @@ import { inRamp } from '../shared/world.js';
 // Bots walk a little slower than a person at full stick, see only what's near them (sight, in metres,
 // blocked by walls), remember what they saw, and only dash now and then (dashEvery seconds at most).
 export const DIFFICULTY = {
-  easy:   { speed: 0.65, react: [1.0, 1.8],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.4,  dashEvery: 0,  follow: 0.5,  sight: 6 },
-  normal: { speed: 0.78, react: [0.5, 1.0],  sloppy: 0.3,  wrap: 0.7, help: 0.8, callout: 0.35, accuracy: 0.6,  dashEvery: 45, follow: 0.7,  sight: 7.5 },
-  hard:   { speed: 0.88, react: [0.3, 0.6],  sloppy: 0.05, wrap: 1,   help: 1,   callout: 0.6,  accuracy: 0.8,  dashEvery: 30, follow: 0.85, sight: 9 },
+  easy:   { pace: 0.12, rest: 0.03, speed: 0.65, react: [1.0, 1.8],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.4,  dashEvery: 0,  follow: 0.5,  sight: 6 },
+  normal: { pace: 0.35, rest: 0.1, speed: 0.78, react: [0.5, 1.0],  sloppy: 0.3,  wrap: 0.7, help: 0.8, callout: 0.35, accuracy: 0.6,  dashEvery: 45, follow: 0.7,  sight: 7.5 },
+  hard:   { pace: 0.45, rest: 0.14, speed: 0.88, react: [0.3, 0.6],  sloppy: 0.05, wrap: 1,   help: 1,   callout: 0.6,  accuracy: 0.8,  dashEvery: 30, follow: 0.85, sight: 9 },
 };
 const NO_DASH_BEFORE = 6; // nobody gets a rocket start
 
@@ -235,6 +235,11 @@ export class Bot {
 
   carry(item, dt) {
     const t = ITEM_TYPES[item.type];
+    // nearly out of energy: stop for a breather (standing still refills it) rather than get hurt
+    if (this.resting || (this.p.energy ?? 1) < this.cfg.rest) {
+      this.resting = (this.p.energy ?? 1) < 0.55;
+      if (this.resting) { this.idle(); return; }
+    }
     if (this.setAside === item.id && !inRamp(this.p.x, this.p.z)) { // staged next to the truck for later
       this.setAside = null; this.idle();
       this.p.pending.tapN = 1;
@@ -363,7 +368,9 @@ export class Bot {
     while (wp && Math.hypot(wp.x - src.x, wp.z - src.z) < 0.35 && this.pathI < this.path.length - 1) wp = this.path[++this.pathI];
     if (!wp) { this.idle(); return; }
     const dx = wp.x - src.x, dz = wp.z - src.z, d = Math.hypot(dx, dz) || 1;
-    const sp = this.cfg.speed;
+    let sp = this.cfg.speed;
+    const hauling = p.carry || p.dolly || p.flatDolly;
+    if (hauling && (p.energy ?? 1) < this.cfg.pace) sp *= 0.55; // getting tired: carry carefully
     p.in.mx = dx / d * sp; p.in.mz = dz / d * sp; p.in.hold = false;
 
     // stuck detection: nudge sideways and repath

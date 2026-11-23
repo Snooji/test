@@ -115,6 +115,7 @@ $('btn-join').onclick = () => { const c = parseCode($('join-code').value); if (c
 
 // ---------- live demo game behind the menu ----------
 let demoRoom = null, demoConnecting = false;
+let energyTipRound = null;
 async function startDemo() {
   if (demoRoom || demoConnecting || room) return;
   demoConnecting = true;
@@ -440,6 +441,8 @@ function renderHud(s, me) {
   show('btn-callout', canCall);
   show('btn-rot', !!me?.loadMode);
   $('dash-label').textContent = me?.loadMode ? 'BACK' : 'DASH';
+  // energy: one friendly tip per round the first time you run low
+  if (me && s.phase === 'playing' && (me.energy ?? 1) < 0.3 && !(me.injured > 0) && energyTipRound !== s.level?.seed) { energyTipRound = s.level?.seed; toast('⚡ Running out of energy! Slow down, or stop for a second to catch your breath, before you get hurt.'); }
   // compact: a strip of avatar + score chips (names only where there's room); you're highlighted, leader gets a crown
   $('scoreboard').innerHTML = [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
     .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}" title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join('');
