@@ -156,3 +156,14 @@ Next: energy meter + injuries while carrying; AI stuck loops near some walls; re
 - [x] Credits for all 15 Sketchfab models at /credits.html
 Measured (headless, solo round): voxel 143–193 draw calls (classic 218–247), ~140k triangles (classic ~30k); lite ~100 calls / 48k triangles
 Verified: unit tests 166/166 · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly PASS (tests now wait on game state instead of fixed pauses)
+
+## Round 10 (2026-11-23)
+- [x] No double-tap/pinch zoom (touch-action: manipulation everywhere, iOS gesture events blocked); smaller pop-ups (max 3, shorter)
+- [x] /voxel: the four classic movers get rendered voxel portraits (lobby carousel, sign-in screen, HUD, results)
+- [x] Furniture dolly: bigger orange/teal model with a floating "FURNITURE DOLLY" label and an orange ring on the minimap
+- [x] Box types clearly different on both links: cardboard / slate-grey heavy with hazard stripes / bright yellow fragile
+- [x] Energy drains much faster with big loads (heavy 0.28, team lift 0.26, solo lift 0.35 per s at full speed)
+- [x] Steal a two-mover lift: tap it → 5 s tap battle (center TAP button or E/Space) vs the nearest carrier; most taps takes that end; lift frozen meanwhile; AI mashes back (4/6/8 taps/s); taps capped at ~20/s
+- [x] AI answers 🆘: nearest free bot heads straight over and says so in chat
+- [ ] Ghost furniture / walls in doorways: not reproduced in 5 voxel houses checked from above; waiting on a screenshot
+Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2e-solo, e2e-wave2, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly PASS · e2e-b being re-checked

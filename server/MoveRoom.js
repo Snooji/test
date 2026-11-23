@@ -12,10 +12,12 @@ const SPEED = 5;
 const R = 0.45;           // player radius
 // Energy while carrying (round 9): drain per second at full speed for that load; scales with speed², so careful = cheap.
 export const ENERGY = {
-  drain: { standard: 0.125, fragile: 0.125, lamp: 0.14, heavy: 0.2, team: 0.15, soloLift: 0.2, dolly: 0.02, flatDolly: 0.03 },
+  drain: { standard: 0.14, fragile: 0.14, lamp: 0.18, heavy: 0.28, team: 0.26, soloLift: 0.35, dolly: 0.02, flatDolly: 0.03 },
   regenStill: 0.35, regenWalk: 0.1, injurySecs: 7, injuryMult: 0.55,
   injuries: ['twisted an ankle', 'pulled a back muscle', 'stubbed a toe', 'tweaked a knee'],
 };
+const DUEL_SECONDS = 5, DUEL_MIN_GAP = 0.05;
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
 const TICK = 50;          // ms (20 Hz)
@@ -81,6 +83,7 @@ export class MoveRoom extends Room {
         if (v > p.in[k]) { p.pending[k] += Math.min(3, v - p.in[k]); p.in[k] = v; }
       }
     });
+    this.onMessage('duelTap', (c) => this.duelTap(this.players.get(c.sessionId)));
     this.onMessage('char', (c, m) => {
       const p = this.players.get(c.sessionId);
       if (!p || this.phase === 'playing' || this.phase === 'meeting') return;
@@ -305,6 +308,14 @@ export class MoveRoom extends Room {
     if (p.lastHelp && now - p.lastHelp < 5000) return false;
     p.lastHelp = now;
     for (const b of this.bots.values()) b.hear?.(item); // everyone hears a 🆘
+    // the nearest free AI mover drops what it's walking to and comes to help
+    const free = [...this.bots.values()].filter(b => b.p !== p && this.isActive(b.p) && !b.p.carry && !b.p.loadMode && !b.p.dolly && !b.p.flatDolly && !b.p.task && !b.p.duel)
+      .sort((a, b) => dist(a.p, item) - dist(b.p, item));
+    const helper = free.find(b => Math.random() < ({ easy: 0.7, normal: 0.95, hard: 1 }[b.difficulty] ?? 0.9));
+    if (helper) {
+      helper.answerHelp(item);
+      this.broadcast('chat', { from: helper.p.name, char: helper.p.char, text: pick(['On my way! 🏃', 'Got you, coming!', 'Hold on, I’ll grab the other end!']), bot: true });
+    }
     const label = ITEM_TYPES[item.type].label.toLowerCase();
     this.event({ kind: 'help', id: p.id, name: p.name, item: label, x: +item.x.toFixed(1), z: +item.z.toFixed(1), text: `🆘 ${p.name} needs a hand with the ${label}! Lift the other end and split the points.` });
     return true;
@@ -328,6 +339,8 @@ export class MoveRoom extends Room {
 
   resetWorld() {
     this.items.clear();
+    this.duels = new Map();
+    for (const p of this.players.values()) p.duel = null;
     this.gridVersion = 0; this.fitCache = null; this.stuckHinted = false;
     this.grid = createGrid();
     this.breaks = [];
@@ -409,6 +422,7 @@ export class MoveRoom extends Room {
       this.updateTasks(dt);
       this.updateDollies(dt);
       this.updateFlatDolly();
+      this.updateDuels(dt);
       this.updateDecay(dt);
       if (this.twist === 'zerog') this.updateZeroG(dt);
       if (this.tutorial) this.updateTutorial();
@@ -535,6 +549,7 @@ export class MoveRoom extends Room {
         else if (t.heavy) mult *= 0.6;
       }
       if (p.task) mult = 0; // working on furniture
+      if (p.duel) mult = 0; // in a tap battle
       if (p.injuredT > 0) mult *= ENERGY.injuryMult;
       const dly = this.dollyOf(p);
       if (dly) mult *= dly.stack.some(id => ITEM_TYPES[this.items.get(id)?.type]?.heavy) ? 0.7 : 0.85;
@@ -619,7 +634,7 @@ export class MoveRoom extends Room {
     if (target.assembled) return this.tell(p, `Hold ACTION to disassemble the ${t.label.toLowerCase()} first`);
     if (t.teamCarry) {
       if (target.state === 'carried') {
-        if (target.carriers.length >= 2) return;
+        if (target.carriers.length >= 2) return this.startDuel(p, target);
         if (this.players.get(target.carriers[0])?.loadMode) return; // already being placed in the truck
         target.carriers.push(p.id); p.carry = target.id; p.helps = (p.helps || 0) + 1;
         this.event({ kind: 'emote', id: p.id, e: '💪' });
@@ -639,12 +654,70 @@ export class MoveRoom extends Room {
     let best = null, bd = REACH;
     for (const it of this.items.values()) {
       if ((it.type === 'dolly' || it.type === 'flatdolly') && (p.bot || it.state !== 'floor')) continue; // AI movers leave the dollies alone
-      if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1)) continue;
+      const stealable = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 2 && !p.carry && !it.carriers.includes(p.id);
+      if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1) && !stealable) continue;
       const t = ITEM_TYPES[it.type], len = Math.max(t.w, t.d);
       const d = dist(p, it) - (len > 1 ? len * 0.35 : 0);
       if (d < bd) { bd = d; best = it; }
     }
     return best;
+  }
+
+  // ---------- steal a two-mover lift: 5 s tap battle between the challenger and the nearest carrier ----------
+  startDuel(p, item) {
+    this.duels ||= new Map();
+    if (this.duels.has(item.id) || p.duel || p.carry || !this.isActive(p)) return;
+    const holders = item.carriers.map(id => this.players.get(id)).filter(Boolean);
+    if (holders.some(h => h.loadMode || h.duel)) return;
+    const victim = holders.sort((a, b) => dist(p, a) - dist(p, b))[0];
+    if (!victim) return;
+    const d = { item: item.id, a: p.id, b: victim.id, t: DUEL_SECONDS, ca: 0, cb: 0, last: {} };
+    this.duels.set(item.id, d);
+    p.duel = item.id; victim.duel = item.id;
+    const label = ITEM_TYPES[item.type].label.toLowerCase();
+    this.event({ kind: 'duel', item: item.id, a: p.id, b: victim.id });
+    this.event({ kind: 'toast', text: `⚔️ ${p.name} is trying to steal ${victim.name}'s end of the ${label}! TAP TAP TAP!`, cls: 'help' });
+  }
+  duelTap(p) {
+    if (!p?.duel) return;
+    const d = this.duels?.get(p.duel);
+    if (!d) return;
+    const now = this.elapsed || 0;
+    if (now - (d.last[p.id] ?? -1) < DUEL_MIN_GAP) return; // no autoclickers: ~20 taps/s max
+    d.last[p.id] = now;
+    if (p.id === d.a) d.ca++; else if (p.id === d.b) d.cb++;
+  }
+  updateDuels(dt) {
+    if (!this.duels?.size) return;
+    for (const [id, d] of this.duels) {
+      const a = this.players.get(d.a), b = this.players.get(d.b), item = this.items.get(id);
+      for (const [who, key] of [[a, 'ca'], [b, 'cb']]) { // AI movers mash too, at a speed set by difficulty
+        const bot = who && this.bots.get(who.id);
+        if (!bot) continue;
+        const rate = { easy: 4, normal: 6, hard: 8 }[bot.difficulty] || 6;
+        bot.duelAcc = (bot.duelAcc || 0) + dt * rate * (0.75 + Math.random() * 0.5);
+        while (bot.duelAcc >= 1) { bot.duelAcc -= 1; d[key]++; }
+      }
+      d.t -= dt;
+      const over = d.t <= 0 || !a || !this.isActive(a) || !item || item.state !== 'carried' || !item.carriers.includes(d.b);
+      if (!over) continue;
+      this.duels.delete(id);
+      if (a) a.duel = null; if (b) b.duel = null;
+      if (!a || !item || item.state !== 'carried') continue;
+      const label = ITEM_TYPES[item.type].label.toLowerCase();
+      const holderGone = !b || !item.carriers.includes(d.b) || !this.isActive(b);
+      if ((d.ca > d.cb || holderGone) && !a.carry && this.isActive(a)) {
+        if (item.carriers.includes(d.b)) item.carriers[item.carriers.indexOf(d.b)] = a.id;
+        else if (item.carriers.length < 2) item.carriers.push(a.id);
+        if (b && b.carry === id) b.carry = null;
+        a.carry = id;
+        this.event({ kind: 'emote', id: a.id, e: '💪' });
+        this.event({ kind: 'toast', text: `⚔️ ${a.name} wins ${d.ca}–${d.cb} and takes ${b?.name || 'their'}'s end of the ${label}!` });
+      } else {
+        this.event({ kind: 'toast', text: `🛡️ ${b?.name || 'The carrier'} holds on ${d.cb}–${d.ca}! The ${label} stays put.` });
+      }
+      this.event({ kind: 'duelEnd', item: id, a: d.a, b: d.b, ca: d.ca, cb: d.cb });
+    }
   }
 
   // ---------- the furniture dolly (flat, four wheels): one two-mover piece, moved solo, single use ----------
@@ -864,7 +937,7 @@ export class MoveRoom extends Room {
       if (item.state !== 'carried') continue;
       const cs = item.carriers.map(id => this.players.get(id)).filter(Boolean);
       if (cs.length < 2) { item.axis = undefined; continue; }
-      if (cs[0].loadMode) continue;
+      if (cs[0].loadMode || this.duels?.has(item.id)) continue; // tug-of-war: nobody moves
       let mx = 0, mz = 0;
       for (const c of cs) { mx += c.in.mx; mz += c.in.mz; }
       mx /= cs.length; mz /= cs.length;
@@ -1331,6 +1404,7 @@ export class MoveRoom extends Room {
       countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0, driveT: this.phase === 'driveoff' ? +this.driveT.toFixed(2) : 0,
       canCallOut: this.canCallOut(),
       game: this.game, overtime: !!this.overtime, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
+      duels: [...(this.duels?.values() || [])].map(d => ({ item: d.item, a: d.a, b: d.b, t: +Math.max(0, d.t).toFixed(1), ca: d.ca, cb: d.cb })),
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
       level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,

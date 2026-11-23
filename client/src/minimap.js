@@ -22,9 +22,12 @@ export function drawMinimap(canvas, level, snap, myId, pings, objective = null) 
   g.fillStyle = '#6b4dff'; g.fillRect(X(TRUCK.bayX1), Z(-2.8), (TRUCK.cabX1 - TRUCK.bayX1) * sc, 5.6 * sc);
   // items still in the house
   for (const it of snap.items) {
-    if (it.state === 'loaded') continue;
+    if (it.state === 'loaded' || it.state === 'gone' || it.state === 'parked') continue;
     const t = ITEM_TYPES[it.type];
-    g.fillStyle = it.state === 'carried' ? '#ffffff' : t.fragile ? '#ffd166' : t.furniture ? '#5b7cfa' : t.heavy ? '#a0703f' : '#d9a066';
+    if (it.type === 'flatdolly') { // the furniture dolly: an orange ring so it's easy to find
+      g.strokeStyle = '#ff8a3d'; g.lineWidth = 2; g.beginPath(); g.arc(X(it.x), Z(it.z), 4.5, 0, Math.PI * 2); g.stroke(); continue;
+    }
+    g.fillStyle = it.state === 'carried' ? '#ffffff' : t.fragile ? '#ffe14d' : t.furniture ? '#5b7cfa' : t.heavy ? '#7d8aa3' : '#c98d52';
     const s = t.furniture ? 4 : 3;
     g.fillRect(X(it.x) - s / 2, Z(it.z) - s / 2, s, s);
   }

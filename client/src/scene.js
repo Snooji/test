@@ -535,13 +535,18 @@ export class GameScene {
       const worked = it.task && it.state === 'floor';
       if (worked) o.rotation.z = Math.sin(performance.now() / 45) * 0.03 * (it.task.kind === 'disassemble' ? 1.6 : 0.8);
       else if (o.rotation.z) o.rotation.z = 0;
-      if (it.type === 'flatdolly') o.visible = it.state !== 'gone' && it.state !== 'parked'; // resetting / parked at the truck
+      if (it.type === 'flatdolly') {
+        o.visible = it.state !== 'gone' && it.state !== 'parked'; // resetting / parked at the truck
+        if (!o.userData.tag) { o.userData.tag = sprite('🛞 FURNITURE DOLLY', { fg: '#ffd166', stroke: '#0b0820', font: 'bold 34px system-ui', w: 400 }, [2.4, 0.5]); o.userData.tag.position.y = 1.5; o.add(o.userData.tag); }
+        o.userData.tag.visible = it.state === 'floor';
+        if (it.state === 'floor') o.userData.tag.position.y = 1.5 + Math.sin(t * 3) * 0.12;
+      }
       if (it.state === 'flat') { // riding the furniture dolly
         const dv = this.items.get(it.on);
         if (dv) {
           o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
           o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
-          o.position.y = damp(o.position.y, 0.24, 14, dt);
+          o.position.y = damp(o.position.y, 0.36, 14, dt);
           o.rotation.y = dv.obj.rotation.y;
         }
         continue;

@@ -181,3 +181,21 @@ test('AI movers never loop in place (seeded houses that used to trap them)', () 
     }
   } finally { Math.random = rnd; }
 });
+
+test('AI answers a 🆘: the nearest free bot heads for the other end and says so', () => {
+  const { room, join } = makeRoom({ level: 'classic' });
+  const a = join('A', 'Ada');
+  for (let i = 0; i < 3; i++) room.addBot();
+  for (const b of room.bots.values()) b.setDifficulty('hard');
+  room.startRound();
+  while (room.phase !== 'playing') room.tick(DT);
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  couch.wrapped = true; couch.state = 'carried'; couch.carriers = ['A']; a.carry = couch.id; a.x = couch.x; a.z = couch.z;
+  const chats = []; room.broadcast = (t, m) => { if (t === 'chat') chats.push(m); };
+  assert.ok(room.helpPing(a));
+  const helpers = [...room.bots.values()].filter(b => b.targetId === couch.id);
+  assert.equal(helpers.length, 1, 'one bot answers');
+  assert.ok(chats.some(c => c.bot && /way|coming|grab/i.test(c.text)));
+  for (let t = 0; t < 25 && couch.carriers.length < 2; t += DT) room.tick(DT);
+  assert.equal(couch.carriers.length, 2, 'the bot made it and lifted the other end');
+});

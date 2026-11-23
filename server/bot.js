@@ -86,6 +86,8 @@ export class Bot {
   }
   canSee(it) { return !!it && this.canSeePoint(it.x, it.z); }
   hear(it) { if (it) this.known.set(it.id, { x: it.x, z: it.z, at: this.t }); } // a 🆘 call everyone hears
+  /** chosen to answer a 🆘: head straight for the other end of that lift */
+  answerHelp(it) { this.hear(it); this.targetId = it.id; this.path = null; this.skipUntil.delete(it.id); this.waitT = Math.min(this.waitT, 0.3); this.exploreTo = null; }
   perceive(force = false, dt = 0.05) {
     if (!force && (this.lookT -= dt) > 0) return;
     this.lookT = 0.25;

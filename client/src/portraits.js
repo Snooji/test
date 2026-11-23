@@ -52,9 +52,13 @@ export const PORTRAITS = {
 // ---- the voxel crew (rendered portraits in /chars) ----
 import { ROSTER, rosterEntry } from '../../shared/roster.js';
 /** Portrait for any mover id: classic SVG, or the voxel crew's rendered picture wrapped in an SVG so it sizes the same. */
+const overrides = {}; // voxel look: rendered pictures of the four classic movers
+export function setPortrait(id, url) { overrides[id] = url; }
+const img = (src) => `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><image href="${src}" x="0" y="0" width="120" height="120"/></svg>`;
 export function portrait(id) {
+  if (overrides[id]) return img(overrides[id]);
   if (PORTRAITS[id]) return PORTRAITS[id];
-  if (rosterEntry(id)) return `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><image href="/chars/${id}.png" x="0" y="0" width="120" height="120"/></svg>`;
+  if (rosterEntry(id)) return img(`/chars/${id}.png`);
   return PORTRAITS.nova;
 }
 export const charInfo = (id) => CHARACTERS[id] || rosterEntry(id) || CHARACTERS.nova;

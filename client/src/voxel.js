@@ -237,7 +237,8 @@ const QUILT = (x, y, z) => ((Math.round(x / VS) + Math.round(z / VS) + Math.roun
 function boxColour(type, w, h, d) {
   const t = ITEM_TYPES[type], base = t.color;
   if (type === 'standard') return (x, y, z) => (Math.abs(x) < 0.1 && (y > h - VS || Math.abs(z) > d / 2 - VS)) ? 0xe8d6a8 : (Math.abs(z) > d / 2 - VS && Math.abs(x - 0.25) < 0.1 && Math.abs(y - h * 0.55) < 0.1) ? 0xffd166 : base;
-  if (type === 'heavy') return (x, y, z) => (y < 0.25 && y > 0.1) ? ((Math.round((x + y) / VS) & 1) ? 0xffdd57 : 0x1b1b24) : base;
+  if (type === 'heavy') return (x, y, z) => (y < 0.25 && y > 0.1) ? ((Math.round((x + y) / VS) & 1) ? 0xffdd57 : 0x1b1b24) // hazard band on the sides
+    : (y > h - VS && Math.abs(x) < 0.25 && Math.abs(z) < 0.25) ? ((Math.round((x + z) / VS) & 1) ? 0xffdd57 : 0x1b1b24) : base; // and a hazard square on top (seen from above)
   if (type === 'fragile') return (x, y, z) => (Math.abs(z) > d / 2 - VS && Math.abs(x) < 0.12 && y > h * 0.35 && y < h * 0.75) ? 0xe63946 : (y > h * 0.8 && y < h * 0.9) ? 0xe63946 : base;
   return (x, y, z) => ((Math.round(x / VS) & 3) === 0 ? shade(base, 0.85) : base);
 }
@@ -274,10 +275,11 @@ function dolly() {
 export function makeItem(type, { wrapped = false, assembled = false, loaded = false, dims = null } = {}) {
   const t = ITEM_TYPES[type];
   if (type === 'dolly') return dolly();
-  if (type === 'flatdolly') {
-    const v = new Vox().box(0, 0.16, 0, 2.0, 0.1, 1.0, (x, y, z) => (Math.round(x / VS) & 3) === 0 ? 0x7a5c3e : 0x8a6a4a);
-    for (const s of [-1, 1]) v.box(0, 0.24, s * 0.42, 2.0, 0.06, 0.14, 0x2f5fd0);
-    for (const sx of [-0.85, 0.85]) for (const sz of [-0.4, 0.4]) v.cyl(sx, 0.07, sz, 0.08, 0.1, 0x1a1a24, 'z');
+  if (type === 'flatdolly') { // chunky and bright so it's easy to spot: orange deck, teal carpet, big casters
+    const v = new Vox().box(0, 0.26, 0, 2.2, 0.16, 1.1, (x) => (Math.round(x / VS) & 3) === 0 ? 0xe06f24 : 0xff8a3d);
+    for (const s of [-1, 1]) v.box(0, 0.37, s * 0.44, 2.2, 0.08, 0.18, 0x2ec4b6);
+    v.box(-1.05, 0.55, 0, 0.12, 0.5, 1.1, 0xffd166); // push bar
+    for (const sx of [-0.9, 0.9]) for (const sz of [-0.42, 0.42]) v.cyl(sx, 0.1, sz, 0.12, 0.12, 0x1a1a24, 'z');
     const g = new THREE.Group(); g.add(v.mesh()); return g;
   }
   if (loaded && dims) return loadedPiece(type, wrapped, dims);
@@ -285,7 +287,7 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   // downloaded models (see /credits.html) for the pieces you carry around the house
   // [file, tint, quarter turns, fit [x, z, y]]
   const ASSET = {
-    standard: ['box', null, 0, [0.9, 0.9, 0.8]], heavy: ['box', 0x8a6a52, 0, [0.9, 0.9, 0.8]], fragile: ['box', 0xffe680, 0, [0.9, 0.9, 0.8]],
+    standard: ['box', null, 0, [0.9, 0.9, 0.8]], // heavy and fragile use the voxel boxes below: slate + hazard stripes / bright yellow + red band
     couch: ['couch', null, 2, [3.0, 0.95, 1.0]], bed: ['bed', null, -1, [2.0, 3.0, 1.0]], lamp: ['lamp', 0xff9ad5, 0, [1.4, 0.55, 1.95]],
     desk: ['desk', null, 0, [2.0, 0.95, 1.25]], table: ['table', null, 0, [2.0, 1.1, 0.85]],
   }[type];
@@ -303,6 +305,10 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
     const flat = t.needsDisassemble && !assembled;
     const w = t.w * 0.9, h = flat ? 0.3 : 0.8, d = Math.max(0.8, t.d * 0.9);
     g.add(new Vox().box(0, h / 2, 0, w, h, d, wrapped && t.furniture ? QUILT : boxColour(type, w, h, d)).mesh());
+    if (type === 'fragile' || type === 'heavy') {
+      const l = sprite(type === 'fragile' ? '🍷 FRAGILE' : '⚠ HEAVY', { fg: type === 'fragile' ? '#ff4d5e' : '#ffd166', stroke: '#1b1340', font: 'bold 34px system-ui' }, [0.95, 0.24]);
+      l.position.y = 1.0; l.material.depthTest = true; g.add(l);
+    }
     if (flat) { const l = sprite('FLAT-PACK ' + t.label.toUpperCase(), { fg: '#fff', stroke: '#000', font: 'bold 30px system-ui', w: 320 }, [1.8, 0.36]); l.position.y = 0.6; g.add(l); }
     return g;
   }
@@ -508,4 +514,22 @@ function decorateYard(g, level, rng) {
   const lamps = []; for (let x = fd.x + 2.5; x < 4.4; x += 3.5) for (const s of [-1, 1]) lamps.push({ x, z: fd.z + s * 2.0, rot: 0 });
   add('lamppost1', lamps, 2.4);
   const cart = place(1, 1.4); if (cart.length) add('hotdog', [{ ...cart[0], rot: rng() * 6.28 }], 1.7);
+}
+
+/** Render the four classic movers' voxel models into small portrait pictures (data URLs) for the HUD and lobby. */
+export function renderClassicPortraits() {
+  const out = {};
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  r.setSize(256, 256); r.setClearColor(0x000000, 0); r.outputColorSpace = THREE.SRGBColorSpace;
+  const sc = new THREE.Scene();
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x6655aa, 2.2));
+  const d = new THREE.DirectionalLight(0xffffff, 1.6); d.position.set(2, 4, 5); sc.add(d);
+  const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 50); cam.position.set(1.6, 1.9, 4.6); cam.lookAt(0, 0.9, 0);
+  for (const id of ['nova', 'cosmo', 'glorp', 'zibble']) {
+    const m = makeMover(id);
+    m.children.filter(c => c.isMesh && c.geometry?.type === 'PlaneGeometry').forEach(c => { c.visible = false; }); // no floor shadow square
+    sc.add(m); r.render(sc, cam); out[id] = r.domElement.toDataURL('image/png'); sc.remove(m);
+  }
+  r.dispose(); r.forceContextLoss?.();
+  return out;
 }

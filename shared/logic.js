@@ -4,8 +4,8 @@ export const GRID = { W: 4, D: 4, H: 4 };
 
 export const ITEM_TYPES = {
   standard: { label: 'Standard Box', w: 1, d: 1, pts: 10, heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0xc89b5f },
-  heavy:    { label: 'Heavy Box',    w: 1, d: 1, pts: 20, heavy: true,  fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0x7a5534 },
-  fragile:  { label: 'Fragile Box',  w: 1, d: 1, pts: 15, heavy: false, fragile: true,  furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0xf2d16b },
+  heavy:    { label: 'Heavy Box',    w: 1, d: 1, pts: 20, heavy: true,  fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0x5d6677 },
+  fragile:  { label: 'Fragile Box',  w: 1, d: 1, pts: 15, heavy: false, fragile: true,  furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0xffd84a },
   // floor lamp shaped like a lower-case "r": a 2-high pole with an arm off the top (cells are [x, y, z])
   lamp:     { label: 'Floor Lamp',   w: 2, d: 1, h: 2, cells: [[0, 0, 0], [0, 1, 0], [1, 1, 0]], pts: 30, heavy: false, fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0xff9ad5 },
   couch:    { label: 'Couch',        w: 3, d: 1, h: 1, pts: 70, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: true,  color: 0x5b7cfa },

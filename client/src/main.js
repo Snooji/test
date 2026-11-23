@@ -1,7 +1,8 @@
 import { Client } from 'colyseus.js';
 import { GameScene } from './scene.js';
 import { Input } from './input.js';
-import { PORTRAITS, CHARACTERS, portrait, charInfo, CREW_ORDER } from './portraits.js';
+import { PORTRAITS, CHARACTERS, portrait, charInfo, CREW_ORDER, setPortrait } from './portraits.js';
+import { renderClassicPortraits } from './voxel.js';
 import { charUnlocked, unlockText, unlockProgress } from '../../shared/roster.js';
 import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL, SUITS, suitUnlocked } from '../../shared/logic.js';
 import { inRamp } from '../../shared/world.js';
@@ -10,6 +11,7 @@ import { drawMinimap } from './minimap.js';
 import { VOXEL } from './style.js';
 if (VOXEL) { // voxel trial: small tag so testers know which look they're on
   document.body.classList.add('voxel');
+  try { for (const [id, url] of Object.entries(renderClassicPortraits())) setPortrait(id, url); } catch (e) { console.warn('portraits', e); }
   const tag = document.createElement('div');
   tag.className = 'voxel-tag';
   tag.innerHTML = '<a href="/">🧊 Voxel trial · classic look</a> · <a href="/credits.html">Art credits</a>';
@@ -51,7 +53,7 @@ const scene = new GameScene($('app'));
 const input = new Input({ onCallout: () => room?.send('callout'), onChatKey: () => focusChat(), onHelp: () => room?.send('help') });
 
 // ---------- gate ----------
-$('gate-crew').innerHTML = Object.keys(PORTRAITS).map(k => PORTRAITS[k]).join('');
+$('gate-crew').innerHTML = Object.keys(PORTRAITS).map(k => portrait(k)).join('');
 $('gate-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('gate-err').textContent = '';
@@ -116,6 +118,30 @@ $('btn-join').onclick = () => { const c = parseCode($('join-code').value); if (c
 // ---------- live demo game behind the menu ----------
 let demoRoom = null, demoConnecting = false;
 let energyTipRound = null;
+// ---- tap battle: someone tried to steal (or keep) an end of a two-mover lift ----
+let myDuel = null;
+function renderDuel(s) {
+  const d = (s.duels || []).find(x => x.a === myId || x.b === myId);
+  myDuel = d ? d.item : null;
+  show('duel', !!d);
+  if (!d) return;
+  const pa = s.players.find(p => p.id === d.a), pb = s.players.find(p => p.id === d.b);
+  const mine = d.a === myId ? d.ca : d.cb, theirs = d.a === myId ? d.cb : d.ca;
+  $('duel-t').textContent = Math.ceil(d.t) + 's';
+  $('duel-na').textContent = `${d.a === myId ? 'You' : pa?.name || '?'} ${d.ca}`;
+  $('duel-nb').textContent = `${d.cb} ${d.b === myId ? 'You' : pb?.name || '?'}`;
+  $('duel-fill').style.width = `${Math.round(100 * (d.ca + 1) / (d.ca + d.cb + 2))}%`;
+  $('duel-btn').textContent = mine > theirs ? 'TAP! 💪' : mine < theirs ? 'TAP!! 😤' : 'TAP!';
+}
+const duelTap = () => { if (!myDuel || !room) return; room.send('duelTap'); const b = $('duel-btn'); b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 60); sfx('blip'); };
+document.getElementById('duel-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); duelTap(); });
+addEventListener('keydown', (e) => { // E / Space mash during a battle (and don't count as the normal action)
+  if (!myDuel || e.repeat || !['e', ' '].includes(e.key.toLowerCase())) return;
+  e.preventDefault(); e.stopImmediatePropagation(); duelTap();
+}, true);
+// iOS Safari ignores user-scalable=no: block pinch-zoom gestures and double-tap zoom explicitly
+for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 async function startDemo() {
   if (demoRoom || demoConnecting || room) return;
   demoConnecting = true;
@@ -278,7 +304,7 @@ function renderLobby(s, me) {
   if (VOXEL) renderCrewCarousel(s); else $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
     const who = s.players.find(p => p.char === k);
     const cls = who?.id === myId ? 'mine' : who ? 'taken' : '';
-    return `<button class="char ${cls}" data-char="${k}" ${who?.bot ? 'disabled' : ''}>${who ? `<div class="who">${esc(who.name)}</div>` : ''}${who?.bot ? '<span class="bot" title="AI mover">🤖</span>' : ''}${PORTRAITS[k]}<div class="n">${c.name}</div><div class="k">${c.kind}</div></button>`;
+    return `<button class="char ${cls}" data-char="${k}" ${who?.bot ? 'disabled' : ''}>${who ? `<div class="who">${esc(who.name)}</div>` : ''}${who?.bot ? '<span class="bot" title="AI mover">🤖</span>' : ''}${portrait(k)}<div class="n">${c.name}</div><div class="k">${c.kind}</div></button>`;
   }).join('');
   for (const b of $('modes').children) { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = !host; }
   for (const b of $('games').children) { b.classList.toggle('on', b.dataset.game === s.game); b.disabled = !host; }
@@ -443,6 +469,7 @@ function renderHud(s, me) {
   $('dash-label').textContent = me?.loadMode ? 'BACK' : 'DASH';
   // energy: one friendly tip per round the first time you run low
   if (me && s.phase === 'playing' && (me.energy ?? 1) < 0.3 && !(me.injured > 0) && energyTipRound !== s.level?.seed) { energyTipRound = s.level?.seed; toast('⚡ Running out of energy! Slow down, or stop for a second to catch your breath, before you get hurt.'); }
+  renderDuel(s);
   // compact: a strip of avatar + score chips (names only where there's room); you're highlighted, leader gets a crown
   $('scoreboard').innerHTML = [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
     .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}" title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join('');
@@ -452,7 +479,8 @@ function renderHud(s, me) {
 function nearest(s, me) {
   let best = null, bd = 1.7;
   for (const it of s.items) {
-    if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 1)) continue;
+    const stealable = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 2 && !me.carry;
+    if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 1) && !stealable) continue;
     const d = Math.hypot(it.x - me.x, it.z - me.z) - (ITEM_TYPES[it.type].w > 1 ? 0.6 : 0);
     if (d < bd) { bd = d; best = it; }
   }
@@ -500,6 +528,7 @@ function renderPrompt(s, me) {
     if (it) {
       const t = ITEM_TYPES[it.type];
       if (it.assembled) { text = `🔧 HOLD to disassemble the ${t.label.toLowerCase()}`; action = 'HOLD 🔧'; }
+      else if (it.state === 'carried' && it.n === 2) { text = `⚔️ TAP to steal an end of the ${t.label.toLowerCase()}: a 5-second tap battle!`; action = 'STEAL'; }
       else if (it.state === 'carried') { text = `💪 TAP to grab the other end of the ${t.label.toLowerCase()}`; action = 'LIFT'; }
       else if (t.needsWrap && !it.wrapped) { text = `🧣 HOLD to pad-wrap the ${t.label.toLowerCase()} · TAP to grab as-is`; action = 'WRAP/GRAB'; }
       else { text = `TAP to pick up ${t.label}${t.teamCarry ? ' (2-mover lift)' : ''}`; action = 'GRAB'; }
@@ -517,8 +546,8 @@ function toast(text, cls = '') {
   el.className = 'toast ' + cls;
   el.textContent = text;
   $('toasts').prepend(el);
-  while ($('toasts').children.length > 4) $('toasts').lastChild.remove();
-  setTimeout(() => el.remove(), cls ? 7000 : 4500);
+  while ($('toasts').children.length > 3) $('toasts').lastChild.remove();
+  setTimeout(() => el.remove(), cls ? 5000 : 3200);
 }
 function onEvent(e) {
   if (e.kind === 'toast') { if (!(e.private && snap?.tutorial)) toast(e.text); }

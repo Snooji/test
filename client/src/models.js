@@ -158,10 +158,11 @@ function makeDolly() {
 
 function makeFlatDolly() { // four-wheel furniture dolly: a padded board on casters
   const g = new THREE.Group();
-  g.add(mesh(new THREE.BoxGeometry(2.0, 0.08, 1.0), mat(0x8a6a4a), 0, 0.16, 0));
-  for (const s of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(2.0, 0.04, 0.12), mat(0x2f5fd0), 0, 0.21, s * 0.42)); // carpet strips
-  for (const sx of [-0.85, 0.85]) for (const sz of [-0.4, 0.4]) {
-    const w = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.07, 12), mat(0x1a1a24), sx, 0.08, sz); w.rotation.x = Math.PI / 2; g.add(w);
+  g.add(mesh(new THREE.BoxGeometry(2.2, 0.16, 1.1), mat(0xff8a3d), 0, 0.26, 0));
+  for (const s of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(2.2, 0.08, 0.18), mat(0x2ec4b6), 0, 0.37, s * 0.44)); // carpet strips
+  g.add(mesh(new THREE.BoxGeometry(0.12, 0.5, 1.1), mat(0xffd166), -1.05, 0.55, 0)); // push bar
+  for (const sx of [-0.9, 0.9]) for (const sz of [-0.42, 0.42]) {
+    const w = mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 12), mat(0x1a1a24), sx, 0.12, sz); w.rotation.x = Math.PI / 2; g.add(w);
   }
   return g;
 }

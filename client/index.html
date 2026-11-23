@@ -61,6 +61,12 @@
     <canvas id="minimap" width="220" height="130" aria-label="Minimap"></canvas>
     <div id="countdown" class="hidden"></div>
     <div id="scoreboard"></div>
+    <div id="duel" class="hidden" aria-live="polite">
+      <div class="dl-title">⚔️ TAP BATTLE <span id="duel-t">5</span></div>
+      <div class="dl-bar"><span id="duel-na"></span><i id="duel-fill"></i><span id="duel-nb"></span></div>
+      <button id="duel-btn">TAP!</button>
+      <div class="dl-hint">Tap as fast as you can (or mash E / Space). Most taps in 5 s wins the lift.</div>
+    </div>
     <div id="toasts"></div>
     <div id="prompt" class="hidden"></div>
     <div id="keyhelp">WASD move · <kbd>E</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>Shift</kbd> dash/back · <kbd>R</kbd> rotate/flip · <kbd>H</kbd> call for help · <kbd>Q</kbd> call out · <kbd>Enter</kbd> chat · in the truck you can also click the grid</div>

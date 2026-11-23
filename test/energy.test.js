@@ -22,7 +22,7 @@ test('energy: carrying a heavy box flat out drains it in a few seconds; careful 
   const { room, a } = setup(); give(room, a, 'heavy'); a.x = 1;
   walk(room, a, 2);
   const fast = 1 - a.energy;
-  assert.ok(fast > 0.3 && fast < 0.5, `full speed for 2 s used ${fast.toFixed(2)}`);
+  assert.ok(fast > 0.45 && fast < 0.75, `full speed for 2 s used ${fast.toFixed(2)}`);
   a.energy = 1; walk(room, a, 2, 0.5);
   const slow = 1 - a.energy;
   assert.ok(slow < fast / 3, `half speed used ${slow.toFixed(2)} vs ${fast.toFixed(2)}`);
