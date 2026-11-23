@@ -241,6 +241,8 @@ function attach(r) {
 
 setInterval(() => {
   if (!room || !snap) return;
+  const ws = room.connection?.transport?.ws; // a dropped socket: stop sending until reconnect/leave handling kicks in
+  if (ws && ws.readyState !== 1) return;
   room.send('input', input.read());
 }, 50);
 

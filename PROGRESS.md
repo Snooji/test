@@ -166,4 +166,4 @@ Verified: unit tests 166/166 · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dol
 - [x] Steal a two-mover lift: tap it → 5 s tap battle (center TAP button or E/Space) vs the nearest carrier; most taps takes that end; lift frozen meanwhile; AI mashes back (4/6/8 taps/s); taps capped at ~20/s
 - [x] AI answers 🆘: nearest free bot heads straight over and says so in chat
 - [ ] Ghost furniture / walls in doorways: not reproduced in 5 voxel houses checked from above; waiting on a screenshot
-Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2e-solo, e2e-wave2, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly PASS · e2e-b being re-checked
+Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly, e2e-b PASS (input no longer sent into a closed socket)
