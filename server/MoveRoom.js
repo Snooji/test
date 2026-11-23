@@ -737,8 +737,12 @@ export class MoveRoom extends Room {
       if (item.axis === undefined) item.axis = Math.atan2(cs[1].z - cs[0].z, cs[1].x - cs[0].x);
       const spots = (x, z, a) => [[x - Math.cos(a) * off, z - Math.sin(a) * off], [x + Math.cos(a) * off, z + Math.sin(a) * off]];
       const clear = (x, z, a) => !this.level.hitsWall(x, z, 0.45) && spots(x, z, a).every(([sx, sz]) => !this.level.hitsWall(sx, sz, R * 0.8));
-      const stuckNow = !clear(item.x, item.z, item.axis); // squeezed already: allow any move that doesn't hit the furniture itself
+      // squeezed already, or wedged for a second (a doorway at the wrong angle): let the furniture itself through;
+      // the carriers still walk round and never stand in a wall
+      const wedged = (item.blockedT || 0) > 1;
+      const stuckNow = wedged || !clear(item.x, item.z, item.axis);
       const ok = (x, z, a) => clear(x, z, a) || (stuckNow && !this.level.hitsWall(x, z, 0.45));
+      const bx = item.x, bz = item.z;
       const moving = Math.abs(mx) + Math.abs(mz) > 0.05;
       if (moving) { // swing the pole round toward the walking line (either end can lead)
         let want = Math.atan2(mz, mx), diff = ((want - item.axis) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
@@ -749,13 +753,22 @@ export class MoveRoom extends Room {
       const nx = item.x + mx * sp, nz = item.z + mz * sp;
       if (ok(nx, item.z, item.axis)) item.x = nx;
       if (ok(item.x, nz, item.axis)) item.z = nz;
+      if (moving && Math.hypot(item.x - bx, item.z - bz) < sp * 0.2) item.blockedT = (item.blockedT || 0) + dt; else if (moving) item.blockedT = Math.max(0, (item.blockedT || 0) - dt * 2);
       const sp2 = spots(item.x, item.z, item.axis), maxStep = SPEED * dt;
-      cs.slice(0, 2).forEach((c, k) => { // walk into position; never jump
+      let lost = false;
+      cs.slice(0, 2).forEach((c, k) => { // walk into position (sliding along walls); never jump
         const [tx, tz] = sp2[k], dx = tx - c.x, dz = tz - c.z, d = Math.hypot(dx, dz);
         const nx2 = d <= maxStep ? tx : c.x + dx / d * maxStep, nz2 = d <= maxStep ? tz : c.z + dz / d * maxStep;
-        if (!this.level.hitsWall(nx2, nz2, R * 0.8)) { c.x = nx2; c.z = nz2; }
+        if (!this.level.hitsWall(nx2, c.z, R * 0.8)) c.x = nx2;
+        if (!this.level.hitsWall(c.x, nz2, R * 0.8)) c.z = nz2;
         c.face = moving ? Math.atan2(mx, mz) : Math.atan2(item.x - c.x, item.z - c.z);
+        if (Math.hypot(tx - c.x, tz - c.z) > 3) lost = true;
       });
+      if (lost) { // someone got stuck round a corner: they lose their grip and the piece is set down
+        this.event({ kind: 'toast', text: `😬 Lost grip on the ${ITEM_TYPES[item.type].label.toLowerCase()}! Set it down and lift again.` });
+        this.releaseCarry(cs[0]);
+        continue;
+      }
       // a tap from either carrier sets it down
       if (cs.some(c => c.pending.tapN)) this.releaseCarry(cs[0]);
     }

@@ -139,3 +139,45 @@ test('classic meetings: bots vote on what they saw, not on hidden culprit data',
   for (let i = 0; i < 300; i++) if (bot.meetingVote() === 'A') hits++;
   assert.ok(hits / 300 < 0.5, `blind bot picked the real culprit ${Math.round(hits / 3)}% of the time`);
 });
+
+test('AI forgets a remembered box once it sees it is already in the truck (no dithering at the edge of sight)', () => {
+  const { room } = makeRoom({ seed: 9433 });
+  room.addBot();
+  room.startRound();
+  const bot = [...room.bots.values()][0];
+  const box = [...room.items.values()].find(i => i.type === 'standard');
+  bot.p.x = 3.8; bot.p.z = 1.3;
+  box.state = 'loaded'; box.x = 10.2; box.z = -2.4;               // in view, but in the truck
+  bot.known.set(box.id, { x: 30, z: 30, at: 0 });                   // remembered somewhere it can't see
+  assert.ok(bot.canSee(box) && !bot.canSeePoint(30, 30), 'setup');
+  bot.perceive(true);
+  assert.ok(!bot.known.has(box.id), 'seeing it in the truck clears the old memory');
+  for (let i = 0; i < 10; i++) { const t = bot.chooseTarget(); assert.notEqual(t?.id, box.id); }
+});
+
+test('AI movers never loop in place (seeded houses that used to trap them)', () => {
+  const rnd = Math.random; Math.random = mulberryFor(1);
+  try {
+    for (const [seed, diff] of [[9433, 'normal'], [9433, 'hard']]) {
+      const { room } = makeRoom({ seed, dolly: true });
+      for (let i = 0; i < 4; i++) room.addBot();
+      for (const b of room.bots.values()) b.setDifficulty(diff);
+      room.startRound();
+      const hist = new Map();
+      for (let t = 0; t < 120 && room.phase !== 'results'; t += DT) {
+        room.tick(DT);
+        if (room.phase !== 'playing') continue;
+        for (const b of room.bots.values()) {
+          const p = b.p, h = hist.get(p.id) || []; h.push({ t, x: p.x, z: p.z, mv: Math.abs(p.in.mx) + Math.abs(p.in.mz) > 0.05 });
+          while (h.length && t - h[0].t > 10) h.shift(); hist.set(p.id, h);
+          if (h.length < 190 || p.loadMode || p.task) continue;
+          const item = p.carry && room.items.get(p.carry);
+          if (item && item.carriers.length === 1 && item.type in { couch: 1, bed: 1, desk: 1, table: 1 }) continue; // waiting for a buddy is allowed
+          const span = Math.max(Math.max(...h.map(q => q.x)) - Math.min(...h.map(q => q.x)), Math.max(...h.map(q => q.z)) - Math.min(...h.map(q => q.z)));
+          const trying = h.filter(q => q.mv).length / h.length;
+          assert.ok(!(span < 1.6 && trying > 0.6), `${diff}: ${p.name} looped at ${p.x.toFixed(1)},${p.z.toFixed(1)} around ${t.toFixed(0)}s`);
+        }
+      }
+    }
+  } finally { Math.random = rnd; }
+});

@@ -92,8 +92,9 @@ export class Bot {
     const room = this.room, p = this.p;
     for (const it of room.items.values()) {
       if (it.type === 'dolly') continue;
-      const visible = (it.state === 'floor' || it.state === 'carried') && this.canSee(it);
-      if (visible) this.known.set(it.id, { x: it.x, z: it.z, at: this.t });
+      const inView = this.canSee(it);
+      if (inView && (it.state === 'floor' || it.state === 'carried')) this.known.set(it.id, { x: it.x, z: it.z, at: this.t });
+      else if (inView) this.known.delete(it.id); // seen it: already in the truck (or broken), so forget the old floor spot
       else if (this.known.has(it.id)) { const k = this.known.get(it.id); if (this.canSeePoint(k.x, k.z)) this.known.delete(it.id); } // looked: it's gone
     }
     for (const o of room.players.values()) {
@@ -251,6 +252,17 @@ export class Bot {
       return;
     }
     this.waitAlone = 0;
+    if (item.carriers.length > 1 && item.carriers[0] === this.p.id) { // leader: a lift that makes no progress for 10 s is set down and left for later
+      const prog = this.liftProg;
+      if (!prog || prog.id !== item.id || Math.hypot(item.x - prog.x, item.z - prog.z) > 0.6) this.liftProg = { id: item.id, x: item.x, z: item.z, t: this.t };
+      else if (this.t - prog.t > 10) {
+        this.liftProg = null;
+        for (const b of this.room.bots.values()) if (item.carriers.includes(b.p.id)) { b.skipUntil.set(item.id, b.t + 20); b.targetId = null; b.path = null; }
+        this.room.releaseCarry(this.p);
+        this.waitT = this.react();
+        return;
+      }
+    }
     // in a team lift, steer the furniture itself, not our own body, so it threads doorways
     this.goTo(RAMP_TARGET, dt, t.heavy && !t.furniture, item.carriers.length > 1 ? item : null);
   }
@@ -282,6 +294,7 @@ export class Bot {
 
   stillValid(it) {
     if (!this.canSee(it)) return this.known.has(it.id); // out of sight: assume it's still where we saw it
+    if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1)) { this.known.delete(it.id); return false; }
     if (it.state === 'floor') return true;
     return it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1 && !it.carriers.includes(this.p.id);
   }
