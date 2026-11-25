@@ -326,6 +326,20 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
     v.cyl(-0.45, 0.06, 0, 0.3, 0.12, W(0x444466)).box(-0.45, 0.9, 0, 0.1, 1.7, 0.1, W(0xcccccc)).box(0.05, 1.72, 0, 1.0, 0.1, 0.1, W(0xcccccc));
     if (wrapped) v.cyl(0.55, 1.45, 0, 0.36, 0.42, QUILT, 'y', 0.18);
     else glow = new Vox().cyl(0.55, 1.45, 0, 0.36, 0.42, 0xff9ad5, 'y', 0.18);
+  } else if (type === 'dresser') { // three drawers with brass knobs; wrapped = under the blue blanket
+    const wood = 0x8b5e3c, dark = 0x6a4429;
+    v.box(0, 0.75, 0, 0.9, 1.5, 0.6, W(wood));
+    if (!wrapped) {
+      v.box(0, 1.52, 0, 0.96, 0.06, 0.66, dark); v.box(0, 0.03, 0, 0.92, 0.06, 0.62, dark);
+      for (const y of [0.32, 0.75, 1.18]) { v.box(0, y, 0.31, 0.8, 0.34, 0.04, 0x9c6b45); v.box(-0.18, y, 0.35, 0.08, 0.06, 0.04, 0xe0b23c); v.box(0.18, y, 0.35, 0.08, 0.06, 0.04, 0xe0b23c); }
+    }
+  } else if (type === 'coffeetable') { // low wooden table with a book and a mug on top
+    const wood = 0xa9744a;
+    v.box(0, 0.42, 0, 1.8, 0.1, 0.8, wood);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) v.box(sx * 0.8, 0.2, sz * 0.32, 0.1, 0.4, 0.1, shade(wood, 0.75));
+    v.box(0, 0.12, 0, 1.6, 0.04, 0.6, shade(wood, 0.85)); // lower shelf
+    v.box(-0.4, 0.5, 0.05, 0.4, 0.06, 0.3, 0x3a7ca5).box(-0.4, 0.55, 0.05, 0.36, 0.04, 0.26, 0xe63946); // books
+    v.box(0.45, 0.53, -0.1, 0.12, 0.14, 0.12, 0xf3efe6); // mug
   } else { // desk / table, assembled
     const top = type === 'desk' ? [2.0, 0.12, 0.9] : [2.0, 0.1, 1.1];
     v.box(0, 0.82, 0, ...top, t.color);
@@ -379,10 +393,25 @@ export function buildHouse(scene, level) {
   const rng = mulberryFor((level.seed ?? 7) * 31 + 5);
   const fb = new Batch(); // floors: patterned per room type, no block grid
   for (const r of level.rooms) { b.box(r.x0, 0, r.z0, r.x1, 0.035, r.z1, 0x2a2340, 1); floorPattern(fb, r, rng); }
+  // walls: split down their thickness so each side shows the colour + skirting of the room it faces (warm siding outside)
+  const roomAt = (x, z) => level.rooms.find(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+  const OUT = { wall: 0xe3cfae, skirt: 0x7a5a3a };
   for (const w of level.houseWalls) {
-    b.box(w.x0, 0, w.z0, w.x1, 1.25, w.z1, 0xeee8ff, 0.42);                                            // wall blocks
-    b.box(w.x0 - 0.02, 0, w.z0 - 0.02, w.x1 + 0.02, 0.14, w.z1 + 0.02, 0x5b4f96, 0.42);                // skirting board
-    b.box(w.x0 - 0.01, 1.25, w.z0 - 0.01, w.x1 + 0.01, 1.35, w.z1 + 0.01, 0x8f7bff, 0.42);             // trim
+    const alongX = (w.x1 - w.x0) >= (w.z1 - w.z0), len = alongX ? w.x1 - w.x0 : w.z1 - w.z0;
+    const n = Math.max(1, Math.round(len)), step = len / n;
+    for (let i = 0; i < n; i++) {
+      const a0 = (alongX ? w.x0 : w.z0) + i * step, a1 = a0 + step, mid = (a0 + a1) / 2;
+      for (const side of [-1, 1]) {
+        const tx = alongX ? mid : (side < 0 ? w.x0 - 0.3 : w.x1 + 0.3), tz = alongX ? (side < 0 ? w.z0 - 0.3 : w.z1 + 0.3) : mid;
+        const tiles = roomAt(tx, tz)?.tiles || OUT;
+        const half = alongX ? [a0, side < 0 ? w.z0 : (w.z0 + w.z1) / 2, a1, side < 0 ? (w.z0 + w.z1) / 2 : w.z1] : [side < 0 ? w.x0 : (w.x0 + w.x1) / 2, a0, side < 0 ? (w.x0 + w.x1) / 2 : w.x1, a1];
+        const [hx0, hz0, hx1, hz1] = alongX ? [half[0], half[1], half[2], half[3]] : [half[0], half[1], half[2], half[3]];
+        b.box(hx0, 0, hz0, hx1, 1.25, hz1, tiles.wall, 0.42);
+        const pad = 0.02; // skirting sticks out a touch on its own side only
+        b.box(alongX ? hx0 : (side < 0 ? hx0 - pad : hx0), 0, alongX ? (side < 0 ? hz0 - pad : hz0) : hz0, alongX ? hx1 : (side < 0 ? hx1 : hx1 + pad), 0.16, alongX ? (side < 0 ? hz1 : hz1 + pad) : hz1, tiles.skirt, 0.42);
+      }
+    }
+    b.box(w.x0 - 0.01, 1.25, w.z0 - 0.01, w.x1 + 0.01, 1.33, w.z1 + 0.01, 0xcfae84, 0.42);             // wooden cap
   }
   const pots = [], foods = [];
   for (const p of level.props) {
@@ -462,12 +491,12 @@ export function puffMesh(color) {
 const FLOOR_STYLE = { 'Kitchen': 'tile', 'Laundry': 'tile2', 'Garage': 'concrete', 'Bedroom': 'carpet', 'Kids Room': 'carpet2', 'Game Room': 'carpet3', 'Library': 'darkwood', 'Observatory': 'darkwood' };
 const PAL = {
   wood: [0xb07d4f, 0xa26f43, 0xbf8a59, 0x9c6a3f], darkwood: [0x6b4a33, 0x5d3f2b, 0x7a5539, 0x553a28],
-  tile: [0xeeeaf6, 0x9fb7d9], tile2: [0xe3eef2, 0xa8c8d8], concrete: [0x8a8a94, 0x7f7f8a],
-  carpet: [0x8f7bd6, 0x8673cc, 0x9883dc], carpet2: [0x6fc3b2, 0x66b8a8, 0x78ccbb], carpet3: [0xd9668a, 0xcf5f82, 0xe06e92],
+  tile: [0xf2e8d5, 0xc8734f], tile2: [0xf4f1ea, 0xa9bfa5], concrete: [0x948d84, 0x8a837a],          // kitchen cream/terracotta, bath sage, warm concrete
+  carpet: [0xc9b79c, 0xbfad92, 0xd2c1a6], carpet2: [0x6fae9e, 0x67a595, 0x78b7a7], carpet3: [0xd98a6a, 0xcf8062, 0xe09474],
 };
 /** top-of-floor quads: planks, checker tiles, carpet speckle or concrete slabs */
 function floorPattern(fb, r, rng) {
-  const style = FLOOR_STYLE[r.name] || 'wood', y = 0.04, top = (x0, z0, x1, z1, hex) => fb.face(1, 1, [x0, y, z0], z1 - z0, x1 - x0, hex, 1);
+  const style = r.tiles?.floor || FLOOR_STYLE[r.name] || 'wood', y = 0.04, top = (x0, z0, x1, z1, hex) => fb.face(1, 1, [x0, y, z0], z1 - z0, x1 - x0, hex, 1);
   const pal = PAL[style];
   if (style === 'wood' || style === 'darkwood') { // planks run along x, staggered
     for (let z = r.z0; z < r.z1 - 1e-6; z += 0.3) {

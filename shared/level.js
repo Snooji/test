@@ -111,11 +111,68 @@ export function generateLevel(seed, opts = {}) {
     ...innerWalls,
   ].filter(w => w.x1 - w.x0 > 0.05 && w.z1 - w.z0 > 0.05);
 
-  // ---- name the rooms ----
-  const names = [...ROOM_NAMES].sort(() => rng() - 0.5);
-  const floors = [...FLOORS].sort(() => rng() - 0.5);
+  // ---- which rooms connect: every door joins the two rooms either side of it ----
   rooms.sort((a, b) => (a.x0 - b.x0) || (a.z0 - b.z0));
-  rooms.forEach((r, i) => { delete r.done; r.name = names[i % names.length]; r.floor = floors[i % floors.length]; });
+  rooms.forEach(r => { delete r.done; });
+  const roomAtPt = (x, z) => rooms.findIndex(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+  const links = rooms.map(() => new Set());
+  for (const d of doors) {
+    const a = d.vertical ? roomAtPt(d.at - 0.5, d.c) : roomAtPt(d.c, d.at - 0.5);
+    const b = d.vertical ? roomAtPt(d.at + 0.5, d.c) : roomAtPt(d.c, d.at + 0.5);
+    if (a >= 0 && b >= 0 && a !== b) { links[a].add(b); links[b].add(a); }
+  }
+  const front = Math.max(0, rooms.findIndex(r => Math.abs(r.x1 - x1) < 0.01 && fd >= r.z0 && fd <= r.z1));
+  const hops = rooms.map(() => Infinity); hops[front] = 0;
+  for (const q = [front]; q.length;) { const i = q.shift(); for (const j of links[i]) if (hops[j] === Infinity) { hops[j] = hops[i] + 1; q.push(j); } }
+  const area = (r) => (r.x1 - r.x0) * (r.z1 - r.z0);
+
+  // ---- room roles, like a real house: living room at the front door, dining next to it, kitchen next to dining,
+  //      bedrooms furthest in, then office / bathroom / laundry ----
+  const role = rooms.map(() => null);
+  role[front] = 'living';
+  const free = () => rooms.map((_, i) => i).filter(i => !role[i]);
+  if (rooms.length >= 4) {
+    const dn = [...links[front]].filter(i => !role[i]).sort((a, b) => area(rooms[b]) - area(rooms[a]))[0];
+    if (dn !== undefined) role[dn] = 'dining';
+  }
+  const dining = role.indexOf('dining');
+  const kCand = free().filter(i => links[front].has(i) || (dining >= 0 && links[dining].has(i)))
+    .sort((a, b) => hops[a] - hops[b] || (dining >= 0 ? (links[dining].has(b) ? 1 : 0) - (links[dining].has(a) ? 1 : 0) : 0) || area(rooms[a]) - area(rooms[b]));
+  const kitchen = kCand.length ? kCand[0] : free().sort((a, b) => hops[a] - hops[b])[0];
+  if (kitchen !== undefined) role[kitchen] = 'kitchen';
+  // furniture budget: the whole inventory must leave slack in the 64-cell truck
+  const cellsOf = (t) => { const it = ITEM_TYPES[t]; return it.cells ? it.cells.length : it.w * it.d * (it.h || 1); };
+  const rest = free().sort((a, b) => hops[b] - hops[a] || area(rooms[b]) - area(rooms[a]));
+  const baseCells = 8 /* couch+lamp+coffee table */ + (dining >= 0 ? 5 : 5) /* table + lamp */ + (rest.length > 1 ? 2 : 0) /* office desk */;
+  const minBoxes = rooms.length + 3;
+  const maxBeds = Math.max(1, Math.min(3, Math.floor((56 - baseCells - minBoxes) / 8)));
+  rest.forEach((i, k) => { role[i] = k < maxBeds ? 'bedroom' : ['office', 'bathroom', 'laundry'][(k - maxBeds) % 3]; });
+  if (!role.includes('bedroom') && rest.length === 0 && rooms.length >= 3) { /* tiny house: never without a bedroom */
+    const far = rooms.map((_, i) => i).filter(i => role[i] !== 'living').sort((a, b) => hops[b] - hops[a])[0];
+    if (far !== undefined && role[far] !== 'kitchen') role[far] = 'bedroom';
+  }
+
+  // ---- names and per-type tile sets (floor pattern, wall colour on this room's side, skirting) ----
+  const ROLE_INFO = {
+    living:   { name: 'Living Room', floor: 'wood',     wall: 0xf1e3cc, skirt: 0x7a4f2c, color: 0x6b4a33 },
+    dining:   { name: 'Dining Room', floor: 'darkwood', wall: 0xead6bd, skirt: 0x5c3a22, color: 0x5d3f2b },
+    kitchen:  { name: 'Kitchen',     floor: 'tile',     wall: 0xf6f1e7, skirt: 0x8a8070, color: 0x8f8a80 },
+    bedroom:  { name: 'Bedroom',     floor: 'carpet',   wall: 0xdfe5d4, skirt: 0x6e6a5c, color: 0x7d6b58 },
+    kids:     { name: 'Kids Room',   floor: 'carpet2',  wall: 0xf3e2b8, skirt: 0x9a6b2f, color: 0x6fae9e },
+    office:   { name: 'Office',      floor: 'darkwood', wall: 0xe4dccd, skirt: 0x4a3a2c, color: 0x55402e },
+    bathroom: { name: 'Bathroom',    floor: 'tile2',    wall: 0xe8efe9, skirt: 0x7d8b84, color: 0x9fb3aa },
+    laundry:  { name: 'Laundry',     floor: 'tile2',    wall: 0xece6da, skirt: 0x7d7468, color: 0x8b8578 },
+  };
+  let bedN = 0;
+  rooms.forEach((r, i) => {
+    let kind = role[i] || 'office';
+    if (kind === 'bedroom') { bedN++; if (bedN === 3) kind = 'kids'; }
+    const info = ROLE_INFO[kind];
+    r.role = role[i] || 'office';
+    r.name = kind === 'bedroom' ? (bedN === 1 ? 'Main Bedroom' : `Bedroom ${bedN}`) : info.name;
+    r.tiles = { floor: info.floor, wall: info.wall, skirt: info.skirt };
+    r.floor = info.color;
+  });
 
   const level = finish({
     seed, exact, mansion, name: mansion ? `${pick(PREFIX)} Moon Mansion` : `${pick(PREFIX)} ${pick(SUFFIX)}`,
@@ -123,20 +180,14 @@ export function generateLevel(seed, opts = {}) {
     rooms, walls: [...houseWalls, ...TRUCK_WALLS], houseWalls, props: [], items: [], cat: [],
     frontDoor: { x: x1, z: fd },
   });
+  level.doorsBetween = (a, b) => (links[rooms.indexOf(a)]?.has(rooms.indexOf(b)) ? 1 : 0);
+  level.hopsFromFront = (r) => hops[rooms.indexOf(r)];
 
-  // ---- pick the inventory: Full load = exactly the 64 cells; otherwise fits with slack ----
-  const size = (t) => { const it = ITEM_TYPES[t]; return it.cells ? it.cells.length : it.w * it.d * (it.h || 1); };
-  let list = ['couch', 'bed'];
-  if (rng() < 0.7) list.push('desk');
-  if (rng() < 0.6) list.push('table');
-  for (let i = RI(1, 2); i--;) list.push('lamp');
-  for (let i = RI(4, 7); i--;) list.push('heavy');
-  for (let i = RI(5, 8); i--;) list.push('fragile');
-  for (let i = RI(8, 12); i--;) list.push('standard');
-  while (list.reduce((a, t) => a + size(t), 0) > 52) list.splice(list.lastIndexOf('standard'), 1);
+  // ---- the inventory, room by room: [type, room index or -1 for anywhere] ----
+  const byRole = (k) => rooms.map((_, i) => i).filter(i => role[i] === k);
+  let entries = [];
   if (exact) {
     const built = buildExactLoad(rng);
-    list = built.pieces.sort((a, b) => size(b) - size(a)); // big pieces get first pick of space
     // remember the known-good packing: AI movers use it as their plan
     const g = createGrid();
     level.solution = built.solution.map(sl => {
@@ -144,35 +195,80 @@ export function generateLevel(seed, opts = {}) {
       const rec = g.items.get(sl.id);
       return { type: sl.type, gx: sl.gx, gz: sl.gz, rot: sl.rot, y: r.y, cells: rec.cells.map(([x, y, z]) => [sl.gx + x, r.y + y, sl.gz + z]) };
     });
+    const pref = { bed: ['bedroom'], dresser: ['bedroom'], couch: ['living'], coffeetable: ['living'], table: ['dining', 'kitchen'], lamp: ['dining', 'living'], desk: ['office', 'bedroom'] };
+    const used = {};
+    entries = built.pieces.sort((a, b) => cellsOf(b) - cellsOf(a)).map(t => {
+      const opts = (pref[t] || []).flatMap(byRole);
+      const k = (used[t] = (used[t] || 0) + 1) - 1;
+      return [t, opts.length ? opts[k % opts.length] : -1];
+    });
+  } else {
+    const L = byRole('living')[0], D = byRole('dining')[0], K = byRole('kitchen')[0];
+    entries.push(['couch', L], ['lamp', L], ['coffeetable', L]);
+    const eat = D !== undefined ? D : K !== undefined ? K : L;
+    entries.push(['table', eat], ['lamp', eat]);
+    for (const b of byRole('bedroom')) entries.push(['bed', b], ['dresser', b]);
+    for (const o of byRole('office')) entries.push(['desk', o]);
+    // boxes: at least one in every room, the rest by floor area; fragile favours kitchen/dining, heavy the office/laundry
+    const furnCells = entries.reduce((a, [t]) => a + cellsOf(t), 0);
+    const yardN = RI(1, 2);
+    const nBoxes = Math.max(rooms.length + 1, Math.min(RI(14, 20), 56 - furnCells - yardN));
+    const MIX = { kitchen: [0.4, 0.15, 0.45], dining: [0.45, 0.1, 0.45], office: [0.4, 0.5, 0.1], laundry: [0.5, 0.4, 0.1], bathroom: [0.6, 0.2, 0.2], bedroom: [0.6, 0.2, 0.2], living: [0.5, 0.25, 0.25] };
+    const boxFor = (i) => { const m = MIX[role[i]] || MIX.living, u = rng(); return u < m[0] ? 'standard' : u < m[0] + m[1] ? 'heavy' : 'fragile'; };
+    const totalArea = rooms.reduce((a, r) => a + area(r), 0);
+    const boxes = rooms.map((_, i) => [boxFor(i), i]);
+    while (boxes.length < nBoxes) { let t = rng() * totalArea, i = 0; for (; i < rooms.length - 1; i++) { t -= area(rooms[i]); if (t <= 0) break; } boxes.push([boxFor(i), i]); }
+    // the full mix is always there
+    if (!boxes.some(([t]) => t === 'heavy')) boxes[0][0] = 'heavy';
+    if (!boxes.some(([t]) => t === 'fragile')) boxes[boxes.length > 1 ? 1 : 0][0] = 'fragile';
+    entries.push(...boxes);
+    for (let i = yardN; i--;) entries.push(['standard', -2]); // a couple of boxes already out on the lawn
   }
 
-  // ---- scatter items: clear of walls, doors and each other ----
+  // ---- place everything: clear of walls, doors and each other, furniture in its own room ----
   const doorPts = [...doors.map(d => d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }), level.frontDoor];
   const placed = [];
-  const areaOf = (r) => (r.x1 - r.x0) * (r.z1 - r.z0);
-  const totalArea = rooms.reduce((a, r) => a + areaOf(r), 0);
-  const roomByArea = () => { let t = rng() * totalArea; for (const r of rooms) { t -= areaOf(r); if (t <= 0) return r; } return rooms[0]; };
-  const yardBoxes = exact ? 0 : RI(1, 3);
-  list.forEach((type, idx) => {
+  const totalArea = rooms.reduce((a, r) => a + area(r), 0);
+  const roomByArea = () => { let t = rng() * totalArea; for (const r of rooms) { t -= area(r); if (t <= 0) return r; } return rooms[0]; };
+  entries.sort((a, b) => (ITEM_TYPES[b[0]].furniture ? 1 : 0) - (ITEM_TYPES[a[0]].furniture ? 1 : 0) || cellsOf(b[0]) - cellsOf(a[0])); // big pieces first
+  entries.forEach(([type, ri]) => {
     const t = ITEM_TYPES[type];
-    const big = Math.max(t.w, t.d);
     const halfX = t.furniture ? t.w / 2 + 0.7 : 0.9, halfZ = t.furniture ? t.d / 2 + 0.7 : 0.9;
-    const inYard = !t.furniture && type === 'standard' && idx >= list.length - yardBoxes;
-    for (let tries = 0; tries < (exact ? 160 : 80); tries++) {
-      let x, z;
-      const overflow = exact && tries >= 120 && !t.furniture; // a full house spills a few boxes onto the lawn
-      if (inYard || overflow) { x = R(x1 + 2, 8); z = R(-12, 12); if (Math.abs(z) < 4 && x > 5) continue; }
-      else { const r = roomByArea(); x = R(r.x0 + halfX, r.x1 - halfX); z = R(r.z0 + halfZ, r.z1 - halfZ); }
-      x = Math.round(x * 10) / 10; z = Math.round(z * 10) / 10;
-      if (!(inYard || overflow) && (x - halfX < x0 || x + halfX > x1 || z - halfZ < z0 || z + halfZ > z1)) continue;
-      if (level.hitsWall(x, z, t.furniture ? big / 2 + 0.25 : 0.7)) continue;
-      if (doorPts.some(p => Math.hypot(p.x - x, p.z - z) < 2.4 + (t.furniture ? big / 2 : 0))) continue;
-      if (placed.some(([pt, px, pz]) => {
+    const hw = Math.max(t.w, 1) / 2, hd = Math.max(t.d, 1) / 2;
+    const inYard = ri === -2;
+    const own = ri >= 0 ? rooms[ri] : null;
+    /** can this piece sit at (x, z)? walls checked against its real rectangle; doorways and other pieces kept clear */
+    const fits = (x, z, tight, yard) => {
+      if (!yard && (x - halfX < x0 || x + halfX > x1 || z - halfZ < z0 || z + halfZ > z1)) return false;
+      if (t.furniture ? [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]].some(([sx, sz]) => level.hitsWall(x + sx * hw, z + sz * hd, 0.45))
+        : level.hitsWall(x, z, 0.7)) return false;
+      const doorGap = t.furniture ? (tight ? 1.4 : 1.9) : 1.3;
+      if (doorPts.some(p => Math.hypot(Math.max(0, Math.abs(p.x - x) - hw), Math.max(0, Math.abs(p.z - z) - hd)) < doorGap)) return false;
+      return !placed.some(([pt, px, pz]) => {
         const o = ITEM_TYPES[pt];
-        return Math.abs(px - x) < (Math.max(o.w, 1) + Math.max(t.w, 1)) / 2 + 0.5 && Math.abs(pz - z) < (Math.max(o.d, 1) + Math.max(t.d, 1)) / 2 + 0.5;
-      })) continue;
+        const gap = tight || (type === 'coffeetable' && pt === 'couch') ? 0.25 : 0.5;
+        return Math.abs(px - x) < (Math.max(o.w, 1) + Math.max(t.w, 1)) / 2 + gap && Math.abs(pz - z) < (Math.max(o.d, 1) + Math.max(t.d, 1)) / 2 + gap;
+      });
+    };
+    for (let tries = 0; tries < (exact ? 200 : 220); tries++) {
+      let x, z;
+      const overflow = exact && tries >= 160 && !t.furniture; // a full house spills a few boxes onto the lawn
+      if (inYard || overflow) { x = R(x1 + 2, 8); z = R(-12, 12); if (Math.abs(z) < 4 && x > 5) continue; }
+      else if (type === 'coffeetable' && tries < 12 && placed.some(([pt]) => pt === 'couch')) { // in front of the couch, like a real living room
+        const [, cx, cz] = placed.find(([pt]) => pt === 'couch');
+        [x, z] = [[cx, cz + 1.6], [cx, cz - 1.6], [cx + 0.6, cz + 1.7], [cx - 0.6, cz - 1.7], [cx + 2.6, cz], [cx - 2.6, cz]][tries % 6];
+      }
+      else { const r = own && (t.furniture || tries < 150) ? own : roomByArea(); x = R(r.x0 + halfX, r.x1 - halfX); z = R(r.z0 + halfZ, r.z1 - halfZ); }
+      x = Math.round(x * 10) / 10; z = Math.round(z * 10) / 10;
+      if (!fits(x, z, false, inYard || overflow)) continue;
       placed.push([type, x, z]);
       return;
+    }
+    if (own) { // a crowded room: scan it on a fine grid, a little tighter, before giving up
+      for (const tight of [false, true]) for (let x = own.x0 + halfX; x <= own.x1 - halfX + 1e-6; x += 0.3) for (let z = own.z0 + halfZ; z <= own.z1 - halfZ + 1e-6; z += 0.3) {
+        const px = Math.round(x * 10) / 10, pz = Math.round(z * 10) / 10;
+        if (fits(px, pz, tight, false)) { placed.push([type, px, pz]); return; }
+      }
     }
     if (exact) { // never drop a piece of a Full load: scan the yard for any free spot
       for (let x = x1 + 2; x < 8.6; x += 1.2) for (let z = -13; z <= 13; z += 1.2) {
@@ -188,7 +284,7 @@ export function generateLevel(seed, opts = {}) {
   // ---- decoration + cat route ----
   for (const r of rooms) {
     const w = r.x1 - r.x0, d = r.z1 - r.z0;
-    level.props.push({ kind: 'rug', x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: Math.min(5, w * 0.45), d: Math.min(3.5, d * 0.35), color: pick([0xe76f51, 0x8ecae6, 0xffd166, 0x9b5de5, 0x52d17c]) });
+    level.props.push({ kind: 'rug', x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: Math.min(5, w * 0.45), d: Math.min(3.5, d * 0.35), color: pick([0xc8734f, 0xd9b26a, 0x8a9a6b, 0xb5654a, 0xe0c9a0]) }); // warm rugs (terracotta, mustard, sage, rust, oat)
     // decorations never sit in a doorway (they're walk-through, but they look like they block it)
     const nearDoor = (x0, z0, x1, z1, pad) => doorPts.some(p => p.x > x0 - pad && p.x < x1 + pad && p.z > z0 - pad && p.z < z1 + pad);
     const corners = [[r.x0 + 0.9, r.z0 + 0.9], [r.x1 - 0.9, r.z0 + 0.9], [r.x0 + 0.9, r.z1 - 0.9], [r.x1 - 0.9, r.z1 - 0.9]];

@@ -219,6 +219,12 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
     g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.7), pole, -0.45, 0.9, 0));
     const arm = mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0), pole, 0.05, 1.72, 0); arm.rotation.z = Math.PI / 2; g.add(arm);
     g.add(mesh(new THREE.ConeGeometry(0.36, 0.42, 16, 1, true), wrapped ? c : mat(0xff9ad5, { emissive: 0xff66bb, emissiveIntensity: 0.6, side: THREE.DoubleSide }), 0.55, 1.45, 0));
+  } else if (type === 'dresser') {
+    g.add(mesh(new THREE.BoxGeometry(0.9, 1.5, 0.6), c, 0, 0.75, 0));
+    if (!wrapped) for (const y of [0.32, 0.75, 1.18]) g.add(mesh(new THREE.BoxGeometry(0.8, 0.32, 0.04), mat(0x9c6b45), 0, y, 0.31));
+  } else if (type === 'coffeetable') {
+    g.add(mesh(new THREE.BoxGeometry(1.8, 0.1, 0.8), c, 0, 0.42, 0));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), c, sx * 0.8, 0.2, sz * 0.32));
   } else { // desk / table assembled
     const top = type === 'desk' ? [2.0, 0.12, 0.9] : [2.0, 0.1, 1.1];
     g.add(mesh(new THREE.BoxGeometry(...top), c, 0, 0.82, 0));
