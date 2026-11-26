@@ -49,7 +49,7 @@ const scene = new GameScene($('app'));
 const input = new Input({
   onCallout: () => room?.send('callout'), onChatKey: () => focusChat(), onHelp: () => room?.send('help'),
   onMenu: () => { if (!$('hud').classList.contains('hidden')) (menuOpen ? closeGameMenu() : openGameMenu()); },
-  onPad: (on) => { renderKeyHelp(); toast(on ? '🎮 Controller connected: left stick moves, A grab/drop (hold to wrap), B dash, X rotate, Y help, LB/RB call out, Start menu.' : '🎮 Controller disconnected.'); },
+  onPad: (on) => { renderKeyHelp(); toast(on ? '🎮 Controller connected: left stick moves, A grab/drop (hold to wrap), B dash, X rotate, RB flip, Y help, LB call out, Start menu.' : '🎮 Controller disconnected.'); },
 });
 
 // ---------- gate ----------
@@ -129,8 +129,8 @@ function renderDuel(s) {
   const pa = s.players.find(p => p.id === d.a), pb = s.players.find(p => p.id === d.b);
   const mine = d.a === myId ? d.ca : d.cb, theirs = d.a === myId ? d.cb : d.ca;
   $('duel-t').textContent = Math.ceil(d.t) + 's';
-  $('duel-na').textContent = `${d.a === myId ? 'You' : pa?.name || '?'} ${d.ca}`;
-  $('duel-nb').textContent = `${d.cb} ${d.b === myId ? 'You' : pb?.name || '?'}`;
+  $('duel-na').textContent = `${d.a === myId ? 'You' : pa?.name || '?'} ${Math.round(d.ca)}`;
+  $('duel-nb').textContent = `${Math.round(d.cb)} ${d.b === myId ? 'You' : pb?.name || '?'}`;
   $('duel-fill').style.width = `${Math.round(100 * (d.ca + 1) / (d.ca + d.cb + 2))}%`;
   $('duel-btn').textContent = mine > theirs ? 'TAP! 💪' : mine < theirs ? 'TAP!! 😤' : 'TAP!';
 }
@@ -465,7 +465,7 @@ function renderHud(s, me) {
   const tut = s.tutorial;
   show('coach', !!tut && s.phase === 'playing');
   if (tut) {
-    const keys = isTouch ? { ACT: 'the big button', ROT: 'a quick swipe', HELP: 'Need a hand' }
+    const keys = isTouch ? { ACT: 'the big button', ROT: 'Rotate', HELP: 'Need a hand' }
       : input.pad.connected ? { ACT: 'A', ROT: 'X', HELP: 'Y' } : { ACT: keyName(input.binds.action), ROT: keyName(input.binds.rotate), HELP: keyName(input.binds.help) };
     $('coach-text').textContent = (tut.text || '').replace(/Tap \{ROT\}/g, isTouch ? 'Use {ROT}' : 'Tap {ROT}').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]);
     $('coach-dots').innerHTML = Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join('');
@@ -488,9 +488,10 @@ function renderHud(s, me) {
   // phones: the stick also moves the aim in the truck; drag on the truck aims, a quick swipe turns the piece
   const aiming = !!me?.loadMode && s.phase === 'playing';
   document.body.classList.toggle('aiming', aiming);
-  show('joyzone', isTouch && s.phase !== 'meeting');
-  const it0 = aiming && me.carry ? s.items.find(i => i.id === me.carry) : null;
-  show('swipe-hint', isTouch && !!it0 && orientations(it0.type).length > 1);
+  show('dpad', aiming && isTouch);                          // phones: aim with the D-pad (or drag on the truck)
+  show('joyzone', !aiming && isTouch && s.phase !== 'meeting');
+  const it0 = aiming && me.carry ? s.items.find(i => i.id === me.carry) : null, turns = !!it0 && orientations(it0.type).length > 1;
+  show('btn-rot', turns); show('btn-flip', turns && new Set(orientations(it0.type).map(o => o.h)).size > 1);
   const canCall = s.phase === 'playing' && s.canCallOut && (s.openBreaks > 0 || s.game === 'sabotage') && me && !me.out && !me.spectator;
   show('hud-callout', canCall && !isTouch);
   show('btn-callout', canCall);
@@ -530,8 +531,8 @@ function renderPrompt(s, me) {
   } else if (me.loadMode) {
     const it = s.items.find(i => i.id === me.carry);
     const f = it ? footprint(it.type, me.cursor?.rot || 0) : null;
-    const turn = it && orientations(it.type).length > 1 ? ` · ${isTouch ? 'ROTATE' : 'R'} turn/flip (${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h})` : '';
-    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `Stick or drag to aim · swipe turns it · Place${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
+    const turn = it && orientations(it.type).length > 1 ? ` · ${isTouch ? 'Rotate / Flip' : input.pad.connected ? 'X rotate · RB flip' : `${keyName(input.binds.rotate)} rotate · ${keyName(input.binds.flip)} flip`} (${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h})` : '';
+    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `D-pad or drag to aim · Place${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
     action = 'DROP';
   } else if (!me.carry && !me.dolly && !s.level?.tutorial && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
     text = `🧩 Hold ${actKey()} to unload pieces from the truck and repack`;
@@ -828,8 +829,8 @@ applyPrefs(); syncGameMenu();
 function renderKeyHelp() {
   const k = (id) => `<kbd>${esc(keyName(input.binds[id]))}</kbd>`;
   $('keyhelp').innerHTML = input.pad.connected
-    ? '🎮 Left stick move · <kbd>A</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>B</kbd> dash/back · <kbd>X</kbd> rotate/flip · <kbd>Y</kbd> call for help · <kbd>LB</kbd>/<kbd>RB</kbd> call out · <kbd>Start</kbd> menu'
-    : `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · ${k('action')} or <kbd>Left click</kbd> grab/drop, hold = wrap/disassemble · <kbd>Right click</kbd> place in truck · <kbd>Wheel drag</kbd> turn camera · ${k('dash')} dash/back · ${k('rotate')} rotate/flip · ${k('help')} call for help · ${k('callout')} call out · ${k('chat')} chat · <kbd>Esc</kbd> menu`;
+    ? '🎮 Left stick move · <kbd>A</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>B</kbd> dash/back · <kbd>X</kbd> rotate · <kbd>RB</kbd> flip · <kbd>Y</kbd> call for help · <kbd>LB</kbd> call out · <kbd>Start</kbd> menu'
+    : `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · ${k('action')} or <kbd>Left click</kbd> grab/drop, hold = wrap/disassemble · <kbd>Right click</kbd> place in truck · <kbd>Wheel drag</kbd> turn camera · ${k('dash')} dash/back · ${k('rotate')} rotate · ${k('flip')} flip · ${k('help')} call for help · ${k('callout')} call out · ${k('chat')} chat · <kbd>Esc</kbd> menu`;
   $('hud-callout').innerHTML = `📣 CALL OUT <kbd>${esc(keyName(input.binds.callout))}</kbd>`;
   $('hud-help').innerHTML = `🆘 NEED A HAND <kbd>${esc(keyName(input.binds.help))}</kbd>`;
   $('gm-keys').innerHTML = ACTIONS.map(a => `<li><span>${a.label}</span><span class="gm-key"><kbd>${esc(keyName(input.binds[a.id]))}</kbd>${PAD_LABEL[a.id] ? `<small>🎮 ${PAD_LABEL[a.id]}</small>` : ''}<button class="gm-change" data-act="${a.id}">Change</button></span></li>`).join('');
@@ -862,6 +863,28 @@ $('fb-skip').onclick = () => answerFeedback(null);
 
 // ---------- truck aiming: D-pad + drag (drop still happens on ACTION) ----------
 const meNow = () => snap?.players.find(p => p.id === myId);
+function aimStep(dir) {
+  const me = meNow();
+  if (!room || !me?.loadMode || !me.cursor) return;
+  const [sx, sy] = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[dir];
+  const st = scene.gridStepFor(sx, sy);
+  room.send('aim', { gx: me.cursor.gx + st.dgx, gz: me.cursor.gz + st.dgz });
+  sfx('tick');
+}
+let dpadRepeat = null;
+$('dpad').addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('button[data-dir]');
+  if (!b) return;
+  e.preventDefault();
+  b.classList.add('down');
+  aimStep(b.dataset.dir);
+  clearInterval(dpadRepeat);
+  dpadRepeat = setInterval(() => aimStep(b.dataset.dir), 220);
+  const up = () => { clearInterval(dpadRepeat); b.classList.remove('down'); };
+  b.addEventListener('pointerup', up, { once: true });
+  b.addEventListener('pointerleave', up, { once: true });
+  b.addEventListener('pointercancel', up, { once: true });
+});
 let lastAim = '';
 function dragAim(e) {
   const me = meNow();
@@ -904,7 +927,7 @@ const touchEnd = (e) => {
   const g = touches.get(e.pointerId); if (!g) return;
   touches.delete(e.pointerId);
   const me = meNow(), dt = performance.now() - g.t, dist = Math.hypot(e.clientX - g.sx, e.clientY - g.sy);
-  if (me?.loadMode && dt < 300 && dist > 40 && room) { input.s.rotN++; sfx('tick'); }
+  void me; void dt; void dist; // (turning a piece is the Rotate / Flip buttons now)
 };
 cv.addEventListener('pointerup', touchEnd); cv.addEventListener('pointercancel', touchEnd);
 // hold the wheel (middle button) and move the mouse to turn the camera; double-click the wheel to put it back

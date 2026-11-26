@@ -8,9 +8,10 @@ import { inRamp } from '../shared/world.js';
 export const DIFFICULTY = {
   easy:   { pace: 0.12, rest: 0.03, speed: 0.65, react: [1.0, 1.8],  sloppy: 1,    wrap: 0.3, help: 0.4, callout: 0.15, accuracy: 0.4,  dashEvery: 0,  follow: 0.5,  sight: 6 },
   normal: { pace: 0.35, rest: 0.1, speed: 0.78, react: [0.5, 1.0],  sloppy: 0.3,  wrap: 0.7, help: 0.8, callout: 0.35, accuracy: 0.6,  dashEvery: 45, follow: 0.7,  sight: 7.5 },
-  hard:   { pace: 0.45, rest: 0.14, speed: 0.88, react: [0.3, 0.6],  sloppy: 0.05, wrap: 1,   help: 1,   callout: 0.6,  accuracy: 0.8,  dashEvery: 30, follow: 0.85, sight: 9 },
+  hard:   { pace: 0.45, rest: 0.14, speed: 0.88, react: [0.3, 0.6],  sloppy: 0.12, wrap: 1,   help: 1,   callout: 0.6,  accuracy: 0.8,  dashEvery: 30, follow: 0.85, sight: 9 },
 };
 const NO_DASH_BEFORE = 6; // nobody gets a rocket start
+const BOX_TYPES = ['standard', 'heavy', 'fragile'];
 
 export const BOT_NAMES = ['Beep', 'Sprocket', 'Orbit', 'Nebby', 'Kip', 'Bolt', 'Pixel', 'Comet'];
 const RAMP_TARGET = { x: 11.2, z: 0 };
@@ -53,9 +54,12 @@ export function choosePlacement(grid, item, difficulty, rng = Math.random, evil 
     return opts[Math.floor(rng() * opts.length)];
   }
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  if (rng() < cfg.sloppy) return opts[Math.floor(rng() * opts.length)];
+  const safeAll = opts.filter(o => o.score > -500);
+  if (rng() < cfg.sloppy) { const from = difficulty === 'easy' || !safeAll.length ? opts : safeAll; return from[Math.floor(rng() * from.length)]; } // careful movers are sloppy, not destructive
   opts.sort((a, b) => b.score - a.score);
-  return opts[0];
+  // decent, not perfect: pick among the few best spots that don't crush anything (a person eyeballing the stack)
+  const safe = opts.filter(o => o.score > -500), pool = (safe.length ? safe : opts).slice(0, { easy: 8, normal: 5, hard: 3 }[difficulty] || 5);
+  return pool[Math.floor(rng() ** 1.6 * pool.length)];
 }
 
 export class Bot {
@@ -128,7 +132,7 @@ export class Bot {
   skipping(id) { return (this.skipUntil.get(id) || 0) > this.t; }
 
   // ---------- Full load: follow the known-good packing ----------
-  plan() { return this.room.isExact() && this.room.level.solution ? this.room.level.solution : null; }
+  plan() { return null; } // AI movers pack like people do: no peeking at the level's perfect packing
   colTop(x, z) { const col = this.room.grid.cells[x][z]; for (let y = GRID.H - 1; y >= 0; y--) if (col[y]) return y + 1; return 0; }
   slotReady(sl) {
     const g = this.room.grid;
@@ -330,12 +334,12 @@ export class Bot {
       const seen = this.seenAt(it);
       if (!seen || (this.canSee(it) && it.state !== 'floor') || ITEM_TYPES[it.type].tool || this.skipping(it.id) || this.claimed(it)) continue;
       const t = ITEM_TYPES[it.type];
+      const box = BOX_TYPES.includes(it.type); // a closed box: what's inside is a surprise until you lift it
       if (t.teamCarry && !alone && someoneWaiting) continue;
       let score = -Math.hypot(seen.x - p.x, seen.z - p.z) - Math.hypot(seen.x - RAMP_TARGET.x, seen.z - RAMP_TARGET.z) * 0.4;
       if (this.difficulty === 'hard') {
-        if (t.heavy || t.furniture) score += loaded < 12 ? 14 : 4; // build the floor first
-        if (t.fragile) score -= loaded < 10 ? 12 : 0;              // fragile goes on top, later
-        score += t.pts * 0.15;
+        if (t.furniture) score += loaded < 12 ? 14 : 4;   // big pieces first: they build the floor
+        score += box ? 2 : t.pts * 0.15;                  // a box is worth "a box" until you know what it is
       } else if (this.difficulty === 'easy') score += this.rng() * 20;
       else score += this.rng() * 6;
       if (t.teamCarry && !alone) score -= 6;
@@ -345,7 +349,7 @@ export class Bot {
     }
     if (best) {
       const t = ITEM_TYPES[best.type];
-      this.wantsWrap = t.needsWrap && this.rng() < cfg.wrap;
+      this.wantsWrap = t.needsWrap && !BOX_TYPES.includes(best.type) && this.rng() < cfg.wrap; // can't see a box needs care from outside
     }
     return best;
   }
@@ -379,7 +383,7 @@ export class Bot {
     // stuck detection: nudge sideways and repath
     if (this.last && Math.hypot(this.last.x - src.x, this.last.z - src.z) < 0.02 && !p.task) this.stuckT += dt; else this.stuckT = 0;
     this.last = { x: src.x, z: src.z };
-    if (this.stuckT > 0.8) { p.in.mx = -dz / d * sp; p.in.mz = dx / d * sp; this.repathT = 0; this.stuckT = 0; }
+    if (this.stuckT > 0.8) { this.side = -(this.side || 1); p.in.mx = -dz / d * sp * this.side; p.in.mz = dx / d * sp * this.side; this.repathT = 0; this.stuckT = 0; } // sidestep, alternating sides
 
     // an occasional dash on a long open run (never off the start line, never on cooldown)
     const every = this.cfg.dashEvery;

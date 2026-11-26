@@ -77,15 +77,28 @@ await wait(1200);
 const c0 = (await meOf(b)).cursor;
 await b.screenshot({ path: `${out}/s07-phone-truck.png` });
 if ((await b.textContent('#action-label')).trim() !== 'Place') errors.push('in the truck the button should say Place, says ' + await b.textContent('#action-label'));
-if (!(await b.isVisible('#swipe-hint'))) errors.push('no swipe hint for a piece that turns');
-// a quick swipe on the view turns the piece
-const cvs = b.locator('#app canvas');
-await cvs.dispatchEvent('pointerdown', { pointerId: 9, clientX: vp.width * 0.6, clientY: vp.height * 0.3, pointerType: 'touch', isPrimary: true });
-await cvs.dispatchEvent('pointerup', { pointerId: 9, clientX: vp.width * 0.6 + 90, clientY: vp.height * 0.3, pointerType: 'touch' });
+if (!(await b.isVisible('#dpad'))) errors.push('D-pad not visible in the truck');
+if (await b.isVisible('#joyzone')) errors.push('stick still active in the truck');
+if (!(await b.isVisible('#btn-rot')) || !(await b.isVisible('#btn-flip'))) errors.push('Rotate / Flip buttons missing for the couch');
+let dmoved = 0;
+for (const dir of ['up', 'left', 'down', 'right']) {
+  const before = JSON.stringify((await meOf(b)).cursor);
+  await b.locator(`#dpad button[data-dir="${dir}"]`).dispatchEvent('pointerdown', { pointerId: 1 });
+  await b.locator(`#dpad button[data-dir="${dir}"]`).dispatchEvent('pointerup', { pointerId: 1 });
+  const changed = await b.waitForFunction((before) => JSON.stringify(window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor) !== before, before, { timeout: 2000 }).then(() => true).catch(() => false);
+  if (changed) dmoved++;
+}
+if (dmoved < 2) errors.push('D-pad barely moves the aim');
+await b.locator('#btn-rot').dispatchEvent('pointerdown'); await b.locator('#btn-rot').dispatchEvent('pointerup');
 await b.waitForFunction((r) => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor?.rot !== r, c0.rot, { timeout: 4000 }).catch(() => {});
 const c1 = (await meOf(b)).cursor;
-log('swipe rotate:', c0.rot, '→', c1.rot);
-if (c1.rot === c0.rot) errors.push('a swipe did not turn the piece');
+log('rotate:', c0.rot, '→', c1.rot);
+if (c1.rot === c0.rot) errors.push('Rotate did not turn the piece');
+await b.locator('#btn-flip').dispatchEvent('pointerdown'); await b.locator('#btn-flip').dispatchEvent('pointerup');
+await b.waitForFunction((r) => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor?.rot !== r, c1.rot, { timeout: 4000 }).catch(() => {});
+const c2 = (await meOf(b)).cursor;
+log('flip:', c1.rot, '→', c2.rot);
+if (c2.rot === c1.rot) errors.push('Flip did not tip the piece');
 // drag across the truck
 const box = await b.evaluate(() => { const c = document.querySelector('#app canvas'); return { w: c.clientWidth, h: c.clientHeight }; });
 let moved = false;
@@ -102,10 +115,10 @@ await b.screenshot({ path: `${out}/s08-phone-aimed.png` });
 // the AI crew keeps loading, so the last drag can land where the couch no longer fits: find a spot that does before dropping
 const fits = await b.evaluate(async () => {
   const w = (ms) => new Promise(r => setTimeout(r, ms));
-  for (let rot = 0; rot < 2; rot++) for (let gx = 0; gx < 4; gx++) for (let gz = 0; gz < 4; gz++) {
-    window.__sm.send('aim', { gx, gz }); await w(250);
-    if (window.__sm.scene.ghostOk) return true;
-    if (gx === 3 && gz === 3) { window.__sm.send('input', { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 1 }); await w(300); }
+  const press = (id) => { const b = document.getElementById(id); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); };
+  for (let turn = 0; turn < 6; turn++) { // try every spot, then turn the piece (the real buttons: input counters are cumulative)
+    for (let gx = 0; gx < 4; gx++) for (let gz = 0; gz < 4; gz++) { window.__sm.send('aim', { gx, gz }); await w(250); if (window.__sm.scene.ghostOk) return true; }
+    press(turn % 2 ? 'btn-flip' : 'btn-rot'); await w(400);
   }
   return false;
 });

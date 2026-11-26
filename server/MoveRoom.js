@@ -16,7 +16,7 @@ export const ENERGY = {
   regenStill: 0.35, regenWalk: 0.1, injurySecs: 7, injuryMult: 0.55,
   injuries: ['twisted an ankle', 'pulled a back muscle', 'stubbed a toe', 'tweaked a knee'],
 };
-const DUEL_SECONDS = 5, DUEL_MIN_GAP = 0.05;
+const DUEL_SECONDS = 5, DUEL_MIN_GAP = 0.05, DUEL_TAP_COST = 0.008; // ~40 taps (a full 5 s of mashing) = a third of your energy
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
@@ -79,8 +79,8 @@ export class MoveRoom extends Room {
       p.in.mx = len > 1 ? mx / len : mx;
       p.in.mz = len > 1 ? mz / len : mz;
       p.in.hold = !!m.hold;
-      if (p.resync) { p.resync = false; for (const k of ['tapN', 'dashN', 'rotN']) p.in[k] = Number(m[k]) | 0; return; }
-      for (const k of ['tapN', 'dashN', 'rotN']) {
+      if (p.resync) { p.resync = false; for (const k of ['tapN', 'dashN', 'rotN', 'flipN']) p.in[k] = Number(m[k]) | 0; return; }
+      for (const k of ['tapN', 'dashN', 'rotN', 'flipN']) {
         const v = Number(m[k]) | 0;
         if (v > p.in[k]) { p.pending[k] += Math.min(3, v - p.in[k]); p.in[k] = v; }
       }
@@ -226,8 +226,8 @@ export class MoveRoom extends Room {
       spectator: movers >= MAX_MOVERS || this.inRound(),
       carry: null, loadMode: false, cursor: { gx: 1, gz: 0, rot: 0 }, cursorCd: 0,
       dashT: 0, dashCd: 0, loaded: 0, task: null,
-      in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 },
-      pending: { tapN: 0, dashN: 0, rotN: 0 },
+      in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0, flipN: 0 },
+      pending: { tapN: 0, dashN: 0, rotN: 0, flipN: 0 },
     };
     this.placeAtSpawn(p, this.players.size);
     this.players.set(p.id, p);
@@ -249,8 +249,8 @@ export class MoveRoom extends Room {
       id, name, char, x: 0, z: 0, face: 0, score: 0, strikes: 0, out: false, spectator: false,
       carry: null, loadMode: false, cursor: { gx: 1, gz: 0, rot: 0 }, cursorCd: 0,
       dashT: 0, dashCd: 0, loaded: 0, breaks: 0, task: null,
-      in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 },
-      pending: { tapN: 0, dashN: 0, rotN: 0 }, ...extra,
+      in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0, flipN: 0 },
+      pending: { tapN: 0, dashN: 0, rotN: 0, flipN: 0 }, ...extra,
     };
   }
 
@@ -484,7 +484,7 @@ export class MoveRoom extends Room {
       this.applyStairs();
       if (this.quick && this.autoStartAt > 0 && (this.autoStartAt -= dt) <= 0) { this.autoStartAt = 0; this.startRound(); }
     }
-    for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; }
+    for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; p.pending.flipN = 0; }
     // the menu's demo game streams at ~7 Hz; real games at 20 Hz
     if (!this.demo || (this.demoTick = (this.demoTick || 0) + 1) % 3 === 0) this.broadcast('snap', this.snapshot());
   }
@@ -740,18 +740,26 @@ export class MoveRoom extends Room {
     const now = this.elapsed || 0;
     if (now - (d.last[p.id] ?? -1) < DUEL_MIN_GAP) return; // no autoclickers: ~20 taps/s max
     d.last[p.id] = now;
-    if (p.id === d.a) d.ca++; else if (p.id === d.b) d.cb++;
+    this.duelPoint(d, p);
+  }
+  /** one tap: worth as much as you have energy left (a worn-out mover barely moves the bar), and it tires you */
+  duelPoint(d, p) {
+    const e = p.energy ?? 1, w = Math.max(0.15, e);
+    if (p.id === d.a) d.ca += w; else if (p.id === d.b) d.cb += w;
+    p.energy = Math.max(0, e - DUEL_TAP_COST);
   }
   updateDuels(dt) {
     if (!this.duels?.size) return;
     for (const [id, d] of this.duels) {
       const a = this.players.get(d.a), b = this.players.get(d.b), item = this.items.get(id);
-      for (const [who, key] of [[a, 'ca'], [b, 'cb']]) { // AI movers mash too, at a speed set by difficulty
+      for (const who of [a, b]) { // AI movers mash too, at a human pace set by difficulty: a slow start, and they tire
         const bot = who && this.bots.get(who.id);
         if (!bot) continue;
-        const rate = { easy: 4, normal: 6, hard: 8 }[bot.difficulty] || 6;
+        const into = DUEL_SECONDS - d.t;
+        if (into < 0.45) continue; // reaction time
+        const rate = ({ easy: 3, normal: 4.5, hard: 5.5 }[bot.difficulty] || 4.5) * (1 - 0.35 * Math.min(1, into / DUEL_SECONDS));
         bot.duelAcc = (bot.duelAcc || 0) + dt * rate * (0.75 + Math.random() * 0.5);
-        while (bot.duelAcc >= 1) { bot.duelAcc -= 1; d[key]++; }
+        while (bot.duelAcc >= 1) { bot.duelAcc -= 1; this.duelPoint(d, who); }
       }
       d.t -= dt;
       const over = d.t <= 0 || !a || !this.isActive(a) || !item || item.state !== 'carried' || !item.carriers.includes(d.b);
@@ -767,9 +775,9 @@ export class MoveRoom extends Room {
         if (b && b.carry === id) b.carry = null;
         a.carry = id;
         this.event({ kind: 'emote', id: a.id, e: '💪' });
-        this.event({ kind: 'toast', text: `⚔️ ${a.name} wins ${d.ca}–${d.cb} and takes ${b?.name || 'their'}'s end of the ${label}!` });
+        this.event({ kind: 'toast', text: `⚔️ ${a.name} wins ${Math.round(d.ca)}–${Math.round(d.cb)} and takes ${b?.name || 'their'}'s end of the ${label}!` });
       } else {
-        this.event({ kind: 'toast', text: `🛡️ ${b?.name || 'The carrier'} holds on ${d.cb}–${d.ca}! The ${label} stays put.` });
+        this.event({ kind: 'toast', text: `🛡️ ${b?.name || 'The carrier'} holds on ${Math.round(d.cb)}–${Math.round(d.ca)}! The ${label} stays put.` });
       }
       this.event({ kind: 'duelEnd', item: id, a: d.a, b: d.b, ca: d.ca, cb: d.cb });
     }
@@ -986,7 +994,7 @@ export class MoveRoom extends Room {
       if (load && speed > 0.15) {
         const ratio = speed / (SPEED * load[1]);
         p.energy -= ENERGY.drain[load[0]] * ratio * ratio * dt;
-      } else {
+      } else if (!p.duel) { // no catching your breath mid tap battle
         p.energy += (speed > 0.15 ? ENERGY.regenWalk : ENERGY.regenStill) * dt;
       }
       p.energy = Math.min(1, p.energy);
@@ -1139,11 +1147,18 @@ export class MoveRoom extends Room {
       if (Math.abs(mx) > 0.5) c.gz -= Math.sign(mx); // pushing right = deeper toward the cab (gz 0)
       p.cursorCd = 0.18;
     }
-    const nOr = orientations(item.type).length;
-    if (p.pending.rotN && nOr > 1) {
-      c.rot = (c.rot + 1) % nOr;
-      const f = footprint(item.type, c.rot);
-      this.tell(p, `↻ ${ITEM_TYPES[item.type].label} ${ORIENT_LABEL(f)} (${f.w}×${f.d}×${f.h})`);
+    const ors = orientations(item.type), nOr = ors.length;
+    // ROTATE turns the piece on the same side (same height); FLIP tips it onto another side (lying flat / on its side / standing up)
+    const turn = (sameSide) => {
+      const h0 = ors[((c.rot % nOr) + nOr) % nOr].h;
+      for (let k = 1; k < nOr; k++) { const j = (c.rot + k) % nOr; if ((ors[j].h === h0) === sameSide) return j; }
+      return null;
+    };
+    if (nOr > 1 && (p.pending.rotN || p.pending.flipN)) {
+      const j = p.pending.flipN ? turn(false) : (turn(true) ?? turn(false));
+      const label = ITEM_TYPES[item.type].label;
+      if (j === null) this.tell(p, p.pending.flipN ? `${label} only sits one way up. Rotate turns it.` : `${label} looks the same turned. Try flip.`);
+      else { c.rot = j; const f = footprint(item.type, c.rot); this.tell(p, `${p.pending.flipN ? '⤾' : '↻'} ${label} ${ORIENT_LABEL(f)} (${f.w}×${f.d}×${f.h})`); }
     }
     const { w, d } = footprint(item.type, c.rot);
     c.gx = clamp(c.gx, 0, GRID.W - w);
@@ -1502,7 +1517,7 @@ export class MoveRoom extends Room {
       countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0, driveT: this.phase === 'driveoff' ? +this.driveT.toFixed(2) : 0,
       canCallOut: this.canCallOut(),
       game: this.game, overtime: !!this.overtime, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
-      duels: [...(this.duels?.values() || [])].map(d => ({ item: d.item, a: d.a, b: d.b, t: +Math.max(0, d.t).toFixed(1), ca: d.ca, cb: d.cb })),
+      duels: [...(this.duels?.values() || [])].map(d => ({ item: d.item, a: d.a, b: d.b, t: +Math.max(0, d.t).toFixed(1), ca: +d.ca.toFixed(1), cb: +d.cb.toFixed(1) })),
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
       floors: this.floors,

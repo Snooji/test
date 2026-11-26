@@ -51,3 +51,16 @@ test('returns null when nothing fits', () => {
   for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 4; y++) placeItem(g, mk(`s${x}${z}${y}`, 'standard'), x, z, 0);
   assert.equal(choosePlacement(g, mk('x', 'standard'), 'hard', Math.random), null);
 });
+
+test('hard AI packs sensibly but not perfectly: over many boxes it does not always take the single best spot', async () => {
+  const { choosePlacement } = await import('../server/bot.js');
+  const { mulberryFor } = await import('../shared/logic.js');
+  const g = createGrid(), rng = mulberryFor(9);
+  let notBest = 0, crushes = 0;
+  for (let i = 0; i < 60; i++) {
+    const best = choosePlacement(g, { id: 'x', type: 'standard' }, 'hard', () => 0.999999 * 0 + 0.0001); // rng≈0 → the top choice
+    const pick = choosePlacement(g, { id: 'x', type: 'standard' }, 'hard', rng);
+    if (pick.gx !== best.gx || pick.gz !== best.gz) notBest++;
+  }
+  assert.ok(notBest >= 10, `hard AI took the very best spot ${60 - notBest}/60 times`);
+});

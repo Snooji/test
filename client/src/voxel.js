@@ -265,8 +265,60 @@ function boxColour(type, w, h, d) {
   return (x, y, z) => ((Math.round(x / VS) & 3) === 0 ? shade(base, 0.85) : base);
 }
 
+// ---------- moving boxes: plain cardboard, tape across the top; fragile = a broken wine glass, heavy = an anvil, standard = nothing ----------
+const BROKEN_GLASS = [ // printed in red, 11×12 pixels
+  'XXXXXXXXXXX',
+  'X....X....X',
+  'X...X.....X',
+  '.X...X...X.',
+  '.X..X....X.',
+  '..X..X..X..',
+  '...XXXXX...',
+  '.....X.....',
+  '.....X.....',
+  '.....X.....',
+  '...XXXXX...',
+  '..XXXXXXX..',
+];
+const ANVIL = [ // printed in charcoal, 12×7 pixels
+  'XXXXXXXXXXXX',
+  '.XXXXXXXXXXX',
+  '...XXXXXXXX.',
+  '.....XXXX...',
+  '.....XXXX...',
+  '...XXXXXXXX.',
+  '..XXXXXXXXXX',
+];
+const CARD = [0xc8955a, 0xc28f55, 0xcd9a60], TAPE = 0xe6c690, SEAM = 0xa87842;
+/** A closed moving box w×h×d (metres), base centred on the origin. Returns a Group with a single mesh. */
+function cardboardBox(type, w, h, d) {
+  const b = new Batch(), v = new Vox();
+  v.box(0, h / 2, 0, w, h, d, (x, y, z) => {
+    if (y > h - VS && Math.abs(z) < 0.09) return TAPE;                                   // tape along the top
+    if (y > h - VS && Math.abs(x) < 0.03) return SEAM;                                    // where the flaps meet
+    if (Math.abs(z) > d / 2 - VS && y > h - 0.16 && Math.abs(x) < 0.09) return TAPE;     // tape running down the front and back
+    return CARD[(Math.round(x / VS) + Math.round(y / VS) * 3 + Math.round(z / VS) * 5 & 7) === 0 ? 1 : 0];
+  });
+  v.into(b);
+  const art = type === 'fragile' ? [BROKEN_GLASS, 0xc0392b] : type === 'heavy' ? [ANVIL, 0x2b241e] : null;
+  if (art) {
+    const [mask, col] = art, P = 0.035, rows = mask.length, cols = mask[0].length, dv = new Vox(P);
+    const top = Math.round(h / P), front = Math.round((d / 2) / P);
+    mask.forEach((row, r) => [...row].forEach((ch, c) => {
+      if (ch !== 'X') return;
+      const i = c - Math.floor(cols / 2);
+      dv.set(i, top, Math.round(0.24 / P) + r - Math.floor(rows / 2), col);                // on the lid, beside the tape (seen from above)
+      dv.set(i, Math.round((h * 0.5) / P) + Math.floor(rows / 2) - r, front, col);       // and on the front
+    }));
+    dv.into(b, 0, 0, 0, P);
+  }
+  const g = new THREE.Group(), m = new THREE.Mesh(b.geometry(), voxMat); m.castShadow = m.receiveShadow = true; g.add(m);
+  return g;
+}
+
 /** a piece in the truck: one block per cell, darker cell edges so the shape reads at a glance */
 function loadedPiece(type, wrapped, dims) {
+  if (['standard', 'heavy', 'fragile'].includes(type)) return cardboardBox(type, CELL * 0.96, CELL * 0.96, CELL * 0.96); // boxes stay boxes in the truck
   const t = ITEM_TYPES[type];
   const hex = wrapped && t.furniture ? 0x2f5fd0 : t.color;
   const edge = shade(hex, 0.62), s = CELL / 4;
@@ -309,7 +361,6 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   // downloaded models (see /credits.html) for the pieces you carry around the house
   // [file, tint, quarter turns, fit [x, z, y]]
   const ASSET = {
-    standard: ['box', null, 0, [0.9, 0.9, 0.8]], // heavy and fragile use the voxel boxes below: slate + hazard stripes / bright yellow + red band
     couch: ['couch', null, 2, [3.0, 0.95, 1.0]], bed: ['bed', null, -1, [2.0, 3.0, 1.0]], lamp: ['lamp', 0xff9ad5, 0, [1.4, 0.55, 1.95]],
     desk: ['desk', null, 0, [2.0, 0.95, 1.25]], table: ['table', null, 0, [2.0, 1.1, 0.85]],
   }[type];
@@ -317,12 +368,9 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   if (ASSET && !flatNow) {
     const tint = wrapped && t.furniture ? 0x5b86ff : ASSET[1] ?? null; // pad-wrapped = under a blue moving blanket
     attachModel(g, `/models/items/${ASSET[0]}.glb`, { tint, rot: ASSET[2], fit: ASSET[3] });
-    if (type === 'fragile' || type === 'heavy') { // the tint alone is subtle from above: a small tag on top
-      const l = sprite(type === 'fragile' ? '🍷 FRAGILE' : '⚠ HEAVY', { fg: type === 'fragile' ? '#ff4d5e' : '#ffd166', stroke: '#1b1340', font: 'bold 34px system-ui' }, [0.95, 0.24]);
-      l.position.y = 1.0; l.material.depthTest = true; g.add(l);
-    }
     return g;
   }
+  if (['standard', 'heavy', 'fragile'].includes(type)) return cardboardBox(type, 0.9, 0.8, 0.9);
   if (!t.furniture || (!assembled && t.needsDisassemble)) {
     const flat = t.needsDisassemble && !assembled;
     const w = t.w * 0.9, h = flat ? 0.3 : 0.8, d = Math.max(0.8, t.d * 0.9);

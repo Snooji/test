@@ -238,3 +238,29 @@ test('AI eyesight never passes through a wall, even at a glancing angle or a wal
     }
   }
 });
+
+test('AI cannot tell a box\'s type until it picks it up: swapping box types never changes which one it goes for', () => {
+  for (const seed of [222, 3333, 40404]) {
+    const { room } = makeRoom({ seed });
+    room.addBot(); room.startRound();
+    const bot = [...room.bots.values()][0];
+    bot.setDifficulty('hard');
+    bot.perceive(true);
+    for (const it of room.items.values()) if (it.state === 'floor') bot.known.set(it.id, { x: it.x, z: it.z, at: 0 });
+    const boxes = [...room.items.values()].filter(i => ['standard', 'heavy', 'fragile'].includes(i.type));
+    const pickWith = () => { bot.rng = mulberryFor(seed); return bot.chooseTarget()?.id; };
+    const before = pickWith();
+    const cycle = { standard: 'heavy', heavy: 'fragile', fragile: 'standard' };
+    for (const b of boxes) b.type = cycle[b.type];
+    assert.equal(pickWith(), before, `seed ${seed}: the choice changed when only the hidden box types changed`);
+  }
+});
+
+test('AI never follows the level\'s known-perfect packing plan, even in Full load', () => {
+  const { room } = makeRoom({ seed: 77 });
+  room.mode = 'load'; room.newLevel(false); room.resetWorld();
+  room.addBot(); room.startRound();
+  const bot = [...room.bots.values()][0];
+  assert.ok(room.level.solution, 'setup: a Full load house has a perfect plan');
+  assert.equal(bot.plan(), null);
+});

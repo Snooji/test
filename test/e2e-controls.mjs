@@ -38,7 +38,7 @@ await p.click('.gm-change[data-act="rotate"]');
 await p.keyboard.press('w');
 if (!/for moving/.test(await p.textContent('#gm-keynote'))) errors.push('W was not refused');
 await p.keyboard.press('f');
-if (!/Rotate \/ flip: F/.test(await p.textContent('#gm-keynote'))) errors.push('rebind note: ' + await p.textContent('#gm-keynote'));
+if (!/Rotate \(in the truck\): F/.test(await p.textContent('#gm-keynote'))) errors.push('rebind note: ' + await p.textContent('#gm-keynote'));
 await p.screenshot({ path: `${out}/controls-menu.png` });
 if (await p.evaluate(() => JSON.parse(localStorage.getItem('sm_keys')).rotate) !== 'KeyF') errors.push('binding not saved');
 await p.click('#gm-resume');

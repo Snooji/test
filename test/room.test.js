@@ -902,3 +902,20 @@ test('load report adds up: placed pieces (even ones that broke) + adjustments + 
     assert.equal(t.base + t.condition + t.placement + t.damage, t.final, `${pid}: ${JSON.stringify(t)}`);
   }
 });
+
+test('in the truck, Rotate turns a piece on the same side and Flip tips it onto another side', async () => {
+  const { orientations, footprint } = await import('../shared/logic.js');
+  const { room, join } = makeRoom({ level: 'classic' });
+  const a = join('A', 'Ada'); join('B', 'Bo');
+  room.startRound(); room.phase = 'playing';
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  couch.state = 'carried'; couch.carriers = [a.id]; a.carry = couch.id; a.loadMode = true; a.cursor = { gx: 0, gz: 0, rot: 0 }; a.cursorCd = 0;
+  const h = () => footprint('couch', a.cursor.rot).h, fp = () => JSON.stringify(footprint('couch', a.cursor.rot));
+  const h0 = h(), f0 = fp();
+  a.pending.rotN = 1; room.updateLoadMode(a, couch, 0.05); a.pending.rotN = 0;
+  assert.equal(h(), h0, 'rotate keeps it on the same side');
+  assert.notEqual(fp(), f0, 'rotate turns it');
+  a.pending.flipN = 1; room.updateLoadMode(a, couch, 0.05); a.pending.flipN = 0;
+  assert.notEqual(h(), h0, 'flip tips it onto another side');
+  assert.ok(orientations('couch').length > 2);
+});

@@ -7,15 +7,16 @@ export const MOVE_CODES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown
 export const ACTIONS = [
   { id: 'action',  label: 'Grab / drop (hold: wrap, take apart)', def: 'KeyE' },
   { id: 'dash',    label: 'Dash (in the truck: back out)',        def: 'ShiftLeft' },
-  { id: 'rotate',  label: 'Rotate / flip',                        def: 'KeyR' },
+  { id: 'rotate',  label: 'Rotate (in the truck)',                def: 'KeyR' },
+  { id: 'flip',    label: 'Flip onto another side (in the truck)', def: 'KeyT' },
   { id: 'help',    label: 'Call for help',                        def: 'KeyH' },
   { id: 'callout', label: 'Call out a crunch',                    def: 'KeyQ' },
   { id: 'chat',    label: 'Chat',                                 def: 'Enter' },
 ];
 const RESERVED = [...MOVE_CODES, 'Escape', 'Tab', 'MetaLeft', 'MetaRight'];
 /** controller (standard mapping) */
-export const PAD = { action: 0, dash: 1, rotate: 2, help: 3, calloutL: 4, calloutR: 5, menu: 9 };
-export const PAD_LABEL = { action: 'A', dash: 'B', rotate: 'X', help: 'Y', callout: 'LB / RB', chat: '', menu: 'Start' };
+export const PAD = { action: 0, dash: 1, rotate: 2, help: 3, callout: 4, flip: 5, menu: 9 };
+export const PAD_LABEL = { action: 'A', dash: 'B', rotate: 'X', flip: 'RB', help: 'Y', callout: 'LB', chat: '', menu: 'Start' };
 
 /** "KeyE" → "E", "ShiftLeft" → "Shift", "Space" → "Space" */
 export function keyName(code) {
@@ -36,7 +37,7 @@ function loadBinds() {
 
 export class Input {
   constructor({ onCallout, onChatKey, onHelp, onMenu, onPad }) {
-    this.s = { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 };
+    this.s = { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0, flipN: 0 };
     this.keys = new Set();
     this.joy = { x: 0, z: 0 };
     this.pad = { x: 0, z: 0, prev: [], connected: false };
@@ -57,6 +58,7 @@ export class Input {
       if (a === 'action' || mash) { e.preventDefault(); this.actionDown(); }
       if (a === 'dash') this.s.dashN++;
       if (a === 'rotate') this.s.rotN++;
+      if (a === 'flip') this.s.flipN++;
       if (a === 'callout') this.onCallout?.();
       if (a === 'help') this.onHelp?.();
     });
@@ -117,8 +119,9 @@ export class Input {
         if (!b(PAD.action) && was(PAD.action)) this.actionUp();
         if (edge(PAD.dash)) this.s.dashN++;
         if (edge(PAD.rotate)) this.s.rotN++;
+        if (edge(PAD.flip)) this.s.flipN++;
         if (edge(PAD.help)) this.onHelp?.();
-        if (edge(PAD.calloutL) || edge(PAD.calloutR)) this.onCallout?.();
+        if (edge(PAD.callout)) this.onCallout?.();
       } else if (was(PAD.action)) this.actionUp(true);
       this.pad.prev = gp.buttons.map(x => x.pressed);
       this.padLoop = requestAnimationFrame(step);
@@ -166,6 +169,8 @@ export class Input {
     btn('btn-action', () => this.actionDown(), () => this.actionUp());
     btn('btn-dash', () => this.s.dashN++);
     btn('btn-callout', () => this.onCallout?.());
+    btn('btn-rot', () => this.s.rotN++);
+    btn('btn-flip', () => this.s.flipN++);
   }
 
   read() {

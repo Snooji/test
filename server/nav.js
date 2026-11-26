@@ -33,7 +33,7 @@ function nearestWalkable(i, k) {
 /** true if a circle of radius r can slide straight from a to b */
 function clearLine(a, b, r = 0.45) {
   const d = Math.hypot(b.x - a.x, b.z - a.z);
-  const n = Math.max(1, Math.ceil(d / 0.2));
+  const n = Math.max(1, Math.ceil(d / 0.1));
   for (let s = 0; s <= n; s++) {
     const t = s / n;
     if (hitsWall(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, r)) return false;
@@ -83,7 +83,7 @@ function findPath(start, goal) {
   const out = [raw[0]];
   let anchor = 0;
   for (let i = 2; i < raw.length; i++) {
-    if (floorOf(raw[i].z) !== floorOf(raw[anchor].z) || !clearLine(raw[anchor], raw[i], 0.45)) { out.push(raw[i - 1]); anchor = i - 1; }
+    if (floorOf(raw[i].z) !== floorOf(raw[anchor].z) || !clearLine(raw[anchor], raw[i], 0.52)) { out.push(raw[i - 1]); anchor = i - 1; } // a margin: a line that just grazes a door jamb snags a mover
   }
   out.push(raw[raw.length - 1]);
   return out;

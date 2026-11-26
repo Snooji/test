@@ -239,4 +239,14 @@ Verified: 201 unit tests; voxel e2e: e2e, e2e-b (x2), solo (new phone controls),
       every doorway, porch lamps by the front door, hedges along the front of the house, a white picket fence round the yard,
       decor on the wall each room's camera sees (TV, pictures, bathroom mirror, kitchen clock, bookshelves, garage tool board),
       a warm night sky dome with a moon. Draw calls in the same range as before (one glow mesh per floor + the fence)
+- [x] Tap battle: each tap counts by the tapper's energy (min 15%) and costs energy (no refill mid-battle); AI taps at a human
+      pace (3 / 4.5 / 5.5 per s, 0.45 s reaction, tiring over the 5 s). A fresh person at ~6-7 taps/s now beats a hard AI (tested)
+- [x] AI: can't tell a box's type until it lifts it (box type no longer steers its choice or its wrap plan); never follows the
+      level's perfect Full-load packing; packs sensibly (floor first, cab end first, no gaps, never crushes unless easy) but
+      picks among its few best spots instead of always the best. Fixed a bot snagging on a door jamb (path margin, alternating sidestep)
+- [x] Phones in the truck: D-pad back (bottom left), Rotate and Flip buttons; Rotate turns a piece on the same side, Flip tips it
+      onto another side (keyboard T, controller RB; call out moves to LB)
+- [x] Boxes: plain cardboard with tape; fragile = red broken wine glass, heavy = anvil (on the lid and the front), standard = blank;
+      same look on the floor, in hand and in the truck; no floating tags. Downloaded box model + credit removed
+Verified: 208 unit tests; AI sim 16-28 loaded per round, hard bots 0 breaks; all voxel e2e suites + smoke pass
 

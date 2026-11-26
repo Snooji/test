@@ -31,13 +31,20 @@
   <!-- touch controls -->
   <div id="joyzone" class="hidden"><div id="joybase"><div id="joyknob"></div></div></div>
   <!-- phones: an invisible stick that appears under your thumb (bottom left); buttons bottom right. Rotate = swipe -->
+  <div id="dpad" class="hidden" aria-label="Aim in the truck">
+    <button data-dir="up" aria-label="Aim up">▲</button>
+    <button data-dir="left" aria-label="Aim left">◀</button>
+    <button data-dir="right" aria-label="Aim right">▶</button>
+    <button data-dir="down" aria-label="Aim down">▼</button>
+  </div>
   <div id="controls" class="hidden">
+    <button id="btn-rot" class="hidden"><b>Rotate</b></button>
+    <button id="btn-flip" class="hidden"><b>Flip</b></button>
     <button id="btn-callout" class="hidden"><b>Call out</b></button>
     <button id="btn-help" class="hidden"><b>Need a hand</b></button>
     <button id="btn-dash"><b id="dash-label">Dash</b></button>
     <button id="btn-action"><b id="action-label">Grab</b><small id="action-sub"></small></button>
   </div>
-  <div id="swipe-hint" class="hidden">Swipe to turn the piece</div>
 
   <!-- HUD -->
   <div id="hud" class="hidden">
@@ -60,7 +67,7 @@
       <div class="dl-title">⚔️ TAP BATTLE <span id="duel-t">5</span></div>
       <div class="dl-bar"><span id="duel-na"></span><i id="duel-fill"></i><span id="duel-nb"></span></div>
       <button id="duel-btn">TAP!</button>
-      <div class="dl-hint">Tap as fast as you can (or mash E / Space). Most taps in 5 s wins the lift.</div>
+      <div class="dl-hint">Tap as fast as you can (or mash the action key / Space). Each tap counts by how much energy you have left, and tapping tires you. Most points in 5 s wins the lift.</div>
     </div>
     <div id="toasts"></div>
     <div id="prompt" class="hidden"></div>

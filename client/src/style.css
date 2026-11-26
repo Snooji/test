@@ -591,3 +591,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .results-card { max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; }
 .results-card .res-buttons { position: sticky; bottom: 0; z-index: 2; margin: 10px -20px 0; padding: 12px 20px max(14px, env(safe-area-inset-bottom)); background: #1f1a16; border-top: 1px solid var(--line); }
 .results-card .rank-list li { min-height: 48px; }
+
+/* truck on phones: D-pad bottom left (warm), Rotate / Flip next to the big button */
+#dpad { left: max(16px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); grid-template-rows: repeat(3, 58px); }
+#dpad button { background: rgba(31,26,22,.85); border: 1px solid rgba(244,234,216,.25); color: var(--ink); border-radius: 12px; }
+#dpad button.down { background: rgba(58,48,40,.95); border-color: var(--gold); }
+#controls { grid-template-areas: "call call" "help help" "rot flip" "dash act"; }
+#controls #btn-rot { grid-area: rot; width: 66px; height: 66px; } #controls #btn-flip { grid-area: flip; width: 66px; height: 66px; justify-self: center; }
