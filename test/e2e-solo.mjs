@@ -84,6 +84,17 @@ for (const [fx, fy] of [[0.55, 0.45], [0.7, 0.55], [0.45, 0.6]]) {
 log('drag moved aim:', moved);
 if (!moved) errors.push('dragging on the truck did not move the aim');
 await b.screenshot({ path: `${out}/s08-phone-aimed.png` });
+// the AI crew keeps loading, so the last drag can land where the couch no longer fits: find a spot that does before dropping
+const fits = await b.evaluate(async () => {
+  const w = (ms) => new Promise(r => setTimeout(r, ms));
+  for (let rot = 0; rot < 2; rot++) for (let gx = 0; gx < 4; gx++) for (let gz = 0; gz < 4; gz++) {
+    window.__sm.send('aim', { gx, gz }); await w(250);
+    if (window.__sm.scene.ghostOk) return true;
+    if (gx === 3 && gz === 3) { window.__sm.send('input', { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 1 }); await w(300); }
+  }
+  return false;
+});
+if (!fits) log('note: no spot fits the couch any more (truck full)');
 await b.locator('#btn-action').dispatchEvent('pointerdown'); await wait(60); await b.locator('#btn-action').dispatchEvent('pointerup');
 await b.waitForFunction(() => !window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.carry, null, { timeout: 4000 }).catch(() => {});
 const me = await meOf(b);
