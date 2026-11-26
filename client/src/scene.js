@@ -412,7 +412,7 @@ export class GameScene {
     for (const [cx, cy, cz] of cells) {
       const m = new THREE.Mesh(this.cellGeo, this.ghostMat);
       m.position.set(-cz * CELL, cy * CELL + CELL / 2, cx * CELL);
-      m.add(new THREE.LineSegments(this.cellEdges, this.ghostLine));
+      if (!VOXEL) m.add(new THREE.LineSegments(this.cellEdges, this.ghostLine)); // voxel look: no cell outlines
       this.ghost.add(m);
     }
   }
@@ -756,7 +756,7 @@ export class GameScene {
     }
 
     // column heights in load mode
-    const showCols = !!me?.loadMode;
+    const showCols = !VOXEL && !!me?.loadMode; // voxel look: no floating numbers (the see-through preview shows where it lands)
     const hts = showCols ? this.heights() : null;
     for (const sp of this.colLabels) {
       sp.visible = showCols;
@@ -855,7 +855,11 @@ export class GameScene {
       this.camOff = [-4, 15, 14];
     } else { this.camTarget.set(-2, 0, 0); this.camOff = [0, 34, 20]; }
     const zoom = me && !me.loadMode ? (this.camZoom || 1) : 1; // settings: Close / Normal / Far (walking around only)
-    const [ox, oy, oz] = this.camOff.map(v => v * zoom);
+    let [ox, oy, oz] = this.camOff.map(v => v * zoom);
+    if (me && !me.loadMode && this.camYaw) { // middle-mouse drag turns the camera around you
+      const c = Math.cos(this.camYaw), sn = Math.sin(this.camYaw);
+      [ox, oz] = [ox * c + oz * sn, -ox * sn + oz * c];
+    }
     const k = 4;
     this.camera.position.x = damp(this.camera.position.x, this.camTarget.x + ox, k, dt);
     this.camera.position.y = damp(this.camera.position.y, this.camTarget.y + oy, k, dt);

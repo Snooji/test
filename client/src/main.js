@@ -248,7 +248,12 @@ setInterval(() => {
   if (!room || !snap) return;
   const ws = room.connection?.transport?.ws; // a dropped socket: stop sending until reconnect/leave handling kicks in
   if (ws && ws.readyState !== 1) return;
-  room.send('input', menuOpen ? { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 } : input.read());
+  if (menuOpen) { room.send('input', { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 }); return; }
+  const r = input.read(), yaw = scene.camYaw || 0;
+  if (yaw && !meNow()?.loadMode) { // the camera is turned: "up" means away from the camera
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    room.send('input', { ...r, mx: +(r.mx * c + r.mz * sn).toFixed(2), mz: +(-r.mx * sn + r.mz * c).toFixed(2) });
+  } else room.send('input', r);
 }, 50);
 
 // ---------- snapshots ----------
@@ -523,7 +528,7 @@ function renderPrompt(s, me) {
     const it = s.items.find(i => i.id === me.carry);
     const f = it ? footprint(it.type, me.cursor?.rot || 0) : null;
     const turn = it && orientations(it.type).length > 1 ? ` · ${isTouch ? 'ROTATE' : 'R'} turn/flip (${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h})` : '';
-    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `🎯 D-pad or drag to aim · ✋ DROP${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : '🎯 Move or point to aim · E drop · Shift back' + turn;
+    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `🎯 D-pad or drag to aim · ✋ DROP${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
     action = 'DROP';
   } else if (!me.carry && !me.dolly && !s.level?.tutorial && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
     text = `🧩 Hold ${isTouch ? '✋' : 'E'} to unload pieces from the truck and repack`;
@@ -814,7 +819,7 @@ function renderKeyHelp() {
   const k = (id) => `<kbd>${esc(keyName(input.binds[id]))}</kbd>`;
   $('keyhelp').innerHTML = input.pad.connected
     ? '🎮 Left stick move · <kbd>A</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>B</kbd> dash/back · <kbd>X</kbd> rotate/flip · <kbd>Y</kbd> call for help · <kbd>LB</kbd>/<kbd>RB</kbd> call out · <kbd>Start</kbd> menu'
-    : `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · ${k('action')} or <kbd>Left click</kbd> grab/drop, hold = wrap/disassemble · <kbd>Right click</kbd> place in truck · ${k('dash')} dash/back · ${k('rotate')} rotate/flip · ${k('help')} call for help · ${k('callout')} call out · ${k('chat')} chat · <kbd>Esc</kbd> menu`;
+    : `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · ${k('action')} or <kbd>Left click</kbd> grab/drop, hold = wrap/disassemble · <kbd>Right click</kbd> place in truck · <kbd>Wheel drag</kbd> turn camera · ${k('dash')} dash/back · ${k('rotate')} rotate/flip · ${k('help')} call for help · ${k('callout')} call out · ${k('chat')} chat · <kbd>Esc</kbd> menu`;
   $('hud-callout').innerHTML = `📣 CALL OUT <kbd>${esc(keyName(input.binds.callout))}</kbd>`;
   $('hud-help').innerHTML = `🆘 NEED A HAND <kbd>${esc(keyName(input.binds.help))}</kbd>`;
   $('gm-keys').innerHTML = ACTIONS.map(a => `<li><span>${a.label}</span><span class="gm-key"><kbd>${esc(keyName(input.binds[a.id]))}</kbd>${PAD_LABEL[a.id] ? `<small>🎮 ${PAD_LABEL[a.id]}</small>` : ''}<button class="gm-change" data-act="${a.id}">Change</button></span></li>`).join('');
@@ -895,6 +900,23 @@ scene.renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && mouseAct) { mouseAct = false; input.actionUp(); } });
 scene.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+// hold the wheel (middle button) and move the mouse to turn the camera; double-click the wheel to put it back
+let camDrag = null;
+scene.renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse' || e.button !== 1) return;
+  e.preventDefault(); // no auto-scroll
+  const now = performance.now();
+  if (now - (camDrag?.up || 0) < 300) { scene.camYaw = 0; camDrag = null; return; }
+  camDrag = { x: e.clientX, id: e.pointerId };
+  scene.renderer.domElement.setPointerCapture(e.pointerId);
+});
+scene.renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!camDrag?.id || e.pointerId !== camDrag.id) return;
+  scene.camYaw = ((scene.camYaw || 0) + (e.clientX - camDrag.x) * 0.008) % (Math.PI * 2);
+  camDrag.x = e.clientX;
+});
+addEventListener('pointerup', (e) => { if (e.button === 1 && camDrag?.id) camDrag = { up: performance.now() }; });
+scene.renderer.domElement.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
 
 // ---------- training complete ----------
 function renderTrainingDone(s) {
@@ -904,7 +926,7 @@ function renderTrainingDone(s) {
   $('td-portrait').innerHTML = portrait(me?.char || 'nova');
   scene.setBanner(myId, '✅ TRAINING COMPLETE');
 }
-$('td-menu').onclick = leaveToMenu;
+$('td-menu').onclick = () => leaveToMenu(false);
 $('td-play').onclick = async () => { await leaveToMenu(); connect(null, { solo: true, difficulty: 'easy' }); };
 
 // ---------- loop ----------

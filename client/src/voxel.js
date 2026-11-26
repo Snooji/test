@@ -517,8 +517,6 @@ export function buildTruck(scene) {
     const zc = sz * (wid / 2 + 0.2);
     b.box(x0, fy, zc - 0.1, x1, fy + 1.2, zc + 0.1, body, 0.4);                                         // side wall
     b.box(x0, fy + 1.2, zc - 0.11, x1, fy + 1.4, zc + 0.11, accent, 0.4);                               // stripe
-    b.box(x0 + 0.05, fy, zc - 0.05, x0 + 0.15, fy + GRID.H * CELL, zc + 0.05, 0xbbbbcc, 0.1);           // height pole
-    for (let y = 1; y <= GRID.H; y++) b.box(x0 + 0.03, fy + y * CELL - 0.03, zc - 0.07, x0 + 0.17, fy + y * CELL + 0.03, zc + 0.07, 0x55ffcc, 0.1);
   }
   b.box(x1, fy, -(wid / 2 + 0.3), x1 + 0.2, fy + GRID.H * CELL + 0.3, wid / 2 + 0.3, body, 0.4);        // bulkhead
   const truck = new THREE.Mesh(b.geometry(), voxMat); truck.castShadow = truck.receiveShadow = true; g.add(truck);
@@ -529,11 +527,6 @@ export function buildTruck(scene) {
   const pads = new Batch();
   for (const px of [x0 + 0.8, x1 - 0.8, TRUCK.cabX1 - 1.2]) for (const sz of [-1, 1]) pads.box(px - 0.45, 0.12, sz * (wid / 2 + 0.15) - 0.3, px + 0.45, 0.22, sz * (wid / 2 + 0.15) + 0.3, 0x55ffcc, 0.3);
   g.add(new THREE.Mesh(pads.geometry(), glowMat));
-  const lines = [];
-  for (let i = 0; i <= GRID.W; i++) { const z = TRUCK.z0 + i * CELL; lines.push(x0, fy + 0.01, z, x1, fy + 0.01, z); }
-  for (let i = 0; i <= GRID.D; i++) { const x = x0 + i * CELL; lines.push(x, fy + 0.01, TRUCK.z0, x, fy + 0.01, TRUCK.z1); }
-  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-  g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.5 })));
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), new THREE.MeshBasicMaterial({ map: labelTexture('★ STARSIDE MOVERS', { fg: '#fff', font: 'bold 34px system-ui', w: 420, h: 100 }), transparent: true }));
   logo.rotation.x = -Math.PI / 2; logo.rotation.z = Math.PI / 2; logo.position.set((x1 + TRUCK.cabX1) / 2 + 0.1, 2.92, 0); g.add(logo);
   const r = TRUCK.ramp, rb = new Batch();

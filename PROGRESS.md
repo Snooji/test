@@ -217,4 +217,10 @@ AI sim on 3-floor houses loads 12–21 of ~30 in 3 min; voxel browser suites pas
       Controller: left stick/d-pad move, A action (hold to wrap), B dash/back, X rotate, Y help, LB/RB call out, Start menu
 - [x] Fixed: a mover in a team lift could jump ~4 m when the piece was set down next to a wall (now nudged out by centimetres)
 Verified: 201 unit tests; voxel e2e: menu, solo, controls (rebind, fake controller, mouse grab + right-click place, arrow, codes)
+- [x] Truck (voxel look): no floating column numbers, floor grid lines, height poles or preview cell outlines; the see-through
+      preview still shows where a piece lands
+- [x] Hold the mouse wheel and move to turn the camera around you (double-click the wheel to reset); movement follows the camera
+      (W = away from it). The truck view stays fixed for aiming
+- [x] Fixed: the training screen's Menu button showed the feedback form over the main menu
+Verified: 201 unit tests; voxel e2e: controls (incl. camera turn), menu, solo, dolly, wave2
 

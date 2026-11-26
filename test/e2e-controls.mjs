@@ -47,6 +47,16 @@ if (!(await p.innerHTML('#keyhelp')).includes('<kbd>F</kbd> rotate')) errors.pus
 const me = () => p.evaluate(() => window.__sm.snap.players.find(x => x.id === window.__sm.myId));
 let a = await me(); await p.keyboard.down('d'); await wait(500); await p.keyboard.up('d'); let b = await me();
 if (!(b.x > a.x + 0.5)) errors.push('D did not move right');
+// wheel drag turns the camera; W then walks away from the camera
+await p.mouse.move(640, 400); await p.mouse.down({ button: 'middle' }); await p.mouse.move(836, 400, { steps: 8 }); await p.mouse.up({ button: 'middle' });
+const yaw = await p.evaluate(() => window.__sm.scene.camYaw);
+if (!(yaw > 1.3 && yaw < 1.8)) errors.push('wheel drag did not turn the camera: ' + yaw);
+a = await me(); await p.keyboard.down('w'); await wait(500); await p.keyboard.up('w'); b = await me();
+if (!(a.x - b.x > 0.5 && Math.abs(b.z - a.z) < 0.4)) errors.push(`W did not walk away from the turned camera: ${a.x.toFixed(2)},${a.z.toFixed(2)} → ${b.x.toFixed(2)},${b.z.toFixed(2)}`);
+await wait(1200);
+await p.screenshot({ path: `${out}/controls-turned.png` });
+await p.mouse.click(640, 400, { button: 'middle', clickCount: 1 }); await p.mouse.click(640, 400, { button: 'middle', clickCount: 2 });
+if (await p.evaluate(() => window.__sm.scene.camYaw) !== 0) errors.push('double wheel click did not reset the camera');
 // mouse: left click grabs the box at your feet; right click in the truck places it
 const box = await p.evaluate(() => { const s = window.__sm.snap, m = s.players.find(x => x.id === window.__sm.myId); return s.items.filter(i => i.state === 'floor' && i.type === 'standard' && (i.fl || 0) === 0).sort((u, v) => Math.hypot(u.x - m.x, u.z - m.z) - Math.hypot(v.x - m.x, v.z - m.z))[0]; });
 await p.evaluate((b) => window.__sm.send('debug_tp', { x: b.x + 0.6, z: b.z }), box);
@@ -56,6 +66,7 @@ await p.waitForFunction(() => window.__sm.snap.players.find(x => x.id === window
 await p.evaluate(() => window.__sm.send('debug_tp', { x: 10.6, z: 0 }));
 await p.waitForFunction(() => window.__sm.snap.players.find(x => x.id === window.__sm.myId).loadMode, null, { timeout: 5000 }).catch(() => errors.push('did not enter the truck'));
 await wait(900);
+await p.screenshot({ path: `${out}/controls-truck.png` });
 await p.mouse.click(640, 400, { button: 'right' });
 await p.waitForFunction(() => !window.__sm.snap.players.find(x => x.id === window.__sm.myId).carry, null, { timeout: 3000 }).catch(() => errors.push('right click did not place in the truck'));
 if (!(await p.innerHTML('#keyhelp')).includes('Right click')) errors.push('mouse not in key help');
