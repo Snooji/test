@@ -387,11 +387,11 @@ export function makeCat() {
 // ---------- world ----------
 export function buildWorld(scene) {
   const s = scene.scene, b = new Batch();
-  b.box(-95, -0.05, -45, 75, 0, 45, 0x3a3358, 2);                                   // lunar ground, 2 m blocks
+  b.box(-95, -0.05, -45, 75, 0, 45, 0x4a4038, 2);                                   // moon ground (warm regolith), 2 m blocks
   for (let i = 0; i < 26; i++) { // craters: sunken dark squares
     const r = 0.6 + Math.random() * 1.8; let x, z;
     do { x = -70 + Math.random() * 110; z = -40 + Math.random() * 80; } while (x > -46 && x < 26 && z > -17 && z < 17);
-    b.box(x - r, 0, z - r, x + r, 0.03, z + r, 0x2c2645, 0.5);
+    b.box(x - r, 0, z - r, x + r, 0.03, z + r, 0x3a322b, 0.5);
   }
   const ground = new THREE.Mesh(b.geometry(), voxMat); ground.receiveShadow = true; s.add(ground);
   const starGeo = new THREE.BufferGeometry(), pts = [];
@@ -440,14 +440,14 @@ export function buildHouse(scene, level) {
     const b = new Batch(), fb = new Batch();
     if (k === 0) {
       const walkLen = Math.max(0.1, 9.4 - fd.x);
-      b.box(fd.x, 0, fd.z - 1.5, fd.x + walkLen, 0.03, fd.z + 1.5, 0x57507a, 0.75);                    // walkway
+      b.box(fd.x, 0, fd.z - 1.5, fd.x + walkLen, 0.03, fd.z + 1.5, 0x8a7f70, 0.75);                    // walkway
       const dz = Math.abs(fd.z) + 2.6;
-      b.box(5.4, 0, -dz, 9.4, 0.025, dz, 0x57507a, 0.75);                                              // driveway
+      b.box(5.4, 0, -dz, 9.4, 0.025, dz, 0x6e665b, 0.75);                                              // driveway
     }
     const holes = level.stairs.filter(st => st.b === k - 1).map(st => [st.x0, Math.min(st.zl, st.zh) + DZ * k, st.x1, Math.max(st.zl, st.zh) + DZ * k]);
     for (const r of level.rooms.filter(r => (r.storey || 0) === k)) {
       for (const [x0, z0, x1, z1] of cutHoles([r.x0, r.z0, r.x1, r.z1], holes)) {
-        b.box(x0, k ? -SLAB : 0, z0, x1, 0.035, z1, k ? 0x6b5a48 : 0x2a2340, 1);                      // upstairs: a real slab under the floor
+        b.box(x0, k ? -SLAB : 0, z0, x1, 0.035, z1, k ? 0x6b5a48 : 0x3a2f26, 1);                      // upstairs: a real slab under the floor
         floorPattern(fb, { ...r, x0, z0, x1, z1 }, rng);
       }
     }
@@ -510,7 +510,7 @@ export function buildHouse(scene, level) {
 
 export function buildTruck(scene) {
   const g = new THREE.Group(), b = new Batch();
-  const body = 0xf4f1ff, accent = 0x6b4dff, dark = 0x2a2640;
+  const body = 0xf4ead8, accent = 0xff8a3d, dark = 0x2b241e; // Starside white + orange
   const len = TRUCK.bayX1 - TRUCK.bayX0, wid = TRUCK.z1 - TRUCK.z0, x0 = TRUCK.bayX0, x1 = TRUCK.bayX1, fy = TRUCK.floorY;
   b.box(x0, fy - 0.2, -(wid / 2 + 0.4), x1, fy, wid / 2 + 0.4, dark, CELL);                             // floor, one block per cell
   for (const sz of [-1, 1]) {
@@ -522,7 +522,7 @@ export function buildTruck(scene) {
   const truck = new THREE.Mesh(b.geometry(), voxMat); truck.castShadow = truck.receiveShadow = true; g.add(truck);
   // the cab is a hover-truck model (see /credits.html), tinted Starside purple; it hovers, so glowing pads instead of tyres
   const cab = new THREE.Group(); cab.position.set((x1 + 0.2 + TRUCK.cabX1) / 2, 0.25, 0);
-  attachModel(cab, '/models/env/cab.glb', { tint: 0xc4b4ff, rot: 1, fit: [TRUCK.cabX1 - x1 - 0.2, wid + 0.6, 2.75] });
+  attachModel(cab, '/models/env/cab.glb', { tint: 0xf2e6d4, rot: 1, fit: [TRUCK.cabX1 - x1 - 0.2, wid + 0.6, 2.75] });
   g.add(cab);
   const pads = new Batch();
   for (const px of [x0 + 0.8, x1 - 0.8, TRUCK.cabX1 - 1.2]) for (const sz of [-1, 1]) pads.box(px - 0.45, 0.12, sz * (wid / 2 + 0.15) - 0.3, px + 0.45, 0.22, sz * (wid / 2 + 0.15) + 0.3, 0x55ffcc, 0.3);

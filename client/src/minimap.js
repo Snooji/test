@@ -23,8 +23,8 @@ export function drawMinimap(canvas, level, snap, myId, pings, objective = null) 
   for (const st of level.stairs || []) if (st.b === fl || st.b === fl - 1) g.fillRect(X(st.x0), Z(Math.min(st.zl, st.zh)), (st.x1 - st.x0) * sc, Math.abs(st.zh - st.zl) * sc);
   // truck + ramp
   g.fillStyle = 'rgba(85,255,204,.35)'; g.fillRect(X(TRUCK.ramp.x0), Z(TRUCK.ramp.z0), (TRUCK.ramp.x1 - TRUCK.ramp.x0) * sc, (TRUCK.ramp.z1 - TRUCK.ramp.z0) * sc);
-  g.fillStyle = '#1b1730'; g.fillRect(X(TRUCK.bayX0), Z(-2.8), (TRUCK.bayX1 - TRUCK.bayX0) * sc, 5.6 * sc);
-  g.fillStyle = '#6b4dff'; g.fillRect(X(TRUCK.bayX1), Z(-2.8), (TRUCK.cabX1 - TRUCK.bayX1) * sc, 5.6 * sc);
+  g.fillStyle = '#2b241e'; g.fillRect(X(TRUCK.bayX0), Z(-2.8), (TRUCK.bayX1 - TRUCK.bayX0) * sc, 5.6 * sc);
+  g.fillStyle = '#ff8a3d'; g.fillRect(X(TRUCK.bayX1), Z(-2.8), (TRUCK.cabX1 - TRUCK.bayX1) * sc, 5.6 * sc);
   // items still in the house
   for (const it of snap.items) {
     if (it.state === 'loaded' || it.state === 'gone' || it.state === 'parked' || !onFl(it)) continue;

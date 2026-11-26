@@ -41,14 +41,14 @@ export class GameScene {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0b0820);
-    this.scene.fog = new THREE.Fog(0x0b0820, 45, 90);
+    this.scene.background = new THREE.Color(0x1a1410); // warm night
+    this.scene.fog = new THREE.Fog(0x1a1410, 45, 90);
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
     this.camTarget = new THREE.Vector3(11, 0, 0);
     this.camera.position.set(11, 22, 13);
     this.shakeT = 0;
 
-    this.scene.add(new THREE.HemisphereLight(0xbfb8ff, 0x2a2040, 1.4));
+    this.scene.add(new THREE.HemisphereLight(0xffe6c8, 0x3a2e24, 1.4));
     const sun = new THREE.DirectionalLight(0xfff1dd, 2.2);
     sun.position.set(12, 30, 14);
     sun.castShadow = true;
