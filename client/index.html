@@ -64,7 +64,7 @@
     <div id="countdown" class="hidden"></div>
     <div id="scoreboard"></div>
     <div id="duel" class="hidden" aria-live="polite">
-      <div class="dl-title">⚔️ TAP BATTLE <span id="duel-t">5</span></div>
+      <div class="dl-title">Tap battle · <span id="duel-t">5</span> s</div>
       <div class="dl-bar"><span id="duel-na"></span><i id="duel-fill"></i><span id="duel-nb"></span></div>
       <button id="duel-btn">TAP!</button>
       <div class="dl-hint">Tap as fast as you can (or mash the action key / Space). Each tap counts by how much energy you have left, and tapping tires you. Most points in 5 s wins the lift.</div>
@@ -123,13 +123,14 @@
       <p class="err" id="home-err"></p>
       <details class="how"><summary>How to play</summary>
         <ul>
-          <li>Grab boxes in the house and carry them to the <b>load zone</b> at the truck.</li>
-          <li>On the ramp, move to aim a column, then press <b>action</b> to drop it in. It stacks like Tetris.</li>
-          <li>Heavy boxes and furniture <b>crush fragile boxes</b> beneath them. Heavy on the bottom.</li>
-          <li><b>Hold action</b> to pad-wrap couches and lamps, or take apart desks and tables.</li>
-          <li>Couches, beds, desks and tables are <b>two-mover lifts</b>. Call for help if you need it.</li>
-          <li>The <b>furniture dolly 🛞</b> lets you move a couch, bed, desk or table alone (take desks and tables apart first). One use, then it turns up somewhere else.</li>
-          <li>Carrying uses <b>energy ⚡</b>. Rushing burns it fast; walk carefully or stop to refill. Run out and you get hurt and slow down for a few seconds.</li>
+          <li>Find the pieces in the house and carry them to the <b>load zone</b> by the truck's ramp. Walls hide the next room, so explore.</li>
+          <li>In the truck, aim where the piece goes, then <b>place</b> it. <b>Rotate</b> turns it, <b>Flip</b> tips it onto another side.</li>
+          <li>Boxes look alike: a <b>broken glass</b> mark means fragile, an <b>anvil</b> means heavy. Heavy on the bottom, fragile on top.</li>
+          <li><b>Hold the action</b> to pad-wrap a couch or lamp, or to take a desk or table apart.</li>
+          <li>Couches, beds, desks and tables are <b>two-mover lifts</b>. Call for help, or use the <b>furniture dolly</b> (downstairs only). The <b>two-wheel dolly</b> stacks three boxes and can go up and down stairs.</li>
+          <li>Bigger houses have <b>stairs</b>: walk up a flight to the next floor. The minimap shows the floor you're on.</li>
+          <li>Carrying uses <b>energy</b>. Rush and you run out, get hurt and slow down; stand still to catch your breath.</li>
+          <li>Tap a lift someone else is carrying to start a 5-second <b>tap battle</b> for it. Taps count by how much energy you have left.</li>
           <li>Heard a crunch? <b>Call out</b> the culprit. Right call: they get a strike. Wrong call: you do.</li>
         </ul>
       </details>
@@ -239,16 +240,15 @@
   <!-- Meeting -->
   <section id="meeting" class="screen hidden">
     <div class="card wide meeting">
-      <div class="siren">📣 CREW MEETING</div>
+      <header class="mt-head"><h2 class="siren">Crew meeting</h2><p class="timer-row"><b class="timer" id="meeting-timer">25</b> seconds to vote</p></header>
       <p id="meeting-sub"></p>
-      <div class="vote-grid" id="vote-grid"></div>
+      <div class="vote-grid" id="vote-grid" role="group" aria-label="Vote"></div>
       <button id="btn-skip" class="ghost">Skip vote</button>
-      <div class="timer" id="meeting-timer">25</div>
     </div>
   </section>
 
   <!-- Chat (lobby + meeting) -->
-  <button id="chat-toggle" class="hidden" aria-label="Show chat">💬</button>
+  <button id="chat-toggle" class="hidden" aria-label="Show chat">Chat</button>
   <div id="chat" class="hidden">
     <div class="quickchat" id="quickchat"></div>
     <div id="chat-log"></div>
@@ -257,8 +257,9 @@
 
   <div id="verdict" class="hidden"></div>
   <div id="role" class="hidden"></div>
-  <div id="coach" class="hidden"><div class="coach-head">🎓 Coach</div><div id="coach-text"></div><div id="coach-dots"></div></div>
-  <div id="drive" class="hidden"><div class="drive-title">🚚 Driving off… load check</div><div id="drive-body"></div></div>
+  <div id="coach" class="hidden" role="status"><div class="coach-head">Coach <span id="coach-step"></span></div><div id="coach-text"></div><div id="coach-dots" aria-hidden="true"></div></div>
+  <div id="drive" class="hidden" role="status"><div class="drive-title">Driving off · load check</div><div id="drive-body"></div></div>
+  <div id="joining" class="hidden" role="status" aria-live="polite"><span class="spin" aria-hidden="true"></span><span id="joining-text">Joining the crew…</span></div>
 
   <!-- Results -->
   <section id="results" class="screen hidden">
@@ -287,7 +288,7 @@
 
   <section id="train-done" class="screen hidden" aria-live="polite">
     <div class="td-card">
-      <span class="td-badge">🎓 Training</span>
+      <span class="td-badge">Training</span>
       <div class="td-portrait" id="td-portrait"></div>
       <h2 class="td-title">Training complete!</h2>
       <p class="td-text">You can lift, stack, wrap and team-carry like a pro. Time for a real move.</p>
@@ -298,10 +299,10 @@
 
   <section id="feedback" class="screen hidden">
     <div class="card">
-      <div class="logo small">★ Quick question</div>
-      <p class="tag">Should <b>Starside Movers</b> become a full game?</p>
-      <div class="thumbs"><button id="fb-up" aria-label="Yes, make it a full game">👍</button><button id="fb-down" aria-label="No">👎</button></div>
-      <button class="link" id="fb-skip">Not now</button>
+      <h2 class="fb-title">Quick question</h2>
+      <p class="tag">Should <b>Starside Movers</b> make this a full game?</p>
+      <div class="thumbs"><button id="fb-up">Yes, make it</button><button id="fb-down">Not for me</button></div>
+      <button class="link" id="fb-skip">Ask me later</button>
     </div>
   </section>
 

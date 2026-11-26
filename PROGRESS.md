@@ -251,4 +251,13 @@ Verified: 201 unit tests; voxel e2e: e2e, e2e-b (x2), solo (new phone controls),
 Verified: 208 unit tests; AI sim 16-28 loaded per round, hard bots 0 breaks; all voxel e2e suites + smoke pass
 - [x] Truck: a thin, narrow, ribbed aluminium ramp (U-Haul style) with side lips, hinged at the truck. End of round: the ramp swings
       up and slides away under the floor, the ribbed shutter rolls down from the top, then the truck drives off (+1 s drive-off time)
+- [x] Redesign finished: sign-in, How to play (rewritten for floors, dollies, box marks, Rotate/Flip, tap battles), crew meeting
+      (list with "Your vote" / "Has voted"), role cards, verdict, countdown, coach ("step 2 of 9"), drive-off panel, tap battle,
+      chat + quick chat, toasts, training complete, feedback ("Yes, make it" / "Not for me"); emoji labels replaced by words
+- [x] States: a loading card while joining ("Setting up the house…", "Finding an open game…"); a clear error when the connection
+      really drops (no false "Disconnected" after choosing Main menu); reduced motion honoured (no bobbing/pulsing; screen shake
+      off by default for those players); training house in warm colours
+- [x] Accessibility: WCAG 2 A/AA scan (axe) of sign-in, home, lobby, HUD, menu and results at desktop + phone is clean
+      (fixed the promo badge, Copy invite and the menu's Esc hint). Scan kept as test/e2e-a11y.mjs
+Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan pass
 

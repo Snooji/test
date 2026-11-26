@@ -71,8 +71,11 @@ const ab = await b.locator('#btn-action').boundingBox();
 if (!ab || ab.x + ab.width < vp.width - 40 || ab.y + ab.height < vp.height - 60) errors.push('action button not bottom right');
 if (!/^(Grab|Lift|Wrap|Take apart|Steal|Unload|Load|Stack)$/.test((await b.textContent('#action-label')).trim())) errors.push('action label: ' + await b.textContent('#action-label'));
 if (await b.isVisible('#btn-help')) errors.push('help showing with empty hands');
-await b.evaluate(() => window.__sm.send('debug_give', { type: 'couch' }));
-await b.waitForFunction(() => { const s = window.__sm.snap; return s.players.find(p => p.id === window.__sm.myId)?.loadMode; }, null, { timeout: 5000 });
+// a piece that turns several ways (the AI crew may already have the couch in hand: fall back to another)
+for (const type of ['couch', 'bed', 'lamp', 'desk', 'table']) {
+  await b.evaluate((type) => window.__sm.send('debug_give', { type }), type);
+  if (await b.waitForFunction(() => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.loadMode, null, { timeout: 2500 }).then(() => true).catch(() => false)) { log('in the truck with a', type); break; }
+}
 await wait(1200);
 const c0 = (await meOf(b)).cursor;
 await b.screenshot({ path: `${out}/s07-phone-truck.png` });

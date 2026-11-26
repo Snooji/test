@@ -558,10 +558,10 @@ export function tutorialLevel() {
   return finish({
     seed: 1, name: 'Training House', tutorial: true,
     house: { x0: -14, x1: 0, z0: -7, z1: 7 }, yardDistance: 9.4,
-    rooms: [{ name: 'Front Room', x0: -7, x1: 0, z0: -7, z1: 7, floor: 0x3b3561 }, { name: 'Back Room', x0: -14, x1: -7, z0: -7, z1: 7, floor: 0x2f4f5e }],
+    rooms: [{ name: 'Front Room', x0: -7, x1: 0, z0: -7, z1: 7, floor: 0x6b4a33, tiles: { floor: 'wood', wall: 0xf1e3cc, skirt: 0x7a4f2c } }, { name: 'Back Room', x0: -14, x1: -7, z0: -7, z1: 7, floor: 0x7d6b58, tiles: { floor: 'carpet', wall: 0xdfe5d4, skirt: 0x6e6a5c } }],
     walls: [...houseWalls, ...TRUCK_WALLS], houseWalls,
     items: [['standard', -3, -4], ['heavy', -3, 4], ['fragile', -10.5, -4.5], ['lamp', -10.5, 4.5], ['couch', -10.5, 0]],
-    props: [{ kind: 'rug', x: -3.5, z: 0, w: 4, d: 3, color: 0xe76f51 }, { kind: 'plant', x: -1, z: -6 }, { kind: 'plant', x: 1.6, z: -3 }, { kind: 'plant', x: 1.6, z: 3 }],
+    props: [{ kind: 'rug', x: -3.5, z: 0, w: 4, d: 3, color: 0xc8734f }, { kind: 'plant', x: -1, z: -6 }, { kind: 'plant', x: 1.6, z: -3 }, { kind: 'plant', x: 1.6, z: 3 }],
     cat: [[-3.5, 0], [-10.5, 2], [-3.5, 5]],
     frontDoor: { x: 0, z: 0 },
   });

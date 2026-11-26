@@ -175,6 +175,7 @@ function stopDemo() {
 document.addEventListener('click', (e) => { const a = e.target.closest('.book-cta'); if (a) track('book_click_' + (a.dataset.where || 'home')); });
 
 function route() {
+  show('joining', false);
   for (const s of ['gate', 'home', 'lobby', 'meeting', 'results']) show(s, false);
   startDemo();
   if (!gate?.token) { show('gate'); track('gate_view'); return; }
@@ -190,6 +191,8 @@ async function connect(roomId, extra = {}) {
   $('home-err').textContent = '';
   stopDemo();
   show('home', false); show('gate', false);
+  $('joining-text').textContent = roomId ? 'Joining your crew…' : extra.quick ? 'Finding an open game…' : 'Setting up the house…';
+  show('joining'); // loading state until the room answers (attach) or fails (route)
   const opts = { name: gate.name, email: gate.email, token: gate.token, char: prefChar, ...extra };
   try {
     // a page reload mid-round can rejoin the same mover
@@ -212,6 +215,7 @@ async function connect(roomId, extra = {}) {
 }
 
 function attach(r) {
+  show('joining', false);
   room = r;
   autoStartSent = false;
   myId = r.sessionId;
@@ -220,6 +224,7 @@ function attach(r) {
   r.onMessage('evt', onEvent);
   r.onMessage('chat', onChat);
   r.onLeave(async (code) => {
+    if (room !== r) return; // we left on purpose (Main menu, Quit): not a disconnect
     const intentional = code === 1000 || code === 4000;
     if (!intentional && snap && (snap.phase === 'playing' || snap.phase === 'meeting' || snap.phase === 'countdown')) {
       // phones drop the socket when you switch apps: try to slip back into the same mover
@@ -236,7 +241,7 @@ function attach(r) {
     history.replaceState(null, '', location.pathname);
     for (const s of ['hud', 'controls', 'joyzone', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results']) show(s, false);
     route();
-    $('home-err').textContent = 'Disconnected from the crew.';
+    if (!intentional) $('home-err').textContent = 'Lost the connection to the crew. Check your signal, then pick a game to jump back in.';
   });
 }
 
@@ -461,7 +466,7 @@ $('btn-copy').onclick = async () => {
 // ---------- HUD ----------
 const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 function renderHud(s, me) {
-  $('hud-timer').textContent = s.level?.tutorial ? '🎓 Training' : s.mode === 'load' ? `🚚 ${fmt(s.timeLeft)}` : fmt(s.timeLeft);
+  $('hud-timer').textContent = s.level?.tutorial ? 'Training' : s.mode === 'load' ? `Full load · ${fmt(s.timeLeft)}` : fmt(s.timeLeft);
   const tut = s.tutorial;
   show('coach', !!tut && s.phase === 'playing');
   if (tut) {
@@ -469,6 +474,7 @@ function renderHud(s, me) {
       : input.pad.connected ? { ACT: 'A', ROT: 'X', HELP: 'Y' } : { ACT: keyName(input.binds.action), ROT: keyName(input.binds.rotate), HELP: keyName(input.binds.help) };
     $('coach-text').textContent = (tut.text || '').replace(/Tap \{ROT\}/g, isTouch ? 'Use {ROT}' : 'Tap {ROT}').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]);
     $('coach-dots').innerHTML = Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join('');
+    $('coach-step').textContent = tut.total ? `· step ${Math.min(tut.step + 1, tut.total)} of ${tut.total}` : '';
   }
   scene.tutorialTarget = tut?.target || null;
   $('hud-timer').classList.toggle('low', s.mode !== 'load' && s.timeLeft <= 20);
@@ -657,8 +663,9 @@ function renderMeeting(s, me) {
   if ($('vote-grid').dataset.key !== key) {
     $('vote-grid').dataset.key = key;
     $('vote-grid').innerHTML = s.players.filter(p => !p.spectator).map(p => `
-      <button class="vote ${myVote === p.id ? 'picked' : ''} ${m.voted.includes(p.id) ? 'voted' : ''}" data-id="${p.id}" ${!canVote || p.out ? 'disabled' : ''}>
+      <button class="vote ${myVote === p.id ? 'picked' : ''} ${m.voted.includes(p.id) ? 'voted' : ''}" data-id="${p.id}" ${!canVote || p.out ? 'disabled' : ''} aria-pressed="${myVote === p.id}">
         ${portrait(p.char)}<div><div><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}</div><div class="sub">${p.out ? 'off the truck' : `${p.score} pts · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}`}</div></div>
+        <span class="vst">${myVote === p.id ? 'Your vote' : m.voted.includes(p.id) ? 'Has voted' : ''}</span>
       </button>`).join('');
   }
   $('btn-skip').disabled = !canVote;
@@ -782,11 +789,11 @@ const pref = (k, d) => { try { return localStorage.getItem('sm_' + k) ?? d; } ca
 const savePref = (k, v) => { try { localStorage.setItem('sm_' + k, v); } catch {} };
 function applyPrefs() {
   scene.camZoom = { close: 0.8, normal: 1, far: 1.45 }[pref('cam', 'normal')] || 1;
-  scene.noShake = pref('shake', 'on') === 'off';
+  scene.noShake = pref('shake', matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on') === 'off'; // reduced motion: no shake unless asked
   scene.showArrow = pref('arrow', 'on') !== 'off';
 }
 function syncGameMenu() {
-  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', 'on'), arrow: pref('arrow', 'on') };
+  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on'), arrow: pref('arrow', 'on') };
   for (const seg of document.querySelectorAll('.gm-seg')) for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === val[seg.dataset.set]));
 }
 function openGameMenu() {
