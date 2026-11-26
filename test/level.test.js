@@ -15,15 +15,15 @@ test('different seeds build different houses: size, rooms and yard distance vary
   const sigs = new Set(SEEDS.map(s => { const l = generateLevel(s); return `${l.house.x0},${l.house.x1},${l.house.z0},${l.house.z1},${l.rooms.length}`; }));
   assert.ok(sigs.size >= 30, `only ${sigs.size} distinct layouts in 40 seeds`);
   const widths = SEEDS.map(s => { const h = generateLevel(s).house; return h.x1 - h.x0; });
-  assert.ok(Math.max(...widths) - Math.min(...widths) >= 8, 'house width varies');
+  assert.ok(Math.max(...widths) - Math.min(...widths) >= 6, 'house width varies'); // rooms have size limits now (cottage ~15 m, family house ~21 m)
   const gaps = SEEDS.map(s => generateLevel(s).yardDistance);
   assert.ok(Math.max(...gaps) - Math.min(...gaps) >= 5, 'distance to the truck varies');
 });
 
-test('every generated house has 3–6 rooms and stays clear of the truck', () => {
+test('every generated house has 3–8 rooms and stays clear of the truck', () => {
   for (const s of SEEDS) {
     const l = generateLevel(s);
-    assert.ok(l.rooms.length >= 3 && l.rooms.length <= 6, `seed ${s}: ${l.rooms.length} rooms`);
+    assert.ok(l.rooms.length >= 3 && l.rooms.length <= 8, `seed ${s}: ${l.rooms.length} rooms`);
     assert.ok(l.house.x1 <= 3, `seed ${s}: house overlaps yard`);
     assert.ok(l.house.z0 >= -14 && l.house.z1 <= 14, `seed ${s}: house out of bounds`);
   }
@@ -161,4 +161,31 @@ test('every room gets its own tile set by type', async () => {
   for (const r of L.rooms) assert.ok(r.tiles && r.tiles.floor && r.tiles.wall, `${r.name} has floor + wall tiles`);
   const k = L.rooms.find(r => r.role === 'kitchen'), b = L.rooms.find(r => r.role === 'bedroom');
   assert.notEqual(k.tiles.floor, b.tiles.floor, 'kitchen and bedroom floors differ');
+});
+
+test('every room type stays within its own size range (no giant bedrooms)', async () => {
+  const { generateLevel, ROOM_SIZES } = await import('../shared/level.js');
+  for (let seed = 1; seed <= 200; seed++) {
+    for (const opts of [{}, { mansion: true }, { exact: true }]) {
+      const L = generateLevel(seed * 31337, opts);
+      for (const r of L.rooms) {
+        const lim = ROOM_SIZES[r.role];
+        assert.ok(lim, `seed ${seed}: ${r.role} has size limits`);
+        const len = r.z1 - r.z0, dep = r.x1 - r.x0;
+        assert.ok(len >= lim.len[0] - 0.01 && len <= lim.len[1] + 0.01, `seed ${seed} ${JSON.stringify(opts)}: ${r.name} length ${len} outside ${lim.len}`);
+        assert.ok(dep >= lim.dep[0] - 0.01 && dep <= lim.dep[1] + 0.01, `seed ${seed} ${JSON.stringify(opts)}: ${r.name} depth ${dep} outside ${lim.dep}`);
+      }
+    }
+  }
+});
+
+test('bedrooms, bathroom and office open onto a hallway; the hallway opens onto the living area', async () => {
+  const { generateLevel } = await import('../shared/level.js');
+  for (let seed = 1; seed <= 120; seed++) {
+    const L = generateLevel(seed * 6151, seed % 3 === 0 ? { mansion: true } : {});
+    const halls = L.rooms.filter(r => r.role === 'hall');
+    if (!halls.length) continue; // cottages: bedroom straight off the living room
+    for (const r of L.rooms.filter(r => ['bedroom', 'bathroom', 'office', 'laundry'].includes(r.role))) assert.ok(halls.some(h => L.doorsBetween(r, h)), `seed ${seed}: ${r.name} opens onto a hallway`);
+    assert.ok(L.rooms.some(r => ['living', 'dining', 'kitchen'].includes(r.role) && halls.some(h => L.doorsBetween(r, h))), `seed ${seed}: a hallway reaches the living area`);
+  }
 });

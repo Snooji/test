@@ -20,14 +20,14 @@ test('hard AI never drops a heavy box onto a fragile one when another spot exist
   const g = createGrid();
   for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) if (x || z) placeItem(g, mk(`f${x}${z}`, 'fragile'), x, z, 0);
   // only (0,0) is free of fragile tops
-  const pick = choosePlacement(g, mk('h', 'heavy'), 'hard', Math.random);
+  const pick = choosePlacement(g, mk('h', 'heavy'), 'hard', () => 0.5);
   assert.deepEqual([pick.gx, pick.gz], [0, 0]);
 });
 
 test('hard AI puts heavy boxes on the floor when the floor has room', () => {
   const g = createGrid();
   placeItem(g, mk('s', 'standard'), 0, 0, 0);
-  const pick = choosePlacement(g, mk('h', 'heavy'), 'hard', Math.random);
+  const pick = choosePlacement(g, mk('h', 'heavy'), 'hard', () => 0.5);
   const c = cloneGrid(g);
   assert.equal(placeItem(c, mk('h', 'heavy'), pick.gx, pick.gz, pick.rot).y, 0);
 });
@@ -35,7 +35,7 @@ test('hard AI puts heavy boxes on the floor when the floor has room', () => {
 test('hard AI puts fragile boxes on top of the stack', () => {
   const g = createGrid();
   placeItem(g, mk('a', 'heavy'), 0, 0, 0);
-  const pick = choosePlacement(g, mk('f', 'fragile'), 'hard', Math.random);
+  const pick = choosePlacement(g, mk('f', 'fragile'), 'hard', () => 0.5); // fixed rng: hard bots are careless 5% of the time
   assert.deepEqual([pick.gx, pick.gz], [0, 0]);
 });
 

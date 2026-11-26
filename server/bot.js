@@ -296,6 +296,7 @@ export class Bot {
       return;
     }
     p.pending.tapN = 1;
+    p.tapWant = target.id; // pick up the thing we walked to, not whatever happens to be nearest (a coffee table next to a couch)
     this.waitT = this.react() * 0.5;
   }
 

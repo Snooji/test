@@ -616,7 +616,12 @@ export class MoveRoom extends Room {
     }
     if (p.dolly) return this.dollyTap(p);
     if (p.flatDolly) return this.flatTap(p);
-    const target = this.nearestItem(p);
+    // an AI mover says what it walked to; use that if it's in reach, else the nearest thing (people)
+    const want = p.tapWant ? this.items.get(p.tapWant) : null;
+    p.tapWant = null;
+    const wantOk = want && (want.state === 'floor' || (want.state === 'carried' && ITEM_TYPES[want.type].teamCarry && want.carriers.length === 1 && !want.carriers.includes(p.id)))
+      && dist(p, want) - Math.max(ITEM_TYPES[want.type].w, ITEM_TYPES[want.type].d) * 0.35 < REACH + 0.3;
+    const target = wantOk ? want : this.nearestItem(p);
     if (!target) return;
     const t = ITEM_TYPES[target.type];
     if (target.type === 'flatdolly') {

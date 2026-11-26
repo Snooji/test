@@ -199,3 +199,19 @@ test('AI answers a 🆘: the nearest free bot heads for the other end and says s
   for (let t = 0; t < 25 && couch.carriers.length < 2; t += DT) room.tick(DT);
   assert.equal(couch.carriers.length, 2, 'the bot made it and lifted the other end');
 });
+
+test('AI picks up the piece it walked to, not the couch right behind it', () => {
+  const { room } = makeRoom({ level: 'classic' });
+  room.addBot(); room.addBot();
+  room.startRound();
+  while (room.phase !== 'playing') room.tick(DT);
+  const [b] = room.bots.values();
+  const couch = [...room.items.values()].find(i => i.type === 'couch');
+  const ct = [...room.items.values()].find(i => i.type === 'standard');
+  // a box sitting just in front of the couch, the bot standing between them, closer to the couch
+  ct.x = couch.x; ct.z = couch.z + 1.4; b.p.x = couch.x; b.p.z = couch.z + 0.75;
+  b.known.set(ct.id, { x: ct.x, z: ct.z, at: 0 }); b.targetId = ct.id; b.waitT = 0;
+  b.chooseTarget = () => ct;
+  for (let i = 0; i < 6 && !b.p.carry; i++) room.tick(DT);
+  assert.equal(b.p.carry, ct.id, 'took the box it was going for');
+});

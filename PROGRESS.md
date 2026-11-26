@@ -168,3 +168,16 @@ Verified: unit tests 166/166 · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dol
 - [ ] Ghost furniture / walls in doorways: not reproduced in 5 voxel houses checked from above; waiting on a screenshot
 Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2e-solo, e2e-wave2, e2e-b, e2e-dolly, smoke PASS · voxel e2e-solo, e2e-dolly, e2e-b PASS (input no longer sent into a closed socket)
 - [x] Fixed (from a player screenshot): the kitchen counter could sit across a doorway (walk-through, but looked like a wall). Counters now go on the first kitchen wall with no doorway (or are skipped); potted plants avoid doorway corners. Test over 300 houses (fails on the old generator, passes now)
+
+## Round 11 (2026-11-25/26): share image, real homes (in progress: floors, redesign, detail)
+- [x] Share image: voxel crew carrying boxes and a couch to the truck under a warm night sky (client/public/og.png, source in tools/og); absolute og:image URLs
+- [x] Homes: a real plan, front column of shared rooms (living with the front door, dining, kitchen), a 4 m hallway, a back column of
+      private rooms (bedrooms, bathroom, office, laundry); cottages (bedroom + en-suite off the living room); Moon Mansion = two wings
+      joined by a passage. Every room type has its own size range (ROOM_SIZES in shared/level.js) and never grows past it
+- [x] Furnishing: each bedroom bed + dresser, dining table + lamp, living couch + lamp + coffee table (coffee table in front of the couch),
+      office desk, boxes in every room (fragile favours kitchen/dining, heavy the office/laundry); inventory ≤ 56 truck cells
+- [x] New pieces: Dresser (1x1x2, heavy, wrap) and Coffee Table (2x1); voxel + classic models
+- [x] Per-room tile sets: floor pattern, wall colour on each room's side, skirting; warm palettes (no purple carpets/rugs)
+- [x] Fixed: AI picked up the couch when it walked to the coffee table in front of it (stood waiting for a partner forever); bots now
+      pick up what they walked to. Flaky AI placement tests made deterministic
+Verified: unit tests all pass (house tests over 600 generated houses), AI sims load 23–28 of ~30 items
