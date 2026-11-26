@@ -27,7 +27,11 @@ signupRoutes(app, express, store);
 const dist = path.resolve('dist');
 if (fs.existsSync(dist)) {
   app.get('/privacy.html', (_req, res) => res.redirect(301, '/privacy'));
-  app.use(express.static(dist, { maxAge: '1h', index: false, setHeaders: (res, p) => { if (p.endsWith('sw.js') || p.endsWith('.webmanifest')) res.setHeader('Cache-Control', 'no-cache'); } }));
+  app.use(express.static(dist, { maxAge: '1h', index: false, setHeaders: (res, p) => {
+    if (p.endsWith('sw.js') || p.endsWith('.webmanifest')) res.setHeader('Cache-Control', 'no-cache');
+    else if (/[\\/]assets[\\/].+-[\w-]{8}\.(js|css)$/.test(p)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); // fingerprinted: never changes
+    else if (/[\\/](models|chars)[\\/]/.test(p)) res.setHeader('Cache-Control', 'public, max-age=604800'); // models + portraits: a week
+  } }));
   const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   app.get('/privacy', (_req, res) => {
     const contact = process.env.CONTACT_EMAIL

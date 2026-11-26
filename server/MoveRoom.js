@@ -214,6 +214,7 @@ export class MoveRoom extends Room {
   }
 
   onJoin(client, options, auth) {
+    this.forceFull = true; // the newcomer needs every item
     // a friend joining a full lobby takes a bot's seat
     if (this.phase === 'lobby' && this.movers().length >= MAX_MOVERS && this.bots.size) this.removeBot([...this.bots.keys()].pop());
     const used = new Set([...this.players.values()].map(p => p.char));
@@ -358,6 +359,7 @@ export class MoveRoom extends Room {
   allowsUnload() { return !this.tutorialMode; }
 
   resetWorld() {
+    this.forceFull = true; // a new set of items: everyone gets the full list
     this.items.clear();
     this.duels = new Map();
     for (const p of this.players.values()) p.duel = null;
@@ -486,7 +488,7 @@ export class MoveRoom extends Room {
     }
     for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; p.pending.flipN = 0; }
     // the menu's demo game streams at ~7 Hz; real games at 20 Hz
-    if (!this.demo || (this.demoTick = (this.demoTick || 0) + 1) % 3 === 0) this.broadcast('snap', this.snapshot());
+    if (!this.demo || (this.demoTick = (this.demoTick || 0) + 1) % 3 === 0) this.broadcastSnap();
   }
 
   /** Zero-G twist: every 25 s gravity cuts out for 6 s; loose items drift and movers float faster. */
@@ -1497,6 +1499,22 @@ export class MoveRoom extends Room {
   onUncaughtException(err, method) {
     console.error('room error in', method, err);
     MoveRoom.store?.logError({ where: 'room:' + method, message: err.message, stack: err.stack, ua: '' }).catch(() => {});
+  }
+
+  /** Send the snapshot with only the items that changed since the last one; every item again once a second, when someone
+   *  joins and when the house changes (clients merge with shared/snap.js). Cuts the bytes per update about three-fold. */
+  broadcastSnap() {
+    const s = this.snapshot();
+    this.snapN = (this.snapN || 0) + 1;
+    if (this.forceFull || !this.sentItems || this.snapN % (this.demo ? 7 : 20) === 0) {
+      this.sentItems = new Map(s.items.map(it => [it.id, JSON.stringify(it)]));
+      this.forceFull = false;
+    } else {
+      const changed = [];
+      for (const it of s.items) { const k = JSON.stringify(it); if (this.sentItems.get(it.id) !== k) { changed.push(it); this.sentItems.set(it.id, k); } }
+      s.items = changed; s.itemsDelta = true;
+    }
+    this.broadcast('snap', s);
   }
 
   snapshot() {

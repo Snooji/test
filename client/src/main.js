@@ -1,6 +1,7 @@
 import { Client } from 'colyseus.js';
 import { GameScene } from './scene.js';
 import { Input, ACTIONS, keyName, PAD_LABEL } from './input.js';
+import { mergeItems } from '../../shared/snap.js';
 import { PORTRAITS, CHARACTERS, portrait, charInfo, CREW_ORDER, setPortrait } from './portraits.js';
 import { renderClassicPortraits } from './voxel.js';
 import { charUnlocked, unlockText, unlockProgress } from '../../shared/roster.js';
@@ -14,6 +15,9 @@ import { drawMinimap } from './minimap.js';
 }
 
 const $ = (id) => document.getElementById(id);
+/** write only when it changes: no layout work when a snapshot repeats what's on screen (20 times a second) */
+const setText = (id, v) => { const e = typeof id === 'string' ? $(id) : id; if (e.textContent !== v) e.textContent = v; };
+const setHTML = (id, v) => { const e = typeof id === 'string' ? $(id) : id; if (e.dataset.html !== v) { e.dataset.html = v; e.innerHTML = v; } };
 const show = (el, on = true) => (typeof el === 'string' ? $(el) : el).classList.toggle('hidden', !on);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isTouch = matchMedia('(pointer: coarse)').matches;
@@ -150,7 +154,8 @@ async function startDemo() {
     if (room) { d.leave(true).catch(() => {}); return; }
     demoRoom = d;
     scene.demoMode = true;
-    d.onMessage('snap', (s) => { if (!room && s.phase !== 'lobby') scene.apply(s, null); });
+    const demoCache = {};
+    d.onMessage('snap', (s) => { mergeItems(s, demoCache); if (!room && s.phase !== 'lobby' && !s.itemsDelta) scene.apply(s, null); });
     d.onMessage('evt', (e) => {
       if (room) return;
       if (e.kind === 'driveoff') scene.startDriveOff(e.damaged.map(x => x.id));
@@ -219,7 +224,8 @@ function attach(r) {
   autoStartSent = false;
   myId = r.sessionId;
   try { sessionStorage.setItem('sm_rt', JSON.stringify({ roomId: r.roomId, token: r.reconnectionToken })); } catch {}
-  r.onMessage('snap', onSnap);
+  const itemCache = {}; // this connection's items: updates only carry what changed
+  r.onMessage('snap', (s) => { mergeItems(s, itemCache); if (!s.itemsDelta) onSnap(s); });
   r.onMessage('evt', onEvent);
   r.onMessage('chat', onChat);
   r.onLeave(async (code) => {
@@ -461,27 +467,27 @@ $('btn-copy').onclick = async () => {
 // ---------- HUD ----------
 const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 function renderHud(s, me) {
-  $('hud-timer').textContent = s.level?.tutorial ? 'Training' : s.mode === 'load' ? `Full load · ${fmt(s.timeLeft)}` : fmt(s.timeLeft);
+  setText('hud-timer', s.level?.tutorial ? 'Training' : s.mode === 'load' ? `Full load · ${fmt(s.timeLeft)}` : fmt(s.timeLeft));
   const tut = s.tutorial;
   show('coach', !!tut && s.phase === 'playing');
   if (tut) {
     const keys = isTouch ? { ACT: 'the big button', ROT: 'Rotate', HELP: 'Need a hand' }
       : input.pad.connected ? { ACT: 'A', ROT: 'X', HELP: 'Y' } : { ACT: keyName(input.binds.action), ROT: keyName(input.binds.rotate), HELP: keyName(input.binds.help) };
-    $('coach-text').textContent = (tut.text || '').replace(/Tap \{ROT\}/g, isTouch ? 'Use {ROT}' : 'Tap {ROT}').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]);
-    $('coach-dots').innerHTML = Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join('');
-    $('coach-step').textContent = tut.total ? `· step ${Math.min(tut.step + 1, tut.total)} of ${tut.total}` : '';
+    setText('coach-text', (tut.text || '').replace(/Tap \{ROT\}/g, isTouch ? 'Use {ROT}' : 'Tap {ROT}').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]));
+    setHTML('coach-dots', Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join(''));
+    setText('coach-step', tut.total ? `· step ${Math.min(tut.step + 1, tut.total)} of ${tut.total}` : '');
   }
   scene.tutorialTarget = tut?.target || null;
   $('hud-timer').classList.toggle('low', s.mode !== 'load' && s.timeLeft <= 20);
   if (me) {
-    $('hud-score').textContent = `${me.score} pts`;
+    setText('hud-score', `${me.score} pts`);
     const sabotage = s.game === 'sabotage';
-    $('hud-strikes').textContent = me.out ? '🚪 OFF THE TRUCK' : sabotage ? (myRole ? '🕵️ Saboteur' : '🧰 Crew') : `Strikes ${me.strikes}/2`;
+    setText('hud-strikes', me.out ? '🚪 OFF THE TRUCK' : sabotage ? (myRole ? '🕵️ Saboteur' : '🧰 Crew') : `Strikes ${me.strikes}/2`);
     $('hud-strikes').classList.toggle('role-sab', sabotage && !!myRole);
     show('hud-crew', sabotage);
-    if (sabotage) { $('hud-crew').textContent = s.overtime ? `⏰ Crew ${s.crewScore}` : `🧰 Crew ${s.crewScore}`; $('hud-crew').classList.toggle('drain', !!s.overtime); }
+    if (sabotage) { setText('hud-crew', s.overtime ? `⏰ Crew ${s.crewScore}` : `🧰 Crew ${s.crewScore}`); $('hud-crew').classList.toggle('drain', !!s.overtime); }
   }
-  $('hud-truck').textContent = `${s.loadedCount}/${s.totalItems} ${isTouch ? 'in truck' : 'in the truck'}`;
+  setText('hud-truck', `${s.loadedCount}/${s.totalItems} ${isTouch ? 'in truck' : 'in the truck'}`);
   const held = me?.carry ? s.items.find(i => i.id === me.carry) : null;
   const needHand = !!held && !me.loadMode && ITEM_TYPES[held.type].teamCarry && held.n === 1 && s.players.filter(p => !p.out && !p.spectator).length > 1 && s.phase === 'playing';
   show('hud-help', needHand && !isTouch);
@@ -496,13 +502,13 @@ function renderHud(s, me) {
   const canCall = s.phase === 'playing' && s.canCallOut && (s.openBreaks > 0 || s.game === 'sabotage') && me && !me.out && !me.spectator;
   show('hud-callout', canCall && !isTouch);
   show('btn-callout', canCall);
-  $('dash-label').textContent = me?.loadMode ? 'Back' : 'Dash';
+  setText('dash-label', me?.loadMode ? 'Back' : 'Dash');
   // energy: one friendly tip per round the first time you run low
   if (me && s.phase === 'playing' && (me.energy ?? 1) < 0.3 && !(me.injured > 0) && energyTipRound !== s.level?.seed) { energyTipRound = s.level?.seed; toast('⚡ Running out of energy! Slow down, or stop for a second to catch your breath, before you get hurt.'); }
   renderDuel(s);
   // compact: a strip of avatar + score chips (names only where there's room); you're highlighted, leader gets a crown
-  $('scoreboard').innerHTML = [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
-    .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}" title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join('');
+  setHTML('scoreboard', [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
+    .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}" title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join(''));
   renderPrompt(s, me);
 }
 
@@ -568,15 +574,15 @@ function renderPrompt(s, me) {
       if (me.task) text = me.task.kind === 'wrap' ? '🧣 Wrapping… keep holding!' : '🔧 Disassembling… keep holding!';
     }
   }
-  $('prompt').textContent = text;
+  setText('prompt', text);
   show('prompt', !!text && !s.tutorial); // in training the Coach does the talking
   // the big button says what it will do right now
   const WORD = { 'ACTION': ['Grab', ''], 'GRAB': ['Grab', ''], 'SET DOWN': ['Drop', ''], 'DROP': ['Place', ''], 'PULL': ['Pull out', ''],
     'HOLD ↩️': ['Unload', 'hold'], 'STACK': ['Stack', ''], 'LOAD': ['Load', ''], 'LIFT': ['Lift', ''], 'STEAL': ['Steal', ''],
     'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'HOLD 🔧': ['Take apart', 'hold'] };
   const [w, sub] = WORD[action] || [action, ''];
-  if ($('action-label').textContent !== w) $('action-label').textContent = w;
-  $('action-sub').textContent = me.task ? 'keep holding' : sub;
+  if ($('action-label').textContent !== w) setText('action-label', w);
+  setText('action-sub', me.task ? 'keep holding' : sub);
 }
 
 // ---------- events ----------
@@ -786,9 +792,10 @@ function applyPrefs() {
   scene.camZoom = { close: 0.8, normal: 1, far: 1.45 }[pref('cam', 'normal')] || 1;
   scene.noShake = pref('shake', matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on') === 'off'; // reduced motion: no shake unless asked
   scene.showArrow = pref('arrow', 'on') !== 'off';
+  if (scene.quality !== pref('gfx', 'auto')) scene.setQuality(pref('gfx', 'auto'));
 }
 function syncGameMenu() {
-  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on'), arrow: pref('arrow', 'on') };
+  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on'), gfx: pref('gfx', 'auto'), arrow: pref('arrow', 'on') };
   for (const seg of document.querySelectorAll('.gm-seg')) for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === val[seg.dataset.set]));
 }
 function openGameMenu() {
@@ -962,12 +969,14 @@ $('td-menu').onclick = () => leaveToMenu(false);
 $('td-play').onclick = async () => { await leaveToMenu(); connect(null, { solo: true, difficulty: 'easy' }); };
 
 // ---------- loop ----------
-let last = performance.now();
+let last = performance.now(), lastMap = 0;
 function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   scene.frame(dt);
-  if (snap && !$('hud').classList.contains('hidden')) drawMinimap($('minimap'), scene.level, snap, myId, helpPings, scene.objectivePos());
+  const inPlay = snap && !$('hud').classList.contains('hidden');
+  if (inPlay) scene.adapt(dt);
+  if (inPlay && now - lastMap > 100) { lastMap = now; drawMinimap($('minimap'), scene.level, snap, myId, helpPings, scene.objectivePos()); } // 10 Hz is plenty
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

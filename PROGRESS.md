@@ -264,4 +264,13 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
       their crew code). Classic house/truck/world/mover/furniture drawing code deleted (models.js 247 → 40 lines)
 - [x] Test flakes fixed: solo and dolly suites now confirm the server has the new aim before trusting the preview, and wait for
       the specific piece (AI movers load things too); solo falls back to another piece when the AI has the couch
+- [x] Performance:
+  - Network: snapshots carry only the items that changed (every item once a second, on join and on a new house; clients merge with
+    shared/snap.js): 6.2 KB → 2.5 KB per update, ~125 → ~50 KB/s per player
+  - Server: route-finding precomputes stair links + floor rows, typed-array heap, reused buffers; straight-line checks only test
+    nearby walls. 4-floor tick: avg 1.8 → 0.37 ms, p95 8.2 → 1.3 ms, worst 25 → 6 ms
+  - Browser: Auto graphics (resolution steps down below ~45 fps and back up with headroom); Menu → Graphics: Auto / Sharp / Fast
+    (Fast = lowest resolution, no shadows); the shadow map follows the camera (sharper for the same cost); HUD text and scoreboard
+    only rewritten when they change (layouts 14/s → 2/s, no DOM churn); minimap redrawn at 10 Hz
+  - Caching: fingerprinted code cached a year (immutable), models and portraits a week
 

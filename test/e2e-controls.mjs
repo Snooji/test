@@ -58,11 +58,16 @@ await p.screenshot({ path: `${out}/controls-turned.png` });
 await p.mouse.click(640, 400, { button: 'middle', clickCount: 1 }); await p.mouse.click(640, 400, { button: 'middle', clickCount: 2 });
 if (await p.evaluate(() => window.__sm.scene.camYaw) !== 0) errors.push('double wheel click did not reset the camera');
 // mouse: left click grabs the box at your feet; right click in the truck places it
-const box = await p.evaluate(() => { const s = window.__sm.snap, m = s.players.find(x => x.id === window.__sm.myId); return s.items.filter(i => i.state === 'floor' && i.type === 'standard' && (i.fl || 0) === 0).sort((u, v) => Math.hypot(u.x - m.x, u.z - m.z) - Math.hypot(v.x - m.x, v.z - m.z))[0]; });
-await p.evaluate((b) => window.__sm.send('debug_tp', { x: b.x + 0.6, z: b.z }), box);
-await wait(600);
-await p.mouse.click(640, 300);
-await p.waitForFunction(() => window.__sm.snap.players.find(x => x.id === window.__sm.myId).carry, null, { timeout: 3000 }).catch(() => errors.push('left click did not pick up'));
+let picked = false;
+for (let attempt = 0; attempt < 3 && !picked; attempt++) { // an AI mover can grab the same box first: try another
+  const box = await p.evaluate((n) => { const s = window.__sm.snap, m = s.players.find(x => x.id === window.__sm.myId); return s.items.filter(i => i.state === 'floor' && i.type === 'standard' && (i.fl || 0) === 0).sort((u, v) => Math.hypot(u.x - m.x, u.z - m.z) - Math.hypot(v.x - m.x, v.z - m.z))[n]; }, attempt);
+  if (!box) break;
+  await p.evaluate((b) => window.__sm.send('debug_tp', { x: b.x + 0.6, z: b.z }), box);
+  await wait(600);
+  await p.mouse.click(640, 300);
+  picked = await p.waitForFunction(() => window.__sm.snap.players.find(x => x.id === window.__sm.myId).carry, null, { timeout: 3000 }).then(() => true).catch(() => false);
+}
+if (!picked) errors.push('left click did not pick up');
 await p.evaluate(() => window.__sm.send('debug_tp', { x: 10.6, z: 0 }));
 await p.waitForFunction(() => window.__sm.snap.players.find(x => x.id === window.__sm.myId).loadMode, null, { timeout: 5000 }).catch(() => errors.push('did not enter the truck'));
 await wait(900);

@@ -33,7 +33,8 @@ export class GameScene {
   constructor(container) {
     const mobile = matchMedia('(pointer: coarse)').matches;
     this.renderer = new THREE.WebGLRenderer({ antialias: !mobile, powerPreference: 'high-performance', stencil: true }); // stencil: movers show through walls
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2));
+    this.maxPR = Math.min(devicePixelRatio, mobile ? 1.5 : 2); this.minPR = mobile ? 0.75 : 1;
+    this.renderer.setPixelRatio(this.maxPR);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -52,8 +53,9 @@ export class GameScene {
     sun.position.set(12, 30, 14);
     sun.castShadow = true;
     sun.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048);
-    Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 20, bottom: -20, near: 1, far: 80 });
-    this.scene.add(sun);
+    // the shadow map only covers the area round the camera (it follows the player): sharper shadows for the same cost
+    Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 18, bottom: -18, near: 1, far: 80 });
+    this.sun = sun; this.scene.add(sun); this.scene.add(sun.target);
 
     this.buildWorld();
     this.players = new Map(); // id → {root, label, char, carried}
@@ -107,6 +109,27 @@ export class GameScene {
 
     addEventListener('resize', () => this.resize());
     this.resize();
+  }
+
+  /** graphics quality: 'auto' adapts resolution to the frame rate; 'high' = full resolution; 'low' = lowest resolution, no shadows */
+  setQuality(q) {
+    this.quality = q;
+    this.renderer.shadowMap.enabled = q !== 'low'; this.sun.castShadow = q !== 'low';
+    this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); // shader variants with/without shadows
+    this.setPR(q === 'low' ? this.minPR : this.maxPR);
+  }
+  setPR(pr) { pr = Math.max(this.minPR, Math.min(this.maxPR, pr)); if (Math.abs(pr - this.renderer.getPixelRatio()) < 0.01) return; this.renderer.setPixelRatio(pr); this.resize(); }
+  /** auto quality: called every frame during play; steps resolution down when frames are slow, back up when there's headroom */
+  adapt(dt) {
+    if (this.quality !== 'auto' && this.quality !== undefined) return;
+    const a = this.adaptState ||= { t: 0, n: 0, sum: 0, good: 0 };
+    a.t += dt; a.n++; a.sum += dt;
+    if (a.t < 2) return;
+    const fps = a.n / a.sum, pr = this.renderer.getPixelRatio();
+    if (fps < 45 && pr > this.minPR) { this.setPR(pr - 0.25); a.good = 0; }
+    else if (fps > 57) { if (++a.good >= 3 && pr < this.maxPR) { this.setPR(pr + 0.25); a.good = 0; } }
+    else a.good = 0;
+    a.t = 0; a.n = 0; a.sum = 0;
   }
 
   resize() {
@@ -732,6 +755,9 @@ export class GameScene {
       this.camera.position.x += (Math.random() - 0.5) * 0.5;
       this.camera.position.y += (Math.random() - 0.5) * 0.5;
     }
+    // keep the sun (and its shadow map) centred on what the camera looks at, snapped to whole metres so shadows don't shimmer
+    const fx = Math.round(this.camTarget.x), fz = Math.round(this.camTarget.z);
+    this.sun.target.position.set(fx, 0, fz); this.sun.position.set(fx + 12, 30, fz + 14);
     this.renderer.render(this.scene, this.camera);
   }
 }
