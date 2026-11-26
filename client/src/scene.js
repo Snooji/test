@@ -716,11 +716,16 @@ export class GameScene {
     if (me && snap?.phase === 'playing' && !me.out && !me.spectator && !me.loadMode) {
       let tx = null, tz = null;
       const op = this.objectivePos();
+      const fl = me.fl || 0, down = fl > 0 && this.level?.stairs?.find(st => st.b === fl - 1); // upstairs: the way down is the stairs
       if (op) { if (Math.hypot(op.x - me.x, op.z - me.z) > 1.8) { tx = op.x; tz = op.z; } }
-      else if (me.carry || (me.dolly && snap.items.find(i => i.id === me.dolly)?.stack?.length >= 3)) { tx = 11.2; tz = 0; }
+      else if (this.showArrow === false) { /* guidance arrow turned off in settings */ }
+      else if (me.carry || (me.dolly && snap.items.find(i => i.id === me.dolly)?.stack?.length >= 3)) {
+        if (down) { tx = (down.x0 + down.x1) / 2; tz = down.dir > 0 ? down.zh + 0.6 : down.zl - 0.6; } else { tx = 11.2; tz = 0; }
+      }
       else {
         let bd = Infinity;
         for (const it of snap.items) {
+          if ((it.fl || 0) !== fl) continue; // only what's on your floor
           if (it.state !== 'floor' && !(it.state === 'carried' && it.n === 1 && !it.carriers?.includes?.(me.id) && ITEM_TYPES[it.type].teamCarry)) continue;
           const d = Math.hypot(it.x - me.x, it.z - me.z);
           if (d < bd) { bd = d; tx = it.x; tz = it.z; }
@@ -730,7 +735,7 @@ export class GameScene {
       if (tx !== null) {
         const pr = this.players.get(this.myId)?.root.position;
         if (pr) {
-          this.arrowPivot.position.set(pr.x, 0, pr.z);
+          this.arrowPivot.position.set(pr.x, pr.y, pr.z);
           this.arrowPivot.rotation.y = Math.atan2(tx - pr.x, tz - pr.z) + Math.PI;
           this.arrow.position.z = -1.25;
           this.arrow.material.color.set(me.carry ? 0x55ffcc : 0xffd166);

@@ -26,7 +26,7 @@ export const ROOM_SIZES = {
   office: { len: [5, 7], dep: [6.5, 8] }, bathroom: { len: [5, 5.5], dep: [6.5, 8] }, laundry: { len: [5, 6], dep: [6.5, 8] },
   hall: { len: [10, 26], dep: [1.9, 1.9] }, passage: { len: [4, 6], dep: [6.5, 8] },
   // upstairs (multi-floor houses): the stairwell, and rooms that fit the deep front column
-  stairs: { len: [7, 7.5], dep: [6.5, 8] }, den: { len: [6, 9], dep: [6.5, 10] }, play: { len: [5, 8], dep: [6.5, 10] }, storage: { len: [4, 6], dep: [6.5, 10] },
+  stairs: { len: [7, 7.5], dep: [6.5, 8] }, garage: { len: [6, 8], dep: [8, 10] }, den: { len: [6, 9], dep: [6.5, 10] }, play: { len: [5, 8], dep: [6.5, 10] }, storage: { len: [4, 6], dep: [6.5, 10] },
 };
 /** Floors: each floor k sits in its own strip of the server's flat map, shifted FLOOR_DZ·k along z; the browser stacks them STOREY_H apart. */
 export const FLOOR_DZ = 40, STOREY_H = 2.8;
@@ -134,6 +134,9 @@ export function generateLevel(seed, opts = {}) {
   const tiny = !mansion && !exact && !multi && rng() < 0.18;                 // a small cottage: living + kitchen, bedroom straight off the living room
   const frontRoles = tiny ? ['living', 'kitchen'] : ['living', 'dining', 'kitchen'];
   if (!tiny && rng() < 0.5) frontRoles.reverse();                       // kitchen-dining-living or living-dining-kitchen
+  const garage = !tiny && rng() < 0.3;                                    // an attached garage, through the kitchen
+  if (garage) { if (frontRoles[0] === 'kitchen') frontRoles.unshift('garage'); else frontRoles.push('garage'); }
+  const openPlan = !tiny && rng() < 0.45;                                 // living and dining joined by a wide opening
   const frontLens = frontRoles.map(pickLen);
   let D = frontLens.reduce((a, b) => a + b, 0);
   // back column(s): bedrooms first, then bathroom / office / laundry, until each is as long as the front.
@@ -168,7 +171,16 @@ export function generateLevel(seed, opts = {}) {
   if (multi) { // bedrooms go upstairs; downstairs keeps the stairwell, office, bathroom and laundry
     columns.push(fillColumn(mansion ? ['stairs', 'passage', 'bathroom', 'office'] : ['stairs', 'office', 'bathroom', 'laundry'], D));
     if (mansion) columns.push(fillColumn(['den', 'laundry', 'office', 'bathroom'], D));
-  } else if (wings === 1) columns.push(fillColumn([...bedRoles, ...(tiny ? ['bathroom'] : ['bathroom', 'office', 'laundry'])], D));
+  } else if (wings === 1) {
+    // private rooms in a seeded order (a bedroom always among the first two, so there's one before the column fills up)
+    const want = tiny ? [...bedRoles, 'bathroom'] : [...bedRoles, 'bathroom', 'office', 'laundry'];
+    if (!tiny) {
+      for (let i = want.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [want[i], want[j]] = [want[j], want[i]]; }
+      const b = want.findIndex(r => r === 'main' || r === 'bedroom' || r === 'kids');
+      if (b > 1) want.unshift(...want.splice(b, 1));
+    }
+    columns.push(fillColumn(want, D));
+  }
   else {
     columns.push(fillColumn(['passage', bedRoles[0], 'bathroom', 'office'], D));
     columns.push(fillColumn([bedRoles[1], bedRoles[2], 'laundry', 'office', 'bathroom'], D));
@@ -208,13 +220,16 @@ export function generateLevel(seed, opts = {}) {
   const r1 = (v) => Math.round(v * 2) / 2;
   const wF = r1(R(...sz('living').dep));
   const z0r = Math.round(R(-1.5, 1.5) - D / 2);
-  const z0 = Math.max(-13, Math.min(13 - D, z0r)), z1 = z0 + D;
+  let z0 = Math.max(-13, Math.min(13 - D, z0r)), z1 = z0 + D;
   let rooms = [], doors = [], innerWalls = [];
   const stack = (roles, lens, xa, xb) => { let z = z0; roles.forEach((role, i) => { const zz = i === roles.length - 1 ? z1 : z + lens[i]; rooms.push({ x0: xa, x1: xb, z0: z, z1: zz, role: role === 'main' || role === 'kids' ? 'bedroom' : role, kind: role, storey: 0 }); z = zz; }); };
   const xF0 = x1 - wF;
   stack(frontRoles, frontLens, xF0, x1);
-  const addH = (xa, xb, at) => { const c = R(xa + DOOR / 2 + 0.8, xb - DOOR / 2 - 0.8); doors.push({ vertical: false, at, c }); innerWalls.push(wallH(xa, c - DOOR / 2, at), wallH(c + DOOR / 2, xb, at)); };
-  for (let i = 1; i < frontRoles.length; i++) { const r = rooms[i]; addH(r.x0, r.x1, r.z0); }
+  const addH = (xa, xb, at, w = DOOR) => { const c = R(xa + w / 2 + 0.8, xb - w / 2 - 0.8); doors.push({ vertical: false, at, c, w }); innerWalls.push(wallH(xa, c - w / 2, at), wallH(c + w / 2, xb, at)); };
+  for (let i = 1; i < frontRoles.length; i++) {
+    const r = rooms[i], pair = [rooms[i - 1].role, r.role].sort().join();
+    addH(r.x0, r.x1, r.z0, openPlan && pair === 'dining,living' ? 5 : DOOR);
+  }
   const vWall = (x, cs) => { let z = z0; for (const c of [...cs].sort((a, b) => a - b)) { innerWalls.push(wallV(x, z, c - DOOR / 2)); z = c + DOOR / 2; doors.push({ vertical: true, at: x, c }); } innerWalls.push(wallV(x, z, z1)); };
   const doorIn = (r) => R(r.z0 + DOOR / 2 + 0.8, r.z1 - DOOR / 2 - 0.8);
   const living = rooms.find(r => r.role === 'living');
@@ -248,7 +263,7 @@ export function generateLevel(seed, opts = {}) {
   }
   const W = x1 - x0;
   // front door on the living room's outer wall, facing the truck
-  const fd = Math.max(Math.max(z0, -10.5) + 2.5, Math.min(Math.min(z1, 10.5) - 2.5, R(living.z0 + 2.4, living.z1 - 2.4)));
+  let fd = Math.max(Math.max(z0, -10.5) + 2.5, Math.min(Math.min(z1, 10.5) - 2.5, R(living.z0 + 2.4, living.z1 - 2.4)));
   const houseWalls = [
     wallH(x0, x1, z0), wallH(x0, x1, z1), wallV(x0, z0, z1),
     wallV(x1, z0, fd - DOOR * 0.6), wallV(x1, fd + DOOR * 0.6, z1),
@@ -320,6 +335,17 @@ export function generateLevel(seed, opts = {}) {
     }
   }
 
+  // ---- half of all houses are mirror images (north–south), so the same pieces make a different-feeling plan ----
+  const mirrored = rng() < 0.5;
+  if (mirrored) {
+    const mz = (z) => 2 * FLOOR_DZ * Math.max(0, Math.round(z / FLOOR_DZ)) - z;   // flip within the floor's own strip
+    const flip = (o) => { const a = mz(o.z1), b = mz(o.z0); o.z0 = a; o.z1 = b; };
+    rooms.forEach(flip); houseWalls.forEach(flip);
+    for (const d of doors) { if (d.vertical) d.c = mz(d.c); else d.at = mz(d.at); }
+    for (const st of stairs) { const a = -st.zh, b = -st.zl; st.zl = a; st.zh = b; st.dir = -st.dir; }
+    [z0, z1] = [-z1, -z0]; fd = -fd;
+  }
+
   // ---- which rooms connect: every door joins the two rooms either side of it ----
   rooms.sort((a, b) => (a.x0 - b.x0) || (a.z0 - b.z0));
   rooms.forEach(r => { delete r.done; });
@@ -356,6 +382,7 @@ export function generateLevel(seed, opts = {}) {
     stairs:   { name: 'Stairs',      floor: 'wood',     wall: 0xefe2cb, skirt: 0x7a4f2c, color: 0x6e5038 },
     den:      { name: 'Family Room', floor: 'carpet3',  wall: 0xf0dcc0, skirt: 0x6b4a33, color: 0x8a5a44 },
     play:     { name: 'Playroom',    floor: 'carpet2',  wall: 0xf6e6b4, skirt: 0x9a6b2f, color: 0x6fae9e },
+    garage:   { name: 'Garage',      floor: 'concrete', wall: 0xdcd6ca, skirt: 0x5e5a52, color: 0x77736b },
     storage:  { name: 'Storage Room', floor: 'concrete', wall: 0xe2dccf, skirt: 0x6e6a5c, color: 0x8b8578 },
   };
   let bedN = 0;
@@ -374,6 +401,7 @@ export function generateLevel(seed, opts = {}) {
     house: { x0, x1, z0, z1 }, yardDistance: +(9.4 - x1).toFixed(1),
     rooms, walls: [...houseWalls, ...TRUCK_WALLS], houseWalls, props: [], items: [], cat: [],
     frontDoor: { x: x1, z: fd }, floors: nFloors, stairs,
+    variant: { mirrored, openPlan, garage },
   });
   level.doorsBetween = (a, b) => (links[rooms.indexOf(a)]?.has(rooms.indexOf(b)) ? 1 : 0);
   level.hopsFromFront = (r) => hops[rooms.indexOf(r)];
@@ -408,7 +436,7 @@ export function generateLevel(seed, opts = {}) {
     const furnCells = entries.reduce((a, [t]) => a + cellsOf(t), 0);
     const yardN = RI(1, 2);
     const nBoxes = multi ? Math.min(RI(14, 20), 56 - furnCells - yardN) : Math.max(rooms.length + 1, Math.min(RI(14, 20), 56 - furnCells - yardN));
-    const MIX = { kitchen: [0.4, 0.15, 0.45], dining: [0.45, 0.1, 0.45], office: [0.4, 0.5, 0.1], laundry: [0.5, 0.4, 0.1], bathroom: [0.6, 0.2, 0.2], bedroom: [0.6, 0.2, 0.2], living: [0.5, 0.25, 0.25] };
+    const MIX = { garage: [0.35, 0.55, 0.1], kitchen: [0.4, 0.15, 0.45], dining: [0.45, 0.1, 0.45], office: [0.4, 0.5, 0.1], laundry: [0.5, 0.4, 0.1], bathroom: [0.6, 0.2, 0.2], bedroom: [0.6, 0.2, 0.2], living: [0.5, 0.25, 0.25] };
     const boxFor = (i) => { const m = MIX[role[i]] || MIX.living, u = rng(); return u < m[0] ? 'standard' : u < m[0] + m[1] ? 'heavy' : 'fragile'; };
     const totalArea = rooms.reduce((a, r) => a + area(r), 0);
     const clearRole = (k) => k === 'hall' || k === 'stairs';
@@ -432,7 +460,8 @@ export function generateLevel(seed, opts = {}) {
   }
 
   // ---- place everything: clear of walls, doors and each other, furniture in its own room ----
-  const doorPts = [...doors.map(d => d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }), level.frontDoor];
+  const doorPts = [...doors.flatMap(d => { const p = d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }; // wide openings: keep their whole width clear
+    return d.w > DOOR ? [p, { ...p, x: p.x - (d.w / 2 - 1) }, { ...p, x: p.x + (d.w / 2 - 1) }] : [p]; }), level.frontDoor];
   const placed = [];
   const totalArea = rooms.reduce((a, r) => a + area(r), 0);
   const open = rooms.filter(r => r.role !== 'hall' && r.role !== 'stairs'), openArea = open.reduce((a, r) => a + area(r), 0);
@@ -556,6 +585,16 @@ export function levelFromSnapshot(lv) {
   const l = generateLevel(lv.seed, { exact: !!lv.exact, mansion: !!lv.mansion, floors: lv.floors || 1 });
   if (lv.daily) l.daily = lv.daily;
   return l;
+}
+
+/** House code: the seed written short (base 36), e.g. 1A2B3C. Same code + same options = the same house for anyone. */
+export const houseCode = (seed) => (seed >>> 0).toString(36).toUpperCase();
+/** Back from a typed code (case, spaces and dashes don't matter); null if it isn't one. */
+export function seedFromCode(code) {
+  const c = String(code || '').toUpperCase().replace(/[\s-]/g, '');
+  if (!/^[0-9A-Z]{1,7}$/.test(c)) return null;
+  const n = parseInt(c, 36);
+  return Number.isSafeInteger(n) && n <= 0xffffffff ? n : null;
 }
 
 /** A fresh seed for the next round. */

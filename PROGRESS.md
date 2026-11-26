@@ -205,3 +205,16 @@ AI sim on 3-floor houses loads 12–21 of ~30 in 3 min; voxel browser suites pas
       that the suit unlocks recolour, chest panel, backpack, swinging arms)
 - [x] Fixed the black square under every mover: the fade code reset the shadow to opaque each snapshot; now a soft round shadow
 - [x] Voxel surfaces: no more grid outlines
+- [x] Seeded variety: half the houses are mirrored, ~30% have a garage off the kitchen (mostly heavy boxes), ~45% open-plan
+      living/dining, private rooms in a seeded order. 50 seeds = 50 different plans on every floor count (tested)
+- [x] House codes: the lobby shows a short code (the seed in base 36); the crew chief can type one to replay or share a house.
+      Changing floors / twist / mode keeps the same seed
+- [x] House setup is a crew pick: everyone chooses floors + twist; the lobby shows everyone's picks; one human pick is drawn at
+      random when the round starts and the crew is told whose
+- [x] Guidance arrow on/off (lobby and Menu); upstairs, carrying, it points to the stairs down; only items on your floor
+- [x] Controls: WASD/arrows always move; each action has one key you can change in Menu → Controls (movement keys refused,
+      clashes swap), reset to default. Mouse: left click grab/drop, hold left wrap/take apart, right click place in the truck.
+      Controller: left stick/d-pad move, A action (hold to wrap), B dash/back, X rotate, Y help, LB/RB call out, Start menu
+- [x] Fixed: a mover in a team lift could jump ~4 m when the piece was set down next to a wall (now nudged out by centimetres)
+Verified: 201 unit tests; voxel e2e: menu, solo, controls (rebind, fake controller, mouse grab + right-click place, arrow, codes)
+

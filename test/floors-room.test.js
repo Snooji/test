@@ -142,3 +142,22 @@ test('the crew chief picks 1–4 floors in the lobby; the house is rebuilt and t
   handlers.floors({ sessionId: 'B' }, { floors: 1 });
   assert.equal(room.level.floors, 3, 'only the crew chief');
 });
+
+test('everyone picks a house setup; the round draws one human pick at random and says whose', () => {
+  const outcomes = new Set();
+  for (const r of [0.01, 0.99]) {
+    const { room, join, handlers } = makeRoom({ seed: 8 });
+    join('A', 'Ada'); join('B', 'Bo'); room.addBot();
+    room.hostId = 'A';
+    handlers.floors({ sessionId: 'A' }, { floors: 2 });
+    handlers.floors({ sessionId: 'B' }, { floors: 4 }); handlers.twist({ sessionId: 'B' }, { twist: 'mansion' });
+    assert.equal(room.level.floors, 2, 'the lobby shows the crew chief\'s pick');
+    assert.deepEqual(room.snapshot().players.find(p => p.id === 'B').setup, { floors: 4, twist: 'mansion' }, 'Bo\'s pick is visible');
+    const events = []; room.event = (e) => events.push(e);
+    const rnd = Math.random; Math.random = () => r;
+    try { room.startRound(); } finally { Math.random = rnd; }
+    outcomes.add(`${room.level.floors}/${room.twist}`);
+    assert.ok(events.some(e => e.kind === 'toast' && /House setup drawn from 2 picks/.test(e.text)), 'everyone is told');
+  }
+  assert.deepEqual([...outcomes].sort(), ['2/none', '4/mansion']);
+});

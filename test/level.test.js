@@ -20,10 +20,10 @@ test('different seeds build different houses: size, rooms and yard distance vary
   assert.ok(Math.max(...gaps) - Math.min(...gaps) >= 5, 'distance to the truck varies');
 });
 
-test('every generated house has 3–8 rooms and stays clear of the truck', () => {
+test('every generated house has 3–9 rooms and stays clear of the truck', () => {
   for (const s of SEEDS) {
     const l = generateLevel(s);
-    assert.ok(l.rooms.length >= 3 && l.rooms.length <= 8, `seed ${s}: ${l.rooms.length} rooms`);
+    assert.ok(l.rooms.length >= 3 && l.rooms.length <= 9, `seed ${s}: ${l.rooms.length} rooms`);
     assert.ok(l.house.x1 <= 3, `seed ${s}: house overlaps yard`);
     assert.ok(l.house.z0 >= -14 && l.house.z1 <= 14, `seed ${s}: house out of bounds`);
   }

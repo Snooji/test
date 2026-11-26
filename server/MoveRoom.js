@@ -2,7 +2,7 @@ import { Room, ServerError } from 'colyseus';
 import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
 import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
-import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel } from '../shared/level.js';
+import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel, houseCode, seedFromCode } from '../shared/level.js';
 import { createNav } from './nav.js';
 import { verifyToken, cleanName, cleanEmail } from './signups.js';
 
@@ -97,7 +97,7 @@ export class MoveRoom extends Room {
       if (c.sessionId !== this.hostId || !RULES.MODES[m?.mode] || this.inRound()) return;
       const wasExact = this.isExact();
       this.mode = m.mode;
-      if (this.isExact() !== wasExact && !this.classic) { this.newLevel(); this.resetWorld(); } // Full load needs an exact-fill house
+      if (this.isExact() !== wasExact && !this.classic) { this.newLevel(false); this.resetWorld(); } // Full load needs an exact-fill house (same seed)
     });
     this.onMessage('start', (c) => {
       if (c.sessionId !== this.hostId || this.inRound()) return;
@@ -114,6 +114,12 @@ export class MoveRoom extends Room {
     });
     this.onMessage('lobby', (c) => {
       if (c.sessionId === this.hostId && this.phase === 'results') { this.phase = 'lobby'; this.newLevel(); this.resetWorld(); }
+    });
+    // a house code typed by the crew chief: that exact house (same code + same options = same house for anyone)
+    this.onMessage('seed', (c, m) => {
+      const seed = seedFromCode(String(m?.code ?? ''));
+      if (!hostInLobby(c) || seed === null || this.daily || this.tutorialMode || this.classic) return;
+      this.seedOverride = seed; this.newLevel(); this.resetWorld();
     });
     this.onMessage('reroll', (c) => {
       if (c.sessionId === this.hostId && this.phase === 'lobby' && !this.classic) { this.newLevel(); this.resetWorld(); }
@@ -152,16 +158,22 @@ export class MoveRoom extends Room {
       const humans = [...this.players.values()].filter(o => !o.bot);
       if (humans.length && humans.every(o => o.ready)) { this.newLevel(); this.startRound(); }
     });
+    // House setup (floors + twist): everyone picks; the crew chief's pick is what the lobby shows, and when the round
+    // starts one human's pick is drawn at random (drawSetup).
+    const vote = (c, patch) => {
+      const p = this.players.get(c.sessionId);
+      if (!p || p.bot || (this.phase !== 'lobby' && this.phase !== 'results') || this.daily || this.tutorialMode) return false;
+      p.setup = { floors: p.setup?.floors ?? (c.sessionId === this.hostId ? this.floors : 1), twist: p.setup?.twist ?? (c.sessionId === this.hostId ? this.twist : 'none'), ...patch };
+      return c.sessionId === this.hostId;
+    };
     this.onMessage('twist', (c, m) => {
-      if (!hostInLobby(c) || !['none', 'zerog', 'mansion'].includes(m?.twist) || this.daily || this.tutorialMode) return;
-      const was = this.twist; this.twist = m.twist;
-      if ((was === 'mansion') !== (this.twist === 'mansion') && !this.classic) { this.newLevel(); this.resetWorld(); }
-      else this.level.twist = this.twist;
+      if (!['none', 'zerog', 'mansion'].includes(m?.twist) || !vote(c, { twist: m.twist })) return;
+      this.applySetup({ floors: this.floors, twist: m.twist });
     });
     this.onMessage('floors', (c, m) => {
       const n = Math.round(Number(m?.floors));
-      if (!hostInLobby(c) || !(n >= 1 && n <= 4) || this.daily || this.tutorialMode || this.classic || n === this.floors) return;
-      this.floors = n; this.newLevel(); this.resetWorld();
+      if (!(n >= 1 && n <= 4) || this.classic || !vote(c, { floors: n })) return;
+      this.applySetup({ floors: n, twist: this.twist });
     });
     this.onMessage('suit', (c, m) => {
       const p = this.players.get(c.sessionId);
@@ -190,7 +202,7 @@ export class MoveRoom extends Room {
       if (!hostInLobby(c) || !['classic', 'sabotage'].includes(m?.game)) return;
       const wasExact = this.isExact();
       this.game = m.game;
-      if (this.isExact() !== wasExact && !this.classic) { this.newLevel(); this.resetWorld(); }
+      if (this.isExact() !== wasExact && !this.classic) { this.newLevel(false); this.resetWorld(); }
     });
     this.onMessage('removeBot', (c) => {
       if (!hostInLobby(c)) return;
@@ -329,10 +341,11 @@ export class MoveRoom extends Room {
   }
 
   // ---------- world ----------
-  newLevel() {
+  /** fresh = a new random house; false = same seed with the current options (floors, twist, mode changed) */
+  newLevel(fresh = true) {
     this.level = this.tutorialMode ? tutorialLevel()
       : this.classic ? classicLevel()
-      : generateLevel(this.seedOverride ?? newSeed(), { exact: this.isExact(), mansion: this.twist === 'mansion', floors: this.floors });
+      : generateLevel(this.seedOverride ?? (!fresh && this.level?.seed !== undefined && !this.level.classic && !this.level.tutorial ? this.level.seed : newSeed()), { exact: this.isExact(), mansion: this.twist === 'mansion', floors: this.floors });
     if (this.daily) this.level.daily = this.daily; else this.seedOverride = null;
     this.level.twist = this.twist;
     this.nav = createNav(this.level);
@@ -374,7 +387,29 @@ export class MoveRoom extends Room {
     p.x = s.x; p.z = s.z; p.face = Math.PI;
   }
 
+  /** Switch to a house setup, keeping the same seed (so a typed house code still holds). */
+  applySetup({ floors, twist }) {
+    const rebuild = !this.classic && (floors !== this.floors || (twist === 'mansion') !== (this.twist === 'mansion'));
+    this.floors = floors; this.twist = twist;
+    if (rebuild) this.newLevel(false); else this.level.twist = twist;
+    return rebuild;
+  }
+
+  /** Round start: draw one human's house-setup pick at random (the crew chief's current one if they didn't pick). */
+  drawSetup() {
+    if (this.daily || this.tutorialMode || this.classic) return;
+    const humans = [...this.players.values()].filter(p => !p.bot && !p.spectator);
+    const picks = humans.map(p => ({ p, s: p.setup || (p.id === this.hostId ? { floors: this.floors, twist: this.twist } : null) })).filter(x => x.s);
+    if (picks.length < 2 || picks.every(x => x.s.floors === picks[0].s.floors && x.s.twist === picks[0].s.twist)) return;
+    const { p, s } = picks[Math.floor(Math.random() * picks.length)];
+    this.applySetup(s);
+    const tw = { none: 'no twist', zerog: 'Zero-G', mansion: 'Moon Mansion' }[s.twist];
+    this.lastDraw = { name: p.name, floors: s.floors, twist: s.twist };
+    this.event({ kind: 'toast', text: `🎲 House setup drawn from ${picks.length} picks: ${p.name}'s (${s.floors} floor${s.floors > 1 ? 's' : ''}, ${tw}).` });
+  }
+
   startRound() {
+    if (this.phase === 'lobby' || this.phase === 'results') this.drawSetup();
     this.resetWorld();
     let i = 0;
     for (const p of this.players.values()) {
@@ -905,13 +940,28 @@ export class MoveRoom extends Room {
       const o = this.players.get(id);
       if (!o) continue;
       o.carry = null; o.loadMode = false;
-      // team-carry positions ignore walls; never leave a mover embedded in one
-      if (this.level.hitsWall(o.x, o.z, R)) { o.x = item.x; o.z = item.z; }
+      // carriers may brush a wall (they slide at 0.8 R): step them out by the overlap; only someone truly inside a wall goes to the piece
+      if (this.level.hitsWall(o.x, o.z, R)) this.pushOutOfWalls(o);
+      if (this.level.hitsWall(o.x, o.z, R * 0.8)) { o.x = item.x; o.z = item.z; }
     }
     item.carriers = [];
     item.state = 'floor';
     // never drop inside a wall or on the ramp
     if (this.level.hitsWall(item.x, item.z, 0.3) || inRamp(item.x, item.z)) { item.x = p.x - 1; item.z = p.z; }
+  }
+
+  /** Nudge a mover out of any wall it overlaps by a few centimetres (a small step, never a jump). */
+  pushOutOfWalls(o) {
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (const w of this.level.walls) {
+        const cx = Math.max(w.x0, Math.min(o.x, w.x1)), cz = Math.max(w.z0, Math.min(o.z, w.z1));
+        const dx = o.x - cx, dz = o.z - cz, d = Math.hypot(dx, dz);
+        if (d >= R || d < 1e-6) continue;
+        const push = R - d + 0.01; o.x += dx / d * push; o.z += dz / d * push; moved = true;
+      }
+      if (!moved) return;
+    }
   }
 
   /** What a mover is hauling right now, for the energy meter: [drain key, top speed multiplier for that load]. */
@@ -1439,7 +1489,7 @@ export class MoveRoom extends Room {
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
       out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dolly: p.dolly || null, flatDolly: p.flatDolly || null, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0, energy: +(p.energy ?? 1).toFixed(2), injured: +(p.injuredT || 0).toFixed(1),
-      room: this.level.roomAt(p.x, p.z), bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
+      room: this.level.roomAt(p.x, p.z), setup: p.setup || null, bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
       id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
@@ -1456,7 +1506,7 @@ export class MoveRoom extends Room {
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
       floors: this.floors,
-      level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
+      level: { seed: this.level.seed, code: this.level.classic || this.level.tutorial ? null : houseCode(this.level.seed), classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,

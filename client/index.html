@@ -162,8 +162,14 @@
         <li><span>Sound effects</span><div class="gm-seg" data-set="sound" role="group" aria-label="Sound effects"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
         <li><span>Music</span><div class="gm-seg" data-set="music" role="group" aria-label="Music"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
         <li><span>Camera</span><div class="gm-seg" data-set="cam" role="group" aria-label="Camera distance"><button data-v="close">Close</button><button data-v="normal">Normal</button><button data-v="far">Far</button></div></li>
+        <li><span>Guidance arrow</span><div class="gm-seg" data-set="arrow" role="group" aria-label="Guidance arrow"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
         <li><span>Screen shake</span><div class="gm-seg" data-set="shake" role="group" aria-label="Screen shake"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
       </ul>
+      <h3>Controls</h3>
+      <p class="gm-note">Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrow keys (or a controller's left stick). Pick any other key for each action. Mouse: left click grabs or drops, hold left to wrap or take apart, right click places in the truck.</p>
+      <ul class="gm-list" id="gm-keys"></ul>
+      <p class="gm-note" id="gm-keynote" aria-live="polite"></p>
+      <button class="gm-btn" id="gm-keys-reset">Reset keys to default</button>
       <button class="gm-btn gm-quit" id="gm-quit">Quit to main menu</button>
       <div class="gm-confirm hidden" id="gm-confirm" role="alertdialog" aria-labelledby="gm-confirm-text">
         <p id="gm-confirm-text">Leave this game? Your crew keeps playing without you, and this round won't count for you.</p>
@@ -195,12 +201,15 @@
         <button data-mode="load">🧩 Full load</button>
       </div>
       <div class="house-row"><span id="lobby-house"></span><button class="ghost small" id="btn-reroll">🎲 New house</button></div>
+      <form class="code-row" id="code-form"><label for="code-input">House code <b id="house-code"></b></label><input id="code-input" maxlength="9" autocomplete="off" spellcheck="false" placeholder="Type a code" /><button class="ghost small" type="submit">Use code</button></form>
+      <div class="lobby-pref"><span>Guidance arrow <small>points to the nearest piece, then the truck</small></span><div class="gm-seg" data-set="arrow" role="group" aria-label="Guidance arrow"><button data-v="on">On</button><button data-v="off">Off</button></div></div>
       <div id="twist-controls">
         <h3>House twist</h3>
         <div class="modes" id="twists">
           <button data-twist="none">🏠 Normal</button><button data-twist="zerog">🪐 Zero-G</button><button data-twist="mansion">🏰 Moon Mansion</button>
         </div>
       </div>
+      <p class="setup-note" id="setup-note"></p>
       <div id="floor-controls">
         <h3>Floors <small>more floors, more stairs, +30 s per extra floor</small></h3>
         <div class="modes" id="floors">

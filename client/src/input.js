@@ -1,38 +1,88 @@
-// Keyboard + touch controls → {mx, mz, hold, tapN, dashN, rotN}
+// Keyboard, touch and controller → {mx, mz, hold, tapN, dashN, rotN}
+// Movement is always W A S D (or the arrow keys, or a stick). Every action has its own key, changeable in Menu → Controls;
+// movement keys can't be given to an action.
 const HOLD_MS = 250;
 
+export const MOVE_CODES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+export const ACTIONS = [
+  { id: 'action',  label: 'Grab / drop (hold: wrap, take apart)', def: 'KeyE' },
+  { id: 'dash',    label: 'Dash (in the truck: back out)',        def: 'ShiftLeft' },
+  { id: 'rotate',  label: 'Rotate / flip',                        def: 'KeyR' },
+  { id: 'help',    label: 'Call for help',                        def: 'KeyH' },
+  { id: 'callout', label: 'Call out a crunch',                    def: 'KeyQ' },
+  { id: 'chat',    label: 'Chat',                                 def: 'Enter' },
+];
+const RESERVED = [...MOVE_CODES, 'Escape', 'Tab', 'MetaLeft', 'MetaRight'];
+/** controller (standard mapping) */
+export const PAD = { action: 0, dash: 1, rotate: 2, help: 3, calloutL: 4, calloutR: 5, menu: 9 };
+export const PAD_LABEL = { action: 'A', dash: 'B', rotate: 'X', help: 'Y', callout: 'LB / RB', chat: '', menu: 'Start' };
+
+/** "KeyE" → "E", "ShiftLeft" → "Shift", "Space" → "Space" */
+export function keyName(code) {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (/^(Shift|Control|Alt)(Left|Right)$/.test(code)) return code.replace(/(Left|Right)$/, '').replace('Control', 'Ctrl');
+  return { Space: 'Space', Enter: 'Enter', Backquote: '`', Slash: '/', Period: '.', Comma: ',', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']', Backslash: '\\', Minus: '-', Equal: '=' }[code] || code;
+}
+
+function loadBinds() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('sm_keys') || '{}') || {}; } catch {}
+  const b = {};
+  for (const a of ACTIONS) b[a.id] = typeof saved[a.id] === 'string' && !RESERVED.includes(saved[a.id]) ? saved[a.id] : a.def;
+  return b;
+}
+
 export class Input {
-  constructor({ onCallout, onChatKey, onHelp }) {
+  constructor({ onCallout, onChatKey, onHelp, onMenu, onPad }) {
     this.s = { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 };
     this.keys = new Set();
     this.joy = { x: 0, z: 0 };
+    this.pad = { x: 0, z: 0, prev: [], connected: false };
     this.enabled = true;
-    this.onCallout = onCallout;
-    this.onChatKey = onChatKey;
-    this.onHelp = onHelp;
+    Object.assign(this, { onCallout, onChatKey, onHelp, onMenu, onPad });
     this.actDown = 0; this.actTimer = null;
+    this.binds = loadBinds();
+    this.capture = null; // waiting for a key to bind (Menu → Controls)
 
     addEventListener('keydown', (e) => {
+      if (this.capture) { e.preventDefault(); e.stopImmediatePropagation(); this.capture(e.code); return; }
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      const k = e.key.toLowerCase();
-      if (e.repeat) { if (['e', ' '].includes(k)) e.preventDefault(); return; }
-      if (k === 'enter') { this.onChatKey?.(); return; }
+      const a = this.actionFor(e.code), mash = e.code === 'Space';
+      if (e.repeat) { if (a === 'action' || mash) e.preventDefault(); return; }
+      if (a === 'chat') { this.onChatKey?.(); return; }
       if (!this.enabled) return;
-      this.keys.add(k);
-      if (k === 'e' || k === ' ') { e.preventDefault(); this.actionDown(); }
-      if (k === 'shift') this.s.dashN++;
-      if (k === 'r') this.s.rotN++;
-      if (k === 'q' || k === 'c') this.onCallout?.();
-      if (k === 'h') this.onHelp?.();
+      this.keys.add(e.code);
+      if (a === 'action' || mash) { e.preventDefault(); this.actionDown(); }
+      if (a === 'dash') this.s.dashN++;
+      if (a === 'rotate') this.s.rotN++;
+      if (a === 'callout') this.onCallout?.();
+      if (a === 'help') this.onHelp?.();
     });
     addEventListener('keyup', (e) => {
-      const k = e.key.toLowerCase();
-      this.keys.delete(k);
-      if (k === 'e' || k === ' ') this.actionUp();
+      this.keys.delete(e.code);
+      if (this.actionFor(e.code) === 'action' || e.code === 'Space') this.actionUp();
     });
     addEventListener('blur', () => { this.keys.clear(); this.actionUp(true); });
+    addEventListener('gamepadconnected', () => { this.pad.connected = true; this.onPad?.(true); this.pollPad(); });
+    addEventListener('gamepaddisconnected', () => { this.pad.connected = !!this.firstPad(); if (!this.pad.connected) { this.pad.x = this.pad.z = 0; this.onPad?.(false); } });
     this.setupTouch();
   }
+
+  actionFor(code) { for (const [id, c] of Object.entries(this.binds)) if (c === code) return id; return null; }
+  isAction(code, id) { return this.binds[id] === code || (id === 'action' && code === 'Space'); }
+
+  /** Give an action a new key. Movement keys and Escape stay as they are; taking a key from another action swaps them. */
+  rebind(id, code) {
+    if (RESERVED.includes(code)) return { ok: false, why: MOVE_CODES.includes(code) ? 'W A S D and the arrow keys are for moving. Pick another key.' : 'Esc opens the menu. Pick another key.' };
+    const other = this.actionFor(code);
+    if (other && other !== id) this.binds[other] = this.binds[id];
+    this.binds[id] = code;
+    try { localStorage.setItem('sm_keys', JSON.stringify(this.binds)); } catch {}
+    return { ok: true, swapped: other && other !== id ? other : null };
+  }
+  resetBinds() { for (const a of ACTIONS) this.binds[a.id] = a.def; try { localStorage.removeItem('sm_keys'); } catch {} }
 
   actionDown() {
     if (this.actDown) return;
@@ -46,6 +96,37 @@ export class Input {
     this.s.hold = false;
     this.actDown = 0;
   }
+
+  // ---------- controller (Gamepad API, standard mapping) ----------
+  firstPad() { return [...(navigator.getGamepads?.() || [])].find(p => p && p.connected) || null; }
+  pollPad() {
+    if (this.padLoop) return;
+    const step = () => {
+      const gp = this.firstPad();
+      if (!gp) { this.padLoop = null; this.pad.x = this.pad.z = 0; return; }
+      const dead = (v) => (Math.abs(v) < 0.25 ? 0 : (v - Math.sign(v) * 0.25) / 0.75);
+      let x = dead(gp.axes[0] || 0), z = dead(gp.axes[1] || 0);
+      const b = (i) => !!gp.buttons[i]?.pressed;
+      if (b(14)) x = -1; if (b(15)) x = 1; if (b(12)) z = -1; if (b(13)) z = 1; // d-pad
+      this.pad.x = x; this.pad.z = z;
+      const was = (i) => !!this.pad.prev[i], edge = (i) => b(i) && !was(i);
+      if (edge(PAD.menu)) this.onMenu?.();
+      if (this.mash) { if (edge(PAD.action)) this.mash(); } // tap battle: A mashes
+      else if (this.enabled) {
+        if (edge(PAD.action)) this.actionDown();
+        if (!b(PAD.action) && was(PAD.action)) this.actionUp();
+        if (edge(PAD.dash)) this.s.dashN++;
+        if (edge(PAD.rotate)) this.s.rotN++;
+        if (edge(PAD.help)) this.onHelp?.();
+        if (edge(PAD.calloutL) || edge(PAD.calloutR)) this.onCallout?.();
+      } else if (was(PAD.action)) this.actionUp(true);
+      this.pad.prev = gp.buttons.map(x => x.pressed);
+      this.padLoop = requestAnimationFrame(step);
+    };
+    this.padLoop = requestAnimationFrame(step);
+  }
+  /** A pressed this frame on the controller (for the tap battle) */
+  padPressed(i) { return !!this.firstPad()?.buttons[i]?.pressed; }
 
   setupTouch() {
     const zone = document.getElementById('joyzone');
@@ -89,13 +170,13 @@ export class Input {
   }
 
   read() {
-    let mx = this.joy.x, mz = this.joy.z;
+    let mx = this.joy.x + this.pad.x, mz = this.joy.z + this.pad.z;
     if (this.enabled) {
       const k = this.keys;
-      if (k.has('a') || k.has('arrowleft')) mx -= 1;
-      if (k.has('d') || k.has('arrowright')) mx += 1;
-      if (k.has('w') || k.has('arrowup')) mz -= 1;
-      if (k.has('s') || k.has('arrowdown')) mz += 1;
+      if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
+      if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
+      if (k.has('KeyW') || k.has('ArrowUp')) mz -= 1;
+      if (k.has('KeyS') || k.has('ArrowDown')) mz += 1;
     } else { mx = 0; mz = 0; }
     const l = Math.hypot(mx, mz);
     if (l > 1) { mx /= l; mz /= l; }

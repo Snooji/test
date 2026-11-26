@@ -1,6 +1,6 @@
 import { Client } from 'colyseus.js';
 import { GameScene } from './scene.js';
-import { Input } from './input.js';
+import { Input, ACTIONS, keyName, PAD_LABEL } from './input.js';
 import { PORTRAITS, CHARACTERS, portrait, charInfo, CREW_ORDER, setPortrait } from './portraits.js';
 import { renderClassicPortraits } from './voxel.js';
 import { charUnlocked, unlockText, unlockProgress } from '../../shared/roster.js';
@@ -50,7 +50,11 @@ addEventListener('unhandledrejection', (e) => reportError(e.reason?.message || e
 track('visit');
 
 const scene = new GameScene($('app'));
-const input = new Input({ onCallout: () => room?.send('callout'), onChatKey: () => focusChat(), onHelp: () => room?.send('help') });
+const input = new Input({
+  onCallout: () => room?.send('callout'), onChatKey: () => focusChat(), onHelp: () => room?.send('help'),
+  onMenu: () => { if (!$('hud').classList.contains('hidden')) (menuOpen ? closeGameMenu() : openGameMenu()); },
+  onPad: (on) => { renderKeyHelp(); toast(on ? '🎮 Controller connected: left stick moves, A grab/drop (hold to wrap), B dash, X rotate, Y help, LB/RB call out, Start menu.' : '🎮 Controller disconnected.'); },
+});
 
 // ---------- gate ----------
 $('gate-crew').innerHTML = Object.keys(PORTRAITS).map(k => portrait(k)).join('');
@@ -123,6 +127,7 @@ let myDuel = null;
 function renderDuel(s) {
   const d = (s.duels || []).find(x => x.a === myId || x.b === myId);
   myDuel = d ? d.item : null;
+  input.mash = myDuel ? duelTap : null; // controller A mashes too
   show('duel', !!d);
   if (!d) return;
   const pa = s.players.find(p => p.id === d.a), pb = s.players.find(p => p.id === d.b);
@@ -135,8 +140,8 @@ function renderDuel(s) {
 }
 const duelTap = () => { if (!myDuel || !room) return; room.send('duelTap'); const b = $('duel-btn'); b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 60); sfx('blip'); };
 document.getElementById('duel-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); duelTap(); });
-addEventListener('keydown', (e) => { // E / Space mash during a battle (and don't count as the normal action)
-  if (!myDuel || e.repeat || !['e', ' '].includes(e.key.toLowerCase())) return;
+addEventListener('keydown', (e) => { // action key / Space mash during a battle (and don't count as the normal action)
+  if (!myDuel || e.repeat || !input.isAction(e.code, 'action')) return;
   e.preventDefault(); e.stopImmediatePropagation(); duelTap();
 }, true);
 // iOS Safari ignores user-scalable=no: block pinch-zoom gestures and double-tap zoom explicitly
@@ -301,7 +306,8 @@ function renderLobby(s, me) {
   const link = `${location.origin}${location.pathname}?room=${room.roomId}`;
   if ($('share-link').value !== link) $('share-link').value = link;
   const host = s.hostId === myId;
-  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors]);
+  const lv = s.level;
+  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready, p.setup]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
   if (VOXEL) renderCrewCarousel(s); else $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
@@ -311,8 +317,19 @@ function renderLobby(s, me) {
   }).join('');
   for (const b of $('modes').children) { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = !host; }
   for (const b of $('games').children) { b.classList.toggle('on', b.dataset.game === s.game); b.disabled = !host; }
-  for (const b of $('twists').children) { b.classList.toggle('on', b.dataset.twist === s.twist); b.disabled = !host || !!s.daily; }
-  for (const b of $('floors').children) { b.classList.toggle('on', Number(b.dataset.floors) === (s.level?.floors || 1)); b.disabled = !host || !!s.daily || !!s.level?.classic; }
+  // house setup: everyone picks (your pick is highlighted); the crew chief's pick is the house shown; one pick is drawn at start
+  const mine = me?.setup || (host ? { floors: s.level?.floors || 1, twist: s.twist } : null);
+  for (const b of $('twists').children) { b.classList.toggle('on', b.dataset.twist === mine?.twist); b.disabled = !me || me.bot || !!s.daily; }
+  for (const b of $('floors').children) { b.classList.toggle('on', Number(b.dataset.floors) === mine?.floors); b.disabled = !me || !!s.daily || !!s.level?.classic; }
+  const TW = { none: 'no twist', zerog: 'Zero-G', mansion: 'Moon Mansion' };
+  const picks = s.players.filter(p => !p.bot && !p.spectator).map(p => ({ p, x: p.setup || (p.id === s.hostId ? { floors: s.level?.floors || 1, twist: s.twist } : null) })).filter(o => o.x);
+  $('setup-note').innerHTML = s.daily ? '' : picks.length > 1
+    ? `House setup picks: ${picks.map(o => `<b>${esc(o.p.name)}</b> ${o.x.floors} floor${o.x.floors > 1 ? 's' : ''}, ${TW[o.x.twist]}`).join(' · ')}. One pick is drawn at random when the round starts.`
+    : 'Pick floors and a twist. With friends, everyone picks and one pick is drawn at random when the round starts.';
+  $('house-code').textContent = lv?.code || '';
+  show('code-form', !!lv?.code && !s.daily);
+  $('code-input').disabled = !host; $('code-form').querySelector('button').disabled = !host;
+  $('code-input').placeholder = host ? 'Type a code' : 'Crew chief only';
   const mySuit = me?.suit || 'classic';
   $('suits').innerHTML = SUITS.map(x => {
     const open = suitUnlocked(x.id, myProfile);
@@ -332,7 +349,6 @@ function renderLobby(s, me) {
   show('btn-ready-lobby', !host && !!me && !me.spectator);
   $('btn-ready-lobby').classList.toggle('on', meReadyL);
   $('btn-ready-lobby').textContent = meReadyL ? '✅ Ready! (tap to undo)' : '✋ I\'m ready';
-  const lv = s.level;
   $('lobby-house').innerHTML = lv ? `🏠 <b>${esc(lv.name)}</b> · ${lv.rooms} rooms${(lv.floors || 1) > 1 ? ` on ${lv.floors} floors` : ''} · ${Math.round(lv.yard)} m to the truck` : '';
   show('btn-reroll', host && lv && !lv.classic);
   show('bot-controls', host || bots.length > 0);
@@ -384,6 +400,7 @@ $('chars').addEventListener('click', (e) => {
   try { localStorage.setItem('sm_char', b.dataset.char); } catch {}
   sfx('blip');
 });
+$('code-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('code-input').value.trim(); if (v && room) { room.send('seed', { code: v }); $('code-input').value = ''; } });
 $('floors').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('floors', { floors: Number(b.dataset.floors) }); });
 $('twists').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('twist', { twist: b.dataset.twist }); });
 $('suits').addEventListener('click', (e) => {
@@ -750,9 +767,10 @@ const savePref = (k, v) => { try { localStorage.setItem('sm_' + k, v); } catch {
 function applyPrefs() {
   scene.camZoom = { close: 0.8, normal: 1, far: 1.45 }[pref('cam', 'normal')] || 1;
   scene.noShake = pref('shake', 'on') === 'off';
+  scene.showArrow = pref('arrow', 'on') !== 'off';
 }
 function syncGameMenu() {
-  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', 'on') };
+  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', 'on'), arrow: pref('arrow', 'on') };
   for (const seg of document.querySelectorAll('.gm-seg')) for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === val[seg.dataset.set]));
 }
 function openGameMenu() {
@@ -764,6 +782,7 @@ function openGameMenu() {
 }
 function closeGameMenu() {
   if (!menuOpen) return;
+  input.capture = null;
   menuOpen = false; input.enabled = snap?.phase !== 'meeting';
   show('game-menu', false);
   $('hud-menu').setAttribute('aria-expanded', 'false');
@@ -783,12 +802,40 @@ $('gm-quit').onclick = () => { show('gm-confirm'); $('gm-quit-no').focus(); };
 $('gm-quit-no').onclick = () => { show('gm-confirm', false); $('gm-quit').focus(); };
 $('gm-quit-yes').onclick = () => leaveToMenu(false);
 addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || $('hud').classList.contains('hidden')) return;
+  if (e.key !== 'Escape' || $('hud').classList.contains('hidden') || input.capture) return;
   if (document.activeElement?.tagName === 'INPUT') return; // chat box handles its own Escape
   e.preventDefault();
   menuOpen ? closeGameMenu() : openGameMenu();
 });
-applyPrefs();
+applyPrefs(); syncGameMenu();
+
+// ---------- controls: keyboard keys (movement is always W A S D / arrows) + controller ----------
+function renderKeyHelp() {
+  const k = (id) => `<kbd>${esc(keyName(input.binds[id]))}</kbd>`;
+  $('keyhelp').innerHTML = input.pad.connected
+    ? '🎮 Left stick move · <kbd>A</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>B</kbd> dash/back · <kbd>X</kbd> rotate/flip · <kbd>Y</kbd> call for help · <kbd>LB</kbd>/<kbd>RB</kbd> call out · <kbd>Start</kbd> menu'
+    : `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · ${k('action')} or <kbd>Left click</kbd> grab/drop, hold = wrap/disassemble · <kbd>Right click</kbd> place in truck · ${k('dash')} dash/back · ${k('rotate')} rotate/flip · ${k('help')} call for help · ${k('callout')} call out · ${k('chat')} chat · <kbd>Esc</kbd> menu`;
+  $('hud-callout').innerHTML = `📣 CALL OUT <kbd>${esc(keyName(input.binds.callout))}</kbd>`;
+  $('hud-help').innerHTML = `🆘 NEED A HAND <kbd>${esc(keyName(input.binds.help))}</kbd>`;
+  $('gm-keys').innerHTML = ACTIONS.map(a => `<li><span>${a.label}</span><span class="gm-key"><kbd>${esc(keyName(input.binds[a.id]))}</kbd>${PAD_LABEL[a.id] ? `<small>🎮 ${PAD_LABEL[a.id]}</small>` : ''}<button class="gm-change" data-act="${a.id}">Change</button></span></li>`).join('');
+}
+$('gm-keys').addEventListener('click', (e) => {
+  const b = e.target.closest('.gm-change'); if (!b) return;
+  const id = b.dataset.act;
+  b.textContent = 'Press a key…'; b.setAttribute('aria-pressed', 'true');
+  $('gm-keynote').textContent = 'Press the key you want (Esc to cancel).';
+  input.capture = (code) => {
+    if (code === 'Escape') { input.capture = null; $('gm-keynote').textContent = 'Kept the old key.'; renderKeyHelp(); return; }
+    const r = input.rebind(id, code);
+    if (!r.ok) { $('gm-keynote').textContent = r.why; return; } // keep listening
+    input.capture = null;
+    const lbl = ACTIONS.find(a => a.id === id).label;
+    $('gm-keynote').textContent = r.swapped ? `${lbl}: ${keyName(code)}. ${ACTIONS.find(a => a.id === r.swapped).label} moved to ${keyName(input.binds[r.swapped])}.` : `${lbl}: ${keyName(code)}.`;
+    renderKeyHelp();
+  };
+});
+$('gm-keys-reset').onclick = () => { input.resetBinds(); input.capture = null; $('gm-keynote').textContent = 'Keys back to the defaults.'; renderKeyHelp(); };
+renderKeyHelp();
 const answerFeedback = (v) => {
   if (v) { track(v); toast(v === 'feedback_up' ? '🙌 Thanks! Noted.' : '🙏 Thanks for the honesty!'); }
   try { localStorage.setItem('sm_fb_day', todayUTC()); } catch {}
@@ -836,6 +883,18 @@ function dragAim(e) {
 }
 scene.renderer.domElement.addEventListener('pointerdown', dragAim);
 scene.renderer.domElement.addEventListener('pointermove', dragAim);
+// mouse: left click = grab/drop, hold left = wrap / take apart; right click = place in the truck (or the same action anywhere)
+let mouseAct = false;
+const mouseInPlay = () => room && !menuOpen && input.enabled && !$('hud').classList.contains('hidden') && snap?.phase === 'playing';
+scene.renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse' || !mouseInPlay()) return;
+  const me = meNow();
+  if (myDuel && (e.button === 0 || e.button === 2)) { duelTap(); return; }
+  if (e.button === 0 && !me?.loadMode) { mouseAct = true; input.actionDown(); }
+  else if (e.button === 2) { if (me?.loadMode) dragAim(e); input.s.tapN++; }
+});
+addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && mouseAct) { mouseAct = false; input.actionUp(); } });
+scene.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ---------- training complete ----------
 function renderTrainingDone(s) {
