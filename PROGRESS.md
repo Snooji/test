@@ -195,6 +195,7 @@ Verified: unit tests all pass (house tests over 600 generated houses), AI sims l
 - [x] Voxel look: floors stacked 2.8 m apart, slabs with the stairwell cut out, solid wooden steps with banisters; floors above
       you are hidden, only your floor's movers/items/pings show (plus anyone on the stairs); camera follows your height;
       minimap shows your floor ("Floor 2 of 3") with arrows for crew on other floors
+- [x] Closer camera (13 up, 8 back instead of 20 / 12): you see your room and the next, not the whole house
 - From here on: voxel look only (classic stays as it is, no new work)
 Verified: unit tests (196) pass incl. stair walks (no jumps, never in a wall), team lift + dolly rules, bot fetching from upstairs;
 AI sim on 3-floor houses loads 12–21 of ~30 in 3 min; voxel browser suites pass (dolly suite flaked once on timing, passed on rerun)

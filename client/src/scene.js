@@ -840,7 +840,7 @@ export class GameScene {
     if (this.drive) { /* following the truck (set above) */ }
     else if (me) {
       if (me.loadMode) { this.camTarget.set(15.2, 1.5, 0); this.camOff = [-6, 11, 9]; }
-      else { this.camTarget.set(me.x, me.y || 0, me.z); this.camOff = [0, 20, 12]; }
+      else { this.camTarget.set(me.x, me.y || 0, me.z); this.camOff = [0, 13, 8]; } // close in: you see your room and the next, not the whole house
     } else if (this.demoMode && this.players.size) {
       // menu backdrop: drift between the AI movers; nudge left on wide screens so the action sits beside the menu
       const list = [...this.players.values()];
