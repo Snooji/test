@@ -273,4 +273,7 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
     (Fast = lowest resolution, no shadows); the shadow map follows the camera (sharper for the same cost); HUD text and scoreboard
     only rewritten when they change (layouts 14/s → 2/s, no DOM churn); minimap redrawn at 10 Hz
   - Caching: fingerprinted code cached a year (immutable), models and portraits a week
+- [x] Share image re-made from the game's own code (client/og.html + src/og.js, render with tools/og/render.mjs): the new
+      astronauts facing the camera with cardboard boxes (glass + anvil marks), two movers carrying the couch, the house with
+      hedge and lit windows, the truck with boxes, warm night sky
 
