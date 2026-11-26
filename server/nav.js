@@ -3,17 +3,19 @@ import { WORLD } from '../shared/world.js';
 
 const STEP = 0.5, X0 = WORLD.x0, Z0 = WORLD.z0;
 const NX = Math.ceil((WORLD.x1 - WORLD.x0) / STEP), NZ = Math.ceil((WORLD.z1 - WORLD.z0) / STEP);
-const CLEAR_R = 0.55; // a bit wider than a mover so paths keep off walls
+const CLEAR_R = 0.55; // a bit wider than a mover so paths keep off walls where there's room
+const TIGHT_R = 0.47; // narrow hallways: just wider than a mover (0.45); allowed, but costs more so open floor is preferred
 
 export function createNav(level) {
 const hitsWall = level.hitsWall;
 const walk = new Uint8Array(NX * NZ);
 for (let i = 0; i < NX; i++) for (let k = 0; k < NZ; k++) {
-  walk[i + k * NX] = hitsWall(X0 + (i + 0.5) * STEP, Z0 + (k + 0.5) * STEP, CLEAR_R) ? 0 : 1;
+  const x = X0 + (i + 0.5) * STEP, z = Z0 + (k + 0.5) * STEP;
+  walk[i + k * NX] = !hitsWall(x, z, CLEAR_R) ? 1 : !hitsWall(x, z, TIGHT_R) ? 2 : 0;
 }
 const cellOf = (x, z) => [Math.floor((x - X0) / STEP), Math.floor((z - Z0) / STEP)];
 const center = (i, k) => ({ x: X0 + (i + 0.5) * STEP, z: Z0 + (k + 0.5) * STEP });
-const ok = (i, k) => i >= 0 && k >= 0 && i < NX && k < NZ && walk[i + k * NX] === 1;
+const ok = (i, k) => i >= 0 && k >= 0 && i < NX && k < NZ && walk[i + k * NX] > 0;
 
 function nearestWalkable(i, k) {
   if (ok(i, k)) return [i, k];
@@ -40,7 +42,7 @@ function findPath(start, goal) {
   const s = nearestWalkable(...cellOf(start.x, start.z));
   const g = nearestWalkable(...cellOf(goal.x, goal.z));
   if (!s || !g) return null;
-  const goalPt = walk[cellOf(goal.x, goal.z)[0] + cellOf(goal.x, goal.z)[1] * NX] && !hitsWall(goal.x, goal.z, 0.45) ? { x: goal.x, z: goal.z } : center(...g);
+  const goalPt = walk[cellOf(goal.x, goal.z)[0] + cellOf(goal.x, goal.z)[1] * NX] > 0 && !hitsWall(goal.x, goal.z, 0.45) ? { x: goal.x, z: goal.z } : center(...g);
   const N = NX * NZ, gScore = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), closed = new Uint8Array(N);
   const si = s[0] + s[1] * NX, gi = g[0] + g[1] * NX;
   const h = (i, k) => { const dx = Math.abs(i - g[0]), dk = Math.abs(k - g[1]); return Math.max(dx, dk) + 0.414 * Math.min(dx, dk); };
@@ -60,7 +62,7 @@ function findPath(start, goal) {
       const ni = ci + di, nk = ck + dk;
       if (!ok(ni, nk)) continue;
       if (di && dk && (!ok(ci + di, ck) || !ok(ci, ck + dk))) continue; // no corner cutting
-      const nIdx = ni + nk * NX, cost = gScore[cur] + (di && dk ? 1.414 : 1);
+      const nIdx = ni + nk * NX, cost = gScore[cur] + (di && dk ? 1.414 : 1) * (walk[nIdx] === 2 ? 1.6 : 1);
       if (cost < gScore[nIdx]) { gScore[nIdx] = cost; from[nIdx] = cur; push(cost + h(ni, nk), nIdx); }
     }
   }

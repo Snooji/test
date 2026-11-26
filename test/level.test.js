@@ -15,7 +15,7 @@ test('different seeds build different houses: size, rooms and yard distance vary
   const sigs = new Set(SEEDS.map(s => { const l = generateLevel(s); return `${l.house.x0},${l.house.x1},${l.house.z0},${l.house.z1},${l.rooms.length}`; }));
   assert.ok(sigs.size >= 30, `only ${sigs.size} distinct layouts in 40 seeds`);
   const widths = SEEDS.map(s => { const h = generateLevel(s).house; return h.x1 - h.x0; });
-  assert.ok(Math.max(...widths) - Math.min(...widths) >= 6, 'house width varies'); // rooms have size limits now (cottage ~15 m, family house ~21 m)
+  assert.ok(Math.max(...widths) - Math.min(...widths) >= 4, 'house width varies'); // rooms have size limits now (cottage ~15 m, family house ~19 m with a 1.5 m hallway)
   const gaps = SEEDS.map(s => generateLevel(s).yardDistance);
   assert.ok(Math.max(...gaps) - Math.min(...gaps) >= 5, 'distance to the truck varies');
 });
@@ -148,7 +148,7 @@ test('furnishing: each bedroom one bed + one dresser, dining table + lamp, livin
     for (const r of ROLE(L, 'bedroom')) { assert.equal(inRoom(r, 'bed'), 1, `seed ${seed}: ${r.name} bed`); assert.equal(inRoom(r, 'dresser'), 1, `seed ${seed}: ${r.name} dresser`); }
     for (const r of ROLE(L, 'dining')) { assert.equal(inRoom(r, 'table'), 1, `seed ${seed}: dining table`); assert.ok(inRoom(r, 'lamp') >= 1, `seed ${seed}: dining lamp`); }
     for (const r of ROLE(L, 'living')) { assert.equal(inRoom(r, 'couch'), 1, `seed ${seed}: couch`); assert.ok(inRoom(r, 'lamp') >= 1, `seed ${seed}: living lamp`); assert.equal(inRoom(r, 'coffeetable'), 1, `seed ${seed}: coffee table`); }
-    for (const r of L.rooms) assert.ok(L.items.some(([t, x, z]) => !ITEM_TYPES[t].furniture && roomOfItem(L, x, z) === r), `seed ${seed}: boxes in ${r.name}`);
+    for (const r of L.rooms.filter(r => r.role !== 'hall')) assert.ok(L.items.some(([t, x, z]) => !ITEM_TYPES[t].furniture && roomOfItem(L, x, z) === r), `seed ${seed}: boxes in ${r.name}`);
     const cells = L.items.reduce((a, [t]) => a + cellsOf(ITEM_TYPES[t]), 0);
     assert.ok(cells <= 56, `seed ${seed}: ${cells} cells must fit the 64-cell truck with slack`);
     for (const [t, x, z] of L.items) if (ITEM_TYPES[t].furniture) assert.ok(roomOfItem(L, x, z), `seed ${seed}: ${t} is inside the house`);
@@ -187,5 +187,34 @@ test('bedrooms, bathroom and office open onto a hallway; the hallway opens onto 
     if (!halls.length) continue; // cottages: bedroom straight off the living room
     for (const r of L.rooms.filter(r => ['bedroom', 'bathroom', 'office', 'laundry'].includes(r.role))) assert.ok(halls.some(h => L.doorsBetween(r, h)), `seed ${seed}: ${r.name} opens onto a hallway`);
     assert.ok(L.rooms.some(r => ['living', 'dining', 'kitchen'].includes(r.role) && halls.some(h => L.doorsBetween(r, h))), `seed ${seed}: a hallway reaches the living area`);
+  }
+});
+
+test('hallways are narrow like a real home (about 1.5 movers wide) and nothing is left standing in them', async () => {
+  const { generateLevel } = await import('../shared/level.js');
+  const { ITEM_TYPES } = await import('../shared/logic.js');
+  for (let seed = 1; seed <= 150; seed++) for (const opts of [{}, { mansion: true }, { exact: true }]) {
+    const L = generateLevel(seed * 7919, opts);
+    for (const h of L.rooms.filter(r => r.role === 'hall')) {
+      const clear = (h.x1 - h.x0) - 0.4; // wall centre to wall centre, minus one wall thickness
+      assert.ok(clear >= 1.35 && clear <= 1.6, `seed ${seed}: hallway clear width ${clear.toFixed(2)} m`);
+      for (const [t, x, z] of L.items) {
+        const it = ITEM_TYPES[t], hw = Math.max(it.w, 1) / 2, hd = Math.max(it.d, 1) / 2;
+        assert.ok(!(x + hw > h.x0 && x - hw < h.x1 && z + hd > h.z0 && z - hd < h.z1), `seed ${seed}: ${t} at ${x},${z} blocks the hallway`);
+      }
+      for (const p of L.props.filter(p => p.kind === 'plant')) assert.ok(!(p.x > h.x0 && p.x < h.x1 && p.z > h.z0 && p.z < h.z1), `seed ${seed}: plant in the hallway`);
+    }
+  }
+});
+
+test('respawns and tools (dollies) never land in a hallway', async () => {
+  const { generateLevel, freeSpot } = await import('../shared/level.js');
+  const { mulberryFor } = await import('../shared/logic.js');
+  for (let seed = 1; seed <= 60; seed++) {
+    const L = generateLevel(seed * 104729), rng = mulberryFor(seed);
+    for (let k = 0; k < 20; k++) {
+      const s = freeSpot(L, [], rng);
+      assert.ok(!L.rooms.some(h => h.role === 'hall' && s.x > h.x0 - 0.3 && s.x < h.x1 + 0.3 && s.z > h.z0 && s.z < h.z1), `seed ${seed}: spot ${s.x},${s.z} in a hallway`);
+    }
   }
 });

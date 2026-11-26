@@ -15,10 +15,25 @@ const cellsOf = (it) => {
   return out;
 };
 
+// Walls are tall enough to hide what's behind them. Movers stay findable: wherever a wall (not the mover itself) is in front
+// of one, a soft warm silhouette shows through. Stencil 1 = "a mover drew this pixel", so a mover never ghosts over itself.
+const XRAY = new THREE.MeshBasicMaterial({ color: 0xffc27a, transparent: true, opacity: 0.45, depthWrite: false, depthFunc: THREE.GreaterDepth,
+  stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.KeepStencilOp, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp });
+function addXray(body) {
+  if (!body) return;
+  body.traverse(o => {
+    if (!o.isMesh || o.isSprite || o.userData.xr || o.userData.isXray) return;
+    for (const m of [].concat(o.material)) { m.stencilWrite = true; m.stencilRef = 1; m.stencilFunc = THREE.AlwaysStencilFunc; m.stencilZPass = THREE.ReplaceStencilOp; }
+    const c = new THREE.Mesh(o.geometry, XRAY);
+    c.userData.isXray = true; c.renderOrder = 20; c.castShadow = c.receiveShadow = false;
+    o.userData.xr = c; o.add(c);
+  });
+}
+
 export class GameScene {
   constructor(container) {
     const mobile = matchMedia('(pointer: coarse)').matches;
-    this.renderer = new THREE.WebGLRenderer({ antialias: !mobile, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ antialias: !mobile, powerPreference: 'high-performance', stencil: true }); // stencil: movers show through walls
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -155,7 +170,7 @@ export class GameScene {
     // walls
     const wallMat = mat(0xe9e4ff), trimMat = mat(0x8f7bff);
     for (const w of level.houseWalls) {
-      const h = 1.3;
+      const h = 2.4; // tall enough to hide what's in the next room (movers show through as silhouettes)
       const m = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0, h, w.z1 - w.z0), wallMat);
       m.position.set((w.x0 + w.x1) / 2, h / 2, (w.z0 + w.z1) / 2); m.castShadow = m.receiveShadow = true; s.add(m);
       const t = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0 + 0.02, 0.08, w.z1 - w.z0 + 0.02), trimMat);
@@ -288,7 +303,7 @@ export class GameScene {
         if (v.energyKey !== bucket) { v.energyKey = bucket; v.energy.material.map?.dispose(); v.energy.material.map = energyTexture(en, p.injured); v.energy.material.needsUpdate = true; }
       }
       if (v.energy) v.energy.visible = showE;
-      v.root.traverse(o => { if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
+      v.root.traverse(o => { if (o.userData.isXray) { o.visible = !p.out; return; } if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
     }
     for (const [id, v] of this.players) if (!seen.has(id)) { this.scene.remove(v.root); this.players.delete(id); }
 
@@ -587,6 +602,7 @@ export class GameScene {
     // arms up while carrying, swinging while walking
     for (const v of this.players.values()) {
       const p = v.data; if (!p) continue;
+      addXray(v.root.userData.body); // models arrive late: give new meshes a see-through-walls silhouette
       const carrying = !!p.carry;
       const walking = Math.hypot(v.root.position.x - p.x, v.root.position.z - p.z) > 0.03;
       v.root.userData.body.traverse(o => {

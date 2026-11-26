@@ -382,6 +382,7 @@ export function buildWorld(scene) {
   scene.buildTruck();
 }
 
+export const WALL_H = 2.4; // tall enough to hide what's in the next room
 export function buildHouse(scene, level) {
   const g = new THREE.Group();
   scene.house = g; scene.level = level;
@@ -406,12 +407,12 @@ export function buildHouse(scene, level) {
         const tiles = roomAt(tx, tz)?.tiles || OUT;
         const half = alongX ? [a0, side < 0 ? w.z0 : (w.z0 + w.z1) / 2, a1, side < 0 ? (w.z0 + w.z1) / 2 : w.z1] : [side < 0 ? w.x0 : (w.x0 + w.x1) / 2, a0, side < 0 ? (w.x0 + w.x1) / 2 : w.x1, a1];
         const [hx0, hz0, hx1, hz1] = alongX ? [half[0], half[1], half[2], half[3]] : [half[0], half[1], half[2], half[3]];
-        b.box(hx0, 0, hz0, hx1, 1.25, hz1, tiles.wall, 0.42);
+        b.box(hx0, 0, hz0, hx1, WALL_H, hz1, tiles.wall, 0.42);
         const pad = 0.02; // skirting sticks out a touch on its own side only
         b.box(alongX ? hx0 : (side < 0 ? hx0 - pad : hx0), 0, alongX ? (side < 0 ? hz0 - pad : hz0) : hz0, alongX ? hx1 : (side < 0 ? hx1 : hx1 + pad), 0.16, alongX ? (side < 0 ? hz1 : hz1 + pad) : hz1, tiles.skirt, 0.42);
       }
     }
-    b.box(w.x0 - 0.01, 1.25, w.z0 - 0.01, w.x1 + 0.01, 1.33, w.z1 + 0.01, 0xcfae84, 0.42);             // wooden cap
+    b.box(w.x0 - 0.01, WALL_H, w.z0 - 0.01, w.x1 + 0.01, WALL_H + 0.08, w.z1 + 0.01, 0xcfae84, 0.42);     // wooden cap
   }
   const pots = [], foods = [];
   for (const p of level.props) {

@@ -566,7 +566,7 @@ test('Moon Mansion twist builds a big 6-room house', () => {
   join('A', 'Ada');
   send('A', 'twist', { twist: 'mansion' });
   const h = room.level.house;
-  assert.ok(h.x1 - h.x0 >= 28 && room.level.rooms.length >= 5, `${h.x1 - h.x0} wide, ${room.level.rooms.length} rooms`);
+  assert.ok(h.x1 - h.x0 >= 26 && room.level.rooms.length >= 5, `${h.x1 - h.x0} wide, ${room.level.rooms.length} rooms`);
 });
 
 test('Zero-G twist: gravity cuts out on a cycle and floor items drift', () => {

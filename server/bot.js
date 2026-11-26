@@ -80,9 +80,7 @@ export class Bot {
   canSeePoint(x, z) {
     const p = this.p, dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
     if (d > this.cfg.sight) return false;
-    const n = Math.ceil(d / 0.3);
-    for (let i = 1; i < n; i++) if (this.room.level.hitsWall(p.x + dx * i / n, p.z + dz * i / n, 0.05)) return false;
-    return true;
+    return !this.room.level.lineBlocked(p.x, p.z, x, z); // walls block eyesight exactly (no peeking past corners)
   }
   canSee(it) { return !!it && this.canSeePoint(it.x, it.z); }
   hear(it) { if (it) this.known.set(it.id, { x: it.x, z: it.z, at: this.t }); } // a 🆘 call everyone hears

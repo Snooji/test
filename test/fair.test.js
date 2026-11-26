@@ -215,3 +215,26 @@ test('AI picks up the piece it walked to, not the couch right behind it', () => 
   for (let i = 0; i < 6 && !b.p.carry; i++) room.tick(DT);
   assert.equal(b.p.carry, ct.id, 'took the box it was going for');
 });
+
+test('AI eyesight never passes through a wall, even at a glancing angle or a wall corner', () => {
+  for (const seed of [11, 222, 3333, 40404]) {
+    const { room } = makeRoom({ seed });
+    room.addBot(); room.startRound();
+    const bot = [...room.bots.values()][0];
+    bot.cfg = { ...bot.cfg, sight: 40 };
+    const L = room.level, rng = mulberryFor(seed);
+    const walls = L.houseWalls;
+    const crosses = (ax, az, bx, bz) => { // fine reference check: any point on the line inside a wall
+      const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 0.01);
+      for (let i = 1; i < n; i++) { const x = ax + (bx - ax) * i / n, z = az + (bz - az) * i / n; if (walls.some(w => x > w.x0 && x < w.x1 && z > w.z0 && z < w.z1)) return true; }
+      return false;
+    };
+    const h = L.house;
+    for (let k = 0; k < 400; k++) {
+      const ax = h.x0 + rng() * (h.x1 - h.x0), az = h.z0 + rng() * (h.z1 - h.z0), bx = h.x0 + rng() * (h.x1 - h.x0), bz = h.z0 + rng() * (h.z1 - h.z0);
+      if (L.hitsWall(ax, az, 0.45) || L.hitsWall(bx, bz, 0.05)) continue;
+      bot.p.x = ax; bot.p.z = az;
+      if (crosses(ax, az, bx, bz)) assert.ok(!bot.canSeePoint(bx, bz), `seed ${seed}: saw through a wall from ${ax.toFixed(2)},${az.toFixed(2)} to ${bx.toFixed(2)},${bz.toFixed(2)}`);
+    }
+  }
+});

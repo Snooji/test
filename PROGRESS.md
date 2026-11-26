@@ -180,4 +180,8 @@ Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2
 - [x] Per-room tile sets: floor pattern, wall colour on each room's side, skirting; warm palettes (no purple carpets/rugs)
 - [x] Fixed: AI picked up the couch when it walked to the coffee table in front of it (stood waiting for a partner forever); bots now
       pick up what they walked to. Flaky AI placement tests made deterministic
-Verified: unit tests all pass (house tests over 600 generated houses), AI sims load 23–28 of ~30 items
+- [x] Hallways 1.5 m clear (about one and a half movers wide); nothing spawns or respawns in them (tools included); nav allows tight
+      corridors at a higher cost so bots still prefer open floor
+- [x] Walls 2.4 m tall (both looks) so they hide the next room; movers behind a wall show as a warm silhouette (stencil, never over themselves)
+- [x] AI eyesight uses an exact line-vs-wall test (no seeing past corners or through walls at a glancing angle)
+Verified: unit tests all pass (house tests over 600 generated houses), AI sims load 22–27 of ~30 items, browser suites pass on both links

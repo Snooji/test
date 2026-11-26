@@ -5,6 +5,7 @@ import { TRUCK_WALLS, HOUSE_WALLS, ROOMS, PROPS, ITEM_SPAWNS, CAT_WAYPOINTS, WOR
 
 const T = 0.4; // wall thickness
 const DOOR = 3.2;
+const HALL_W = 1.9; // hallway, wall centre to wall centre (1.5 m clear)
 const wallH = (x0, x1, z) => ({ x0, x1, z0: z - T / 2, z1: z + T / 2 });
 const wallV = (x, z0, z1) => ({ x0: x - T / 2, x1: x + T / 2, z0, z1 });
 
@@ -23,7 +24,7 @@ export const ROOM_SIZES = {
   living: { len: [7, 10], dep: [8, 10] }, dining: { len: [6, 8], dep: [8, 10] }, kitchen: { len: [5, 7], dep: [8, 10] },
   main: { len: [7, 9], dep: [6.5, 8] }, bedroom: { len: [6, 9], dep: [6.5, 8] }, kids: { len: [6, 7], dep: [6.5, 8] },
   office: { len: [5, 7], dep: [6.5, 8] }, bathroom: { len: [5, 5.5], dep: [6.5, 8] }, laundry: { len: [5, 6], dep: [6.5, 8] },
-  hall: { len: [10, 26], dep: [3.6, 4.2] }, passage: { len: [4, 6], dep: [6.5, 8] },
+  hall: { len: [10, 26], dep: [1.9, 1.9] }, passage: { len: [4, 6], dep: [6.5, 8] },
 };
 const ROOM_NAMES = ['Living Room', 'Kitchen', 'Bedroom', 'Star Office', 'Kids Room', 'Dining Room', 'Game Room', 'Observatory', 'Laundry', 'Garage', 'Den', 'Library'];
 const FLOORS = [0x3b3561, 0x2f4f5e, 0x4a3358, 0x33465e, 0x45385e, 0x2e5456, 0x503a4e, 0x3a4a6a];
@@ -37,6 +38,21 @@ function finish(level) {
     for (const w of walls) {
       const cx = Math.max(w.x0, Math.min(x, w.x1)), cz = Math.max(w.z0, Math.min(z, w.z1));
       if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) return true;
+    }
+    return false;
+  };
+  /** exact: does the straight line from a to b pass through any wall (house, truck)? Slab test, so no glancing gaps. */
+  level.lineBlocked = (ax, az, bx, bz) => {
+    const dx = bx - ax, dz = bz - az;
+    for (const w of walls) {
+      if (w.invisible) continue;
+      let t0 = 0, t1 = 1;
+      for (const [p, d, lo, hi] of [[ax, dx, w.x0, w.x1], [az, dz, w.z0, w.z1]]) {
+        if (Math.abs(d) < 1e-9) { if (p <= lo || p >= hi) { t0 = 2; break; } continue; }
+        let a = (lo - p) / d, b = (hi - p) / d; if (a > b) [a, b] = [b, a];
+        t0 = Math.max(t0, a); t1 = Math.min(t1, b); if (t0 >= t1) break;
+      }
+      if (t0 < t1) return true;
     }
     return false;
   };
@@ -145,7 +161,7 @@ export function generateLevel(seed, opts = {}) {
     const kit = rooms.find(r => r.role === 'kitchen');
     let prevOpen = [doorIn(living), ...(kit && rng() < 0.5 ? [doorIn(kit)] : [])]; // openings from the rooms on the near side of this hallway
     columns.forEach((c, ci) => {
-      const hx1 = xCur, hx0 = xCur - 4;                    // the hallway (4 m: room for a couch to turn)
+      const hx1 = xCur, hx0 = xCur - HALL_W;               // the hallway: 1.5 m clear, about one and a half movers wide
       rooms.push({ x0: hx0, x1: hx1, z0, z1, role: 'hall', kind: 'hall' });
       vWall(hx1, prevOpen);
       const wB = r1(R(...sz('bedroom').dep)), bx0 = hx0 - wB;
@@ -254,8 +270,8 @@ export function generateLevel(seed, opts = {}) {
     const MIX = { kitchen: [0.4, 0.15, 0.45], dining: [0.45, 0.1, 0.45], office: [0.4, 0.5, 0.1], laundry: [0.5, 0.4, 0.1], bathroom: [0.6, 0.2, 0.2], bedroom: [0.6, 0.2, 0.2], living: [0.5, 0.25, 0.25] };
     const boxFor = (i) => { const m = MIX[role[i]] || MIX.living, u = rng(); return u < m[0] ? 'standard' : u < m[0] + m[1] ? 'heavy' : 'fragile'; };
     const totalArea = rooms.reduce((a, r) => a + area(r), 0);
-    const boxes = rooms.map((_, i) => [boxFor(i), i]);
-    while (boxes.length < nBoxes) { let t = rng() * totalArea, i = 0; for (; i < rooms.length - 1; i++) { t -= area(rooms[i]); if (t <= 0) break; } boxes.push([boxFor(i), i]); }
+    const boxes = rooms.map((_, i) => i).filter(i => role[i] !== 'hall').map(i => [boxFor(i), i]); // hallways stay clear
+    while (boxes.length < nBoxes) { let t = rng() * totalArea, i = 0; for (; i < rooms.length - 1; i++) { t -= area(rooms[i]); if (t <= 0) break; } if (role[i] !== 'hall') boxes.push([boxFor(i), i]); }
     // the full mix is always there
     if (!boxes.some(([t]) => t === 'heavy')) boxes[0][0] = 'heavy';
     if (!boxes.some(([t]) => t === 'fragile')) boxes[boxes.length > 1 ? 1 : 0][0] = 'fragile';
@@ -267,7 +283,9 @@ export function generateLevel(seed, opts = {}) {
   const doorPts = [...doors.map(d => d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }), level.frontDoor];
   const placed = [];
   const totalArea = rooms.reduce((a, r) => a + area(r), 0);
-  const roomByArea = () => { let t = rng() * totalArea; for (const r of rooms) { t -= area(r); if (t <= 0) return r; } return rooms[0]; };
+  const open = rooms.filter(r => r.role !== 'hall'), openArea = open.reduce((a, r) => a + area(r), 0);
+  const roomByArea = () => { let t = rng() * openArea; for (const r of open) { t -= area(r); if (t <= 0) return r; } return open[0]; };
+  const halls = rooms.filter(r => r.role === 'hall');
   entries.sort((a, b) => (ITEM_TYPES[b[0]].furniture ? 1 : 0) - (ITEM_TYPES[a[0]].furniture ? 1 : 0) || cellsOf(b[0]) - cellsOf(a[0])); // big pieces first
   entries.forEach(([type, ri]) => {
     const t = ITEM_TYPES[type];
@@ -280,6 +298,7 @@ export function generateLevel(seed, opts = {}) {
       if (!yard && (x - halfX < x0 || x + halfX > x1 || z - halfZ < z0 || z + halfZ > z1)) return false;
       if (t.furniture ? [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]].some(([sx, sz]) => level.hitsWall(x + sx * hw, z + sz * hd, 0.45))
         : level.hitsWall(x, z, 0.7)) return false;
+      if (halls.some(h => x + hw + 0.3 > h.x0 && x - hw - 0.3 < h.x1 && z + hd + 0.3 > h.z0 && z - hd - 0.3 < h.z1)) return false; // never in a hallway
       const doorGap = t.furniture ? (tight ? 1.4 : 1.9) : 1.3;
       if (doorPts.some(p => Math.hypot(Math.max(0, Math.abs(p.x - x) - hw), Math.max(0, Math.abs(p.z - z) - hd)) < doorGap)) return false;
       return !placed.some(([pt, px, pz]) => {
@@ -327,7 +346,7 @@ export function generateLevel(seed, opts = {}) {
     const nearDoor = (x0, z0, x1, z1, pad) => doorPts.some(p => p.x > x0 - pad && p.x < x1 + pad && p.z > z0 - pad && p.z < z1 + pad);
     const corners = [[r.x0 + 0.9, r.z0 + 0.9], [r.x1 - 0.9, r.z0 + 0.9], [r.x0 + 0.9, r.z1 - 0.9], [r.x1 - 0.9, r.z1 - 0.9]];
     const first = RI(0, 3);
-    const corner = [0, 1, 2, 3].map(k => corners[(first + k) % 4]).find(([cx, cz]) => !nearDoor(cx, cz, cx, cz, DOOR / 2 + 1.0));
+    const corner = r.role === 'hall' ? null : [0, 1, 2, 3].map(k => corners[(first + k) % 4]).find(([cx, cz]) => !nearDoor(cx, cz, cx, cz, DOOR / 2 + 1.0));
     if (corner && !placed.some(([, px, pz]) => Math.hypot(px - corner[0], pz - corner[1]) < 1.5)) level.props.push({ kind: 'plant', x: corner[0], z: corner[1] });
     if (r.name === 'Kitchen' && Math.max(w, d) > 7) { // counter along the first wall with no doorway in its way
       const opts = [
@@ -365,8 +384,9 @@ export function tutorialLevel() {
 
 /** A random free floor spot inside the house (for respawning broken items). */
 export function freeSpot(level, taken, rng = Math.random) {
+  const rooms = level.rooms.filter(r => r.role !== 'hall'); // hallways stay clear (they're only 1.5 m wide)
   for (let i = 0; i < 200; i++) {
-    const r = level.rooms[Math.floor(rng() * level.rooms.length)];
+    const r = rooms[Math.floor(rng() * rooms.length)];
     const x = r.x0 + 1.1 + rng() * (r.x1 - r.x0 - 2.2), z = r.z0 + 1.1 + rng() * (r.z1 - r.z0 - 2.2);
     if (level.hitsWall(x, z, 0.7) || taken.some(p => Math.hypot(p.x - x, p.z - z) < 1.2)) continue;
     return { x: +x.toFixed(1), z: +z.toFixed(1) };
