@@ -394,6 +394,16 @@ export function buildWorld(scene) {
     b.box(x - r, 0, z - r, x + r, 0.03, z + r, 0x3a322b, 0.5);
   }
   const ground = new THREE.Mesh(b.geometry(), voxMat); ground.receiveShadow = true; s.add(ground);
+  // warm night sky: a dome from deep charcoal overhead to an amber glow at the horizon, and a pale moon
+  const dome = new THREE.SphereGeometry(160, 24, 12), col = [], top = new THREE.Color(0x0e0a08), mid = new THREE.Color(0x2a1d15), hor = new THREE.Color(0x6a4128);
+  for (let i = 0; i < dome.attributes.position.count; i++) {
+    const t = Math.max(0, dome.attributes.position.getY(i) / 160), c = t < 0.18 ? hor.clone().lerp(mid, t / 0.18) : mid.clone().lerp(top, Math.min(1, (t - 0.18) / 0.5));
+    col.push(c.r, c.g, c.b);
+  }
+  dome.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  s.add(new THREE.Mesh(dome, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })));
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(7, 20, 14), new THREE.MeshBasicMaterial({ color: 0xf2e6c8, fog: false }));
+  moon.position.set(-60, 70, -120); s.add(moon);
   const starGeo = new THREE.BufferGeometry(), pts = [];
   for (let i = 0; i < 900; i++) pts.push((Math.random() - 0.5) * 200, 30 + Math.random() * 60, (Math.random() - 0.5) * 200);
   starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -424,6 +434,85 @@ export function cutHoles(rect, holes) {
   return parts.filter(([x0, z0, x1, z1]) => x1 - x0 > 0.01 && z1 - z0 > 0.01);
 }
 
+/** Windows on the outside walls (lit warm at night), frames + lintels on every doorway, a porch lamp by the front door,
+ *  hedges along the front, and something on the far wall of each room (the wall the camera looks at). All of it goes into
+ *  the floor's existing batches, so the house stays a couple of draw calls per floor. */
+function houseDetail(b, gb, level, k, rng) {
+  const DZ = FLOOR_DZ * k, h = level.house, X0 = h.x0, X1 = h.x1, Z0 = h.z0 + DZ, Z1 = h.z1 + DZ, HT = 0.2;
+  const TRIM = 0xf4ead8, WOOD = 0xb88a5a, GLASS = 0xffd9a0, onK = (z) => level.floorOf(z) === k;
+  const fd = level.frontDoor;
+  // doorways: two jambs and a lintel (the wall above the opening), in warm wood
+  const doors = (level.doors || []).filter(d => onK(d.vertical ? d.c : d.at));
+  for (const d of doors) {
+    const a0 = d.c - d.w / 2, a1 = d.c + d.w / 2, j = 0.07;
+    if (d.vertical) {
+      b.box(d.at - HT - 0.01, 2.1, a0, d.at + HT + 0.01, WALL_H, a1, TRIM, 0.42);
+      b.box(d.at - HT - 0.03, 2.02, a0, d.at + HT + 0.03, 2.1, a1, WOOD, 0.42);
+      for (const z of [a0, a1 - j]) b.box(d.at - HT - 0.03, 0, z, d.at + HT + 0.03, 2.1, z + j, WOOD, 0.42);
+    } else {
+      b.box(a0, 2.1, d.at - HT - 0.01, a1, WALL_H, d.at + HT + 0.01, TRIM, 0.42);
+      b.box(a0, 2.02, d.at - HT - 0.03, a1, 2.1, d.at + HT + 0.03, WOOD, 0.42);
+      for (const x of [a0, a1 - j]) b.box(x, 0, d.at - HT - 0.03, x + j, 2.1, d.at + HT + 0.03, WOOD, 0.42);
+    }
+  }
+  // windows: one per room on each outside wall it touches (none where the front door is), glass glowing through the wall
+  const win = (alongX, line, mid, w) => {
+    const y0 = 0.95, y1 = 2.0, e = 0.03, t0 = line - HT - e, t1 = line + HT + e;
+    const B = (a, c, y, yy, p, q, col, batch = b) => alongX ? batch.box(a, y, p, c, yy, q, col, 0.42) : batch.box(p, y, a, q, yy, c, col, 0.42);
+    B(mid - w / 2, mid + w / 2, y0, y1, line - HT - 0.005, line + HT + 0.005, GLASS, gb);              // lit glass (both faces)
+    for (const [p, q] of [[t0, line - HT], [line + HT, t1]]) {                                          // frame on each face
+      B(mid - w / 2 - 0.08, mid + w / 2 + 0.08, y1, y1 + 0.08, p, q, TRIM);
+      B(mid - w / 2 - 0.12, mid + w / 2 + 0.12, y0 - 0.1, y0, p - (p < line ? 0.06 : 0), q + (p < line ? 0 : 0.06), TRIM); // sill
+      B(mid - w / 2 - 0.08, mid - w / 2, y0, y1, p, q, TRIM); B(mid + w / 2, mid + w / 2 + 0.08, y0, y1, p, q, TRIM);
+      B(mid - 0.03, mid + 0.03, y0, y1, p, q, TRIM); B(mid - w / 2, mid + w / 2, (y0 + y1) / 2 - 0.03, (y0 + y1) / 2 + 0.03, p, q, TRIM); // mullions
+    }
+  };
+  for (const r of level.rooms.filter(r => (r.storey || 0) === k)) {
+    const lenZ = r.z1 - r.z0, lenX = r.x1 - r.x0, wz = Math.min(2.2, lenZ * 0.32), wx = Math.min(2.2, lenX * 0.32);
+    if (Math.abs(r.x0 - X0) < 0.01 && lenZ >= 3.2 && r.role !== 'stairs') win(false, X0, (r.z0 + r.z1) / 2, wz);
+    if (Math.abs(r.x1 - X1) < 0.01 && lenZ >= 3.2) {
+      const mid = (r.z0 + r.z1) / 2;
+      if (!(k === 0 && Math.abs(mid - fd.z) < wz / 2 + 2.4)) win(false, X1, mid, wz);
+      else if (k === 0) { const alt = fd.z + (fd.z - r.z0 > r.z1 - fd.z ? -1 : 1) * (wz / 2 + 2.6); if (alt - wz / 2 > r.z0 + 0.5 && alt + wz / 2 < r.z1 - 0.5) win(false, X1, alt, wz); }
+    }
+    if (Math.abs(r.z0 - Z0) < 0.01 && lenX >= 3.2 && r.role !== 'hall') win(true, Z0, (r.x0 + r.x1) / 2, wx);
+    if (Math.abs(r.z1 - Z1) < 0.01 && lenX >= 3.2 && r.role !== 'hall') win(true, Z1, (r.x0 + r.x1) / 2, wx);
+  }
+  if (k === 0) { // porch: lamps either side of the front door, hedges along the front of the house (not across the path)
+    for (const s of [-1, 1]) { b.box(X1 + HT, 1.7, fd.z + s * 1.95 - 0.12, X1 + HT + 0.14, 2.15, fd.z + s * 1.95 + 0.12, 0x3a2f26, 0.42); gb.box(X1 + HT + 0.02, 1.78, fd.z + s * 1.95 - 0.08, X1 + HT + 0.12, 2.05, fd.z + s * 1.95 + 0.08, 0xffd08a, 0.42); }
+    const hv = new Vox(0.25), HG = [0x3f7a3a, 0x4a8a42, 0x377034, 0x52934a];
+    for (let z = h.z0 + 0.3; z < h.z1 - 0.3; z += 0.25) {
+      if (Math.abs(z - fd.z) < 2.3) continue;
+      for (let x = X1 + 0.45; x < X1 + 1.15; x += 0.25) for (let y = 0; y < 0.85; y += 0.25) hv.set(Math.round(x / 0.25), Math.round(y / 0.25), Math.round(z / 0.25), HG[Math.floor(rng() * HG.length)]);
+    }
+    hv.into(b, 0, 0, 0);
+  }
+  // decor on the far (north) wall of each room, where the camera looks: chosen by room type, clear of doorways and windows
+  const DECOR = { living: ['tv', 'picture'], bedroom: ['picture', 'picture'], kids: ['picture', 'shelf'], office: ['shelf', 'picture'], den: ['tv', 'shelf'], play: ['picture', 'shelf'],
+    dining: ['picture', 'picture'], kitchen: ['clock', 'picture'], bathroom: ['mirror'], laundry: ['shelf'], storage: ['shelf'], garage: ['tools'] };
+  const ART = [[0xc8734f, 0xe9c46a], [0x6b9e8a, 0xf4ead8], [0x8a5a44, 0xd9b26a], [0x3f6f8a, 0xe0c9a0], [0xb5654a, 0x8a9a6b]];
+  for (const r of level.rooms.filter(r => (r.storey || 0) === k)) {
+    const list = DECOR[r.kind] || DECOR[r.role]; if (!list) continue;
+    const fz = r.z0 + HT, blocked = (x, half) => doors.some(d => !d.vertical && Math.abs(d.at - r.z0) < 0.05 && x + half > d.c - d.w / 2 - 0.3 && x - half < d.c + d.w / 2 + 0.3)
+      || (Math.abs(r.z0 - Z0) < 0.01 && Math.abs(x - (r.x0 + r.x1) / 2) < Math.min(2.2, (r.x1 - r.x0) * 0.32) / 2 + half + 0.3);
+    const spots = [0.27, 0.73].map(f => r.x0 + (r.x1 - r.x0) * f);
+    list.forEach((kind, i) => {
+      const x = spots[i % 2]; if (!x || blocked(x, 0.9)) return;
+      if (kind === 'picture') { const [c1, c2] = ART[Math.floor(rng() * ART.length)]; b.box(x - 0.55, 1.25, fz, x + 0.55, 2.05, fz + 0.05, 0x5c3a22, 0.42); b.box(x - 0.47, 1.33, fz + 0.05, x + 0.47, 1.97, fz + 0.07, c1, 0.42); b.box(x - 0.47, 1.33, fz + 0.05, x + 0.05, 1.7, fz + 0.075, c2, 0.42); }
+      else if (kind === 'tv') { b.box(x - 0.85, 1.15, fz, x + 0.85, 2.1, fz + 0.06, 0x1d1b19, 0.42); gb.box(x - 0.78, 1.22, fz + 0.06, x + 0.78, 2.03, fz + 0.07, 0x2f4a5a, 0.42); }
+      else if (kind === 'mirror') { b.box(x - 0.45, 1.15, fz, x + 0.45, 2.15, fz + 0.05, 0xd9b26a, 0.42); gb.box(x - 0.38, 1.22, fz + 0.05, x + 0.38, 2.08, fz + 0.06, 0xbfd7d6, 0.42); }
+      else if (kind === 'clock') { b.box(x - 0.3, 1.6, fz, x + 0.3, 2.2, fz + 0.05, 0x3a2f26, 0.42); b.box(x - 0.24, 1.66, fz + 0.05, x + 0.24, 2.14, fz + 0.06, 0xf4ead8, 0.42); b.box(x - 0.02, 1.9, fz + 0.06, x + 0.02, 2.08, fz + 0.07, 0x1d1b19, 0.42); b.box(x - 0.02, 1.88, fz + 0.06, x + 0.14, 1.92, fz + 0.07, 0x1d1b19, 0.42); }
+      else if (kind === 'shelf' || kind === 'tools') {
+        for (const y of kind === 'shelf' ? [1.35, 1.85] : [1.3]) {
+          b.box(x - 0.75, y - 0.05, fz, x + 0.75, y, fz + 0.28, 0x8a5a3a, 0.42);
+          let bx = x - 0.7; while (bx < x + 0.65) { const bw = 0.08 + rng() * 0.08, bh = 0.22 + rng() * 0.18; b.box(bx, y, fz + 0.04, bx + bw, y + bh, fz + 0.24, [0xc8734f, 0x6b9e8a, 0xe9c46a, 0x8a5a44, 0x3f6f8a][Math.floor(rng() * 5)], 0.42); bx += bw + 0.02; }
+        }
+        if (kind === 'tools') b.box(x - 0.8, 1.45, fz, x + 0.8, 2.1, fz + 0.03, 0xa89070, 0.42);
+      }
+    });
+  }
+}
+
 export function buildHouse(scene, level) {
   const g = new THREE.Group();
   scene.house = g; scene.level = level; scene.storeys = [];
@@ -437,7 +526,7 @@ export function buildHouse(scene, level) {
     // each floor is built in the server's own coordinates (its strip of the map), then lifted into place over the ground floor
     const sg = new THREE.Group(); sg.position.set(0, k * H, -DZ * k); g.add(sg); scene.storeys.push(sg);
     const onK = (z) => level.floorOf(z) === k;
-    const b = new Batch(), fb = new Batch();
+    const b = new Batch(), fb = new Batch(), gb = new Batch(); // gb: things that glow (lit windows, lamps, screens)
     if (k === 0) {
       const walkLen = Math.max(0.1, 9.4 - fd.x);
       b.box(fd.x, 0, fd.z - 1.5, fd.x + walkLen, 0.03, fd.z + 1.5, 0x8a7f70, 0.75);                    // walkway
@@ -469,6 +558,7 @@ export function buildHouse(scene, level) {
       }
       b.box(w.x0 - 0.01, WALL_H, w.z0 - 0.01, w.x1 + 0.01, WALL_H + 0.08, w.z1 + 0.01, 0xcfae84, 0.42);     // wooden cap
     }
+    houseDetail(b, gb, level, k, rng);
     // stairs: solid wooden steps up from this floor, a banister on each open side; around the opening upstairs, a railing
     const TREAD = 0xb07a4a, NOSE = 0x7a4f2c, BAN = 0x5c3a22, POST = 0xe8dcc4;
     for (const st of level.stairs) {
@@ -496,6 +586,7 @@ export function buildHouse(scene, level) {
     }
     if (k === 0) b.box(fd.x + 0.2, 0.04, fd.z - 1.7, fd.x + 1.4, 0.06, fd.z + 1.7, 0xffd166, 0.3);       // door mat
     const m = new THREE.Mesh(b.geometry(), voxMat); m.castShadow = m.receiveShadow = true; sg.add(m);
+    if (gb.pos.length) sg.add(new THREE.Mesh(gb.geometry(), glowMat));
     const fm = new THREE.Mesh(fb.geometry(), plainMat); fm.receiveShadow = true; sg.add(fm);
     for (const r of level.rooms.filter(r => (r.storey || 0) === k)) { // room names stay as soft floor decals
       const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
@@ -591,6 +682,7 @@ function decorateYard(g, level, rng) {
   const taken = [];
   const free = (x, z, r) => {
     if (x > hx0 - 0.9 - r && x < hx1 + 0.9 + r && z > hz0 - 0.9 - r && z < hz1 + 0.9 + r) return false;          // the house
+    if (x < L.x0 + 1 + r || z < L.z0 + 1 + r || z > L.z1 - 1 - r) return false;                                 // the fence
     if (x > fd.x - 1 && Math.abs(z - fd.z) < 2.4 + r) return false;                                              // front path
     if (x > 4.6 - r && Math.abs(z) < dz + 1.2 + r) return false;                                                 // driveway, ramp, truck
     for (const p of level.props) if (Math.hypot(p.x - x, p.z - z) < 1.2 + r) return false;
@@ -611,6 +703,17 @@ function decorateYard(g, level, rng) {
   const lamps = []; for (let x = fd.x + 2.5; x < 4.4; x += 3.5) for (const s of [-1, 1]) lamps.push({ x, z: fd.z + s * 2.0, rot: 0 });
   add('lamppost1', lamps, 2.4);
   const cart = place(1, 1.4); if (cart.length) add('hotdog', [{ ...cart[0], rot: rng() * 6.28 }], 1.7);
+  // a white picket fence round the back and sides of the yard (the street side stays open to the truck)
+  const fb = new Batch(), PK = 0xf1e6d2, POST = 0xd9ccb6, fx1 = Math.min(L.x1, 4.2);
+  const run = (alongX, fixed, a0, a1) => {
+    for (const y of [0.32, 0.72]) alongX ? fb.box(a0, y, fixed - 0.04, a1, y + 0.08, fixed + 0.04, POST, 0.3) : fb.box(fixed - 0.04, y, a0, fixed + 0.04, y + 0.08, a1, POST, 0.3);
+    for (let a = a0; a <= a1 + 1e-6; a += 0.32) {
+      const post = Math.abs((a - a0) % 2.56) < 0.01, w = post ? 0.07 : 0.045, top = post ? 1.0 : 0.88;
+      alongX ? fb.box(a - w, 0, fixed - w, a + w, top, fixed + w, post ? POST : PK, 0.3) : fb.box(fixed - w, 0, a - w, fixed + w, top, a + w, post ? POST : PK, 0.3);
+    }
+  };
+  run(true, L.z0, L.x0, fx1); run(true, L.z1, L.x0, fx1); run(false, L.x0, L.z0, L.z1);
+  const fm = new THREE.Mesh(fb.geometry(), voxMat); fm.castShadow = fm.receiveShadow = true; g.add(fm);
 }
 
 /** Render the four classic movers' voxel models into small portrait pictures (data URLs) for the HUD and lobby. */

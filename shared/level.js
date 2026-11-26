@@ -402,6 +402,7 @@ export function generateLevel(seed, opts = {}) {
     rooms, walls: [...houseWalls, ...TRUCK_WALLS], houseWalls, props: [], items: [], cat: [],
     frontDoor: { x: x1, z: fd }, floors: nFloors, stairs,
     variant: { mirrored, openPlan, garage },
+    doors: doors.map(d => ({ vertical: d.vertical, at: d.at, c: d.c, w: d.w || DOOR })), // inner doorways (for frames, lintels, decor)
   });
   level.doorsBetween = (a, b) => (links[rooms.indexOf(a)]?.has(rooms.indexOf(b)) ? 1 : 0);
   level.hopsFromFront = (r) => hops[rooms.indexOf(r)];

@@ -235,4 +235,8 @@ Verified: 201 unit tests; voxel e2e: controls (incl. camera turn), menu, solo, d
   - Prompts and the training coach name the right control for your device and your own key bindings
 - [x] Fixed: Daily House results could push the buttons off screen; e2e-b closes finished pages so the test isn't starved
 Verified: 201 unit tests; voxel e2e: e2e, e2e-b (x2), solo (new phone controls), dolly, wave2, menu, controls; smoke
+- [x] Detail (voxel): windows on every outside wall (frames, crossbars, sills, glass lit warm at night), wooden frames + lintels on
+      every doorway, porch lamps by the front door, hedges along the front of the house, a white picket fence round the yard,
+      decor on the wall each room's camera sees (TV, pictures, bathroom mirror, kitchen clock, bookshelves, garage tool board),
+      a warm night sky dome with a moon. Draw calls in the same range as before (one glow mesh per floor + the fence)
 
