@@ -652,7 +652,7 @@ export class MoveRoom extends Room {
       p.cursor = { gx: 1, gz: 0, rot: 0 };
       this.takeRampSlot(p);
       p.cursorCd = 0.35; // grace so held movement doesn't jerk the cursor on entry
-      this.tell(p, 'Aim with move · ACTION to drop · ROTATE to turn · BACK to leave');
+      this.tell(p, 'In the truck: aim, then place it. Turn the piece if it doesn’t fit. Back leaves the truck.');
       return;
     }
 

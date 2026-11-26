@@ -92,7 +92,7 @@ export class GameScene {
     // stack-height numbers over each truck column (load mode)
     this.colLabels = [];
     for (let gx = 0; gx < GRID.W; gx++) for (let gz = 0; gz < GRID.D; gz++) {
-      const sp = sprite('0', { fg: '#55ffcc', stroke: '#0b0820', font: 'bold 60px system-ui', w: 96, h: 96 }, [0.55, 0.55]);
+      const sp = sprite('0', { fg: '#55ffcc', stroke: '#171310', font: 'bold 60px system-ui', w: 96, h: 96 }, [0.55, 0.55]);
       sp.visible = false; sp.userData = { gx, gz, v: '0' };
       this.scene.add(sp); this.colLabels.push(sp);
     }
@@ -170,7 +170,7 @@ export class GameScene {
       l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.03, r.z0 + 1.3); s.add(l);
     }
     // walls
-    const wallMat = mat(0xe9e4ff), trimMat = mat(0x8f7bff);
+    const wallMat = mat(0xe9e4ff), trimMat = mat(0xd6c4aa);
     for (const w of level.houseWalls) {
       if (w.rail) continue; // banisters come with the stairs
       const h = 2.4; // tall enough to hide what's in the next room (movers show through as silhouettes)
@@ -326,7 +326,7 @@ export class GameScene {
         const root = makeMover(p.char, SUITS.find(x => x.id === p.suit)?.color ?? null);
         const label = sprite(p.name, { fg: '#fff', stroke: '#000', font: 'bold 40px system-ui' });
         label.position.y = 2.25; root.add(label);
-        const ready = sprite('✅ READY', { fg: '#55ffcc', stroke: '#0b0820', font: 'bold 40px system-ui' }, [2, 0.5]);
+        const ready = sprite('✅ READY', { fg: '#55ffcc', stroke: '#171310', font: 'bold 40px system-ui' }, [2, 0.5]);
         ready.position.y = 2.85; ready.visible = false; root.add(ready);
         root.position.set(p.x, 0, p.z);
         this.scene.add(root);
@@ -442,7 +442,7 @@ export class GameScene {
     if (!v) return;
     if (v.banner) { v.root.remove(v.banner); v.banner = null; }
     if (!text) return;
-    v.banner = sprite(text, { fg: '#0b0820', bg: '#55ffcc', font: 'bold 36px system-ui', w: 420, h: 72 }, [3.6, 0.62]);
+    v.banner = sprite(text, { fg: '#171310', bg: '#55ffcc', font: 'bold 36px system-ui', w: 420, h: 72 }, [3.6, 0.62]);
     v.banner.position.y = 3.2; v.root.add(v.banner);
   }
 
@@ -600,7 +600,7 @@ export class GameScene {
       else if (o.rotation.z) o.rotation.z = 0;
       if (it.type === 'flatdolly') {
         o.visible = it.state !== 'gone' && it.state !== 'parked'; // resetting / parked at the truck
-        if (!o.userData.tag) { o.userData.tag = sprite('🛞 FURNITURE DOLLY', { fg: '#ffd166', stroke: '#0b0820', font: 'bold 34px system-ui', w: 400 }, [2.4, 0.5]); o.userData.tag.position.y = 1.5; o.add(o.userData.tag); }
+        if (!o.userData.tag) { o.userData.tag = sprite('🛞 FURNITURE DOLLY', { fg: '#ffd166', stroke: '#171310', font: 'bold 34px system-ui', w: 400 }, [2.4, 0.5]); o.userData.tag.position.y = 1.5; o.add(o.userData.tag); }
         o.userData.tag.visible = it.state === 'floor';
         if (it.state === 'floor') o.userData.tag.position.y = 1.5 + Math.sin(t * 3) * 0.12;
       }
@@ -631,7 +631,7 @@ export class GameScene {
       if (it.type === 'dolly') {
         const pusher = it.pusher && this.players.get(it.pusher);
         if (pusher) o.rotation.y = pusher.face + Math.PI;
-        if (!o.userData.warn) { o.userData.warn = sprite('⚠️ CRUSHING!', { fg: '#ff4466', stroke: '#0b0820', font: 'bold 40px system-ui' }, [2.2, 0.55]); o.userData.warn.position.y = 3.1; o.add(o.userData.warn); }
+        if (!o.userData.warn) { o.userData.warn = sprite('⚠️ CRUSHING!', { fg: '#ff4466', stroke: '#171310', font: 'bold 40px system-ui' }, [2.2, 0.55]); o.userData.warn.position.y = 3.1; o.add(o.userData.warn); }
         o.userData.warn.visible = it.strain > 0.25;
         if (it.strain > 0.25) o.userData.warn.material.opacity = 0.5 + Math.abs(Math.sin(t * (6 + it.strain * 10))) * 0.5;
       }
@@ -766,7 +766,7 @@ export class GameScene {
       if (sp.userData.v !== txt) {
         sp.userData.v = txt;
         sp.material.map.dispose();
-        sp.material.map = labelTexture(txt, { fg: hv >= GRID.H ? '#ff4466' : '#55ffcc', stroke: '#0b0820', font: `bold ${txt.length > 1 ? 34 : 60}px system-ui`, w: 96, h: 96 });
+        sp.material.map = labelTexture(txt, { fg: hv >= GRID.H ? '#ff4466' : '#55ffcc', stroke: '#171310', font: `bold ${txt.length > 1 ? 34 : 60}px system-ui`, w: 96, h: 96 });
         sp.material.needsUpdate = true;
       }
       const wp = gridToWorld(sp.userData.gx, sp.userData.gz, Math.min(hv, GRID.H));
@@ -880,14 +880,14 @@ function energyTexture(e, injured) {
   const c = document.createElement('canvas');
   c.width = 220; c.height = 40;
   const g = c.getContext('2d');
-  g.fillStyle = 'rgba(11,8,32,.75)'; g.beginPath(); g.roundRect(0, 0, 220, 40, 20); g.fill();
+  g.fillStyle = 'rgba(23,19,16,.75)'; g.beginPath(); g.roundRect(0, 0, 220, 40, 20); g.fill();
   if (injured > 0) {
     g.fillStyle = '#ff4d5e'; g.font = 'bold 24px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(`🤕 HURT ${Math.ceil(injured)}s`, 110, 21);
   } else {
     g.fillStyle = e > 0.5 ? '#55ffcc' : e > 0.25 ? '#ffd166' : '#ff4d5e';
     g.beginPath(); g.roundRect(4, 4, Math.max(20, 212 * Math.max(0, e)), 32, 16); g.fill();
-    g.fillStyle = '#0b0820'; g.font = 'bold 20px system-ui'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText('⚡', 10, 21);
+    g.fillStyle = '#171310'; g.font = 'bold 20px system-ui'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText('⚡', 10, 21);
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }

@@ -134,19 +134,19 @@ export class Input {
     const knob = document.getElementById('joyknob');
     let id = null, ox = 0, oy = 0;
     const R = 50;
-    zone.addEventListener('pointerdown', (e) => {
+    const place = () => { const r = zone.getBoundingClientRect(); base.style.left = (ox - r.left) + 'px'; base.style.top = (oy - r.top) + 'px'; }; // zone-relative
+    zone.addEventListener('pointerdown', (e) => { // the stick appears wherever your thumb lands
       if (id !== null) return;
       id = e.pointerId; ox = e.clientX; oy = e.clientY;
-      base.style.display = 'block';
-      base.style.left = ox + 'px'; base.style.top = oy + 'px';
+      base.style.display = 'block'; place();
       knob.style.transform = 'translate(-50%,-50%)';
-      zone.setPointerCapture(id);
+      try { zone.setPointerCapture(id); } catch {} // some browsers refuse; the stick still works without it
     });
     zone.addEventListener('pointermove', (e) => {
       if (e.pointerId !== id) return;
       let dx = e.clientX - ox, dy = e.clientY - oy;
       const d = Math.hypot(dx, dy);
-      if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+      if (d > R) { ox += dx / d * (d - R); oy += dy / d * (d - R); place(); dx = dx / d * R; dy = dy / d * R; } // and follows it past the rim
       knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
       this.joy.x = dx / R; this.joy.z = dy / R;
     });
@@ -165,7 +165,6 @@ export class Input {
     };
     btn('btn-action', () => this.actionDown(), () => this.actionUp());
     btn('btn-dash', () => this.s.dashN++);
-    btn('btn-rot', () => this.s.rotN++);
     btn('btn-callout', () => this.onCallout?.());
   }
 

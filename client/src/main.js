@@ -12,10 +12,6 @@ import { VOXEL } from './style.js';
 if (VOXEL) { // voxel trial: small tag so testers know which look they're on
   document.body.classList.add('voxel');
   try { for (const [id, url] of Object.entries(renderClassicPortraits())) setPortrait(id, url); } catch (e) { console.warn('portraits', e); }
-  const tag = document.createElement('div');
-  tag.className = 'voxel-tag';
-  tag.innerHTML = '<a href="/">🧊 Voxel trial · classic look</a> · <a href="/credits.html">Art credits</a>';
-  document.body.appendChild(tag);
 }
 
 const $ = (id) => document.getElementById(id);
@@ -238,7 +234,7 @@ function attach(r) {
     room = null; snap = null; lastPhase = null;
     try { sessionStorage.removeItem('sm_rt'); } catch {}
     history.replaceState(null, '', location.pathname);
-    for (const s of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results']) show(s, false);
+    for (const s of ['hud', 'controls', 'joyzone', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results']) show(s, false);
     route();
     $('home-err').textContent = 'Disconnected from the crew.';
   });
@@ -344,16 +340,20 @@ function renderLobby(s, me) {
   }).join('');
   $('game-desc').textContent = s.game === 'sabotage'
     ? '🕵️ One mover is secretly a saboteur. Pack the truck perfectly before time runs out, or vote them out. Needs 3+ movers.'
-    : s.mode === 'load' ? '🧩 Full load: the house holds exactly one truckload. Pack it perfectly. Hold ✋ on the ramp to pull pieces back out.'
+    : s.mode === 'load' ? '🧩 Full load: the house holds exactly one truckload. Pack it perfectly. Hold the action on the ramp to pull pieces back out.'
     : '🏆 Everyone for themselves. Most points still on the truck wins.';
   const movers = s.players.filter(p => !p.spectator);
   const bots = s.players.filter(p => p.bot);
-  $('lobby-players').innerHTML = `Crew (${movers.length}/4): ` + s.players.map(p => `<b>${esc(p.name)}</b>${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.id === s.hostId ? ' 👑' : p.bot ? '' : p.ready ? ' ✅' : ' ⏳'}`).join(', ');
+  // the crew as a list; status is words, not icons
+  $('lobby-players').innerHTML = `<h2>Crew <small>${movers.length} of 4 movers</small></h2><ul class="crew-list">` + s.players.map(p => {
+    const st = p.id === s.hostId ? 'Crew chief' : p.bot ? 'AI mover' : p.spectator ? 'Watching' : p.ready ? 'Ready' : 'Not ready yet';
+    return `<li class="${p.id === myId ? 'me' : ''}"><span class="cl-pic">${portrait(p.char)}</span><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}</b><span class="cl-st ${p.ready || p.id === s.hostId ? 'ok' : ''}">${st}</span></li>`;
+  }).join('') + '</ul>';
   const waitingOn = s.players.filter(p => !p.bot && !p.spectator && p.id !== s.hostId && !p.ready);
   const meReadyL = !!me?.ready;
   show('btn-ready-lobby', !host && !!me && !me.spectator);
   $('btn-ready-lobby').classList.toggle('on', meReadyL);
-  $('btn-ready-lobby').textContent = meReadyL ? '✅ Ready! (tap to undo)' : '✋ I\'m ready';
+  $('btn-ready-lobby').textContent = meReadyL ? 'Ready (tap to undo)' : 'I\'m ready';
   $('lobby-house').innerHTML = lv ? `🏠 <b>${esc(lv.name)}</b> · ${lv.rooms} rooms${(lv.floors || 1) > 1 ? ` on ${lv.floors} floors` : ''} · ${Math.round(lv.yard)} m to the truck` : '';
   show('btn-reroll', host && lv && !lv.classic);
   show('bot-controls', host || bots.length > 0);
@@ -364,7 +364,7 @@ function renderLobby(s, me) {
   $('btn-rmbot').disabled = bots.length === 0;
   show('btn-start', host);
   $('btn-start').disabled = host && waitingOn.length > 0;
-  if (host) $('btn-start').textContent = waitingOn.length ? `Waiting for ${waitingOn.length} to ready up…` : 'Start the move ▶';
+  if (host) $('btn-start').textContent = waitingOn.length ? `Waiting for ${waitingOn.length} to get ready` : 'Start the move';
   $('lobby-wait').textContent = !host ? (meReadyL ? 'You\'re ready. The crew chief 👑 starts when everyone is.' : 'Tap “I’m ready” when you are.')
     : waitingOn.length ? `Waiting on ${waitingOn.map(p => p.name).join(', ')}.`
     : s.game === 'sabotage' && movers.length < 3 ? 'Sabotage needs 3+ movers. Add AI movers or invite friends.'
@@ -465,8 +465,9 @@ function renderHud(s, me) {
   const tut = s.tutorial;
   show('coach', !!tut && s.phase === 'playing');
   if (tut) {
-    const keys = isTouch ? { ACT: '✋', ROT: '⟳', HELP: '🆘' } : { ACT: 'E', ROT: 'R', HELP: 'H' };
-    $('coach-text').textContent = (tut.text || '').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]);
+    const keys = isTouch ? { ACT: 'the big button', ROT: 'a quick swipe', HELP: 'Need a hand' }
+      : input.pad.connected ? { ACT: 'A', ROT: 'X', HELP: 'Y' } : { ACT: keyName(input.binds.action), ROT: keyName(input.binds.rotate), HELP: keyName(input.binds.help) };
+    $('coach-text').textContent = (tut.text || '').replace(/Tap \{ROT\}/g, isTouch ? 'Use {ROT}' : 'Tap {ROT}').replace(/\{(ACT|ROT|HELP)\}/g, (_, k) => keys[k]);
     $('coach-dots').innerHTML = Array.from({ length: tut.total || 0 }, (_, i) => `<i class="${i < tut.step ? 'done' : ''}"></i>`).join('');
   }
   scene.tutorialTarget = tut?.target || null;
@@ -479,21 +480,21 @@ function renderHud(s, me) {
     show('hud-crew', sabotage);
     if (sabotage) { $('hud-crew').textContent = s.overtime ? `⏰ Crew ${s.crewScore}` : `🧰 Crew ${s.crewScore}`; $('hud-crew').classList.toggle('drain', !!s.overtime); }
   }
-  $('hud-truck').textContent = `🚚 ${s.loadedCount}/${s.totalItems}${isTouch ? '' : ' loaded'}`;
+  $('hud-truck').textContent = `${s.loadedCount}/${s.totalItems} ${isTouch ? 'in truck' : 'in the truck'}`;
   const held = me?.carry ? s.items.find(i => i.id === me.carry) : null;
   const needHand = !!held && !me.loadMode && ITEM_TYPES[held.type].teamCarry && held.n === 1 && s.players.filter(p => !p.out && !p.spectator).length > 1 && s.phase === 'playing';
   show('hud-help', needHand && !isTouch);
   show('btn-help', needHand && isTouch);
-  // phones: D-pad + drag replace the joystick while aiming in the truck
+  // phones: the stick also moves the aim in the truck; drag on the truck aims, a quick swipe turns the piece
   const aiming = !!me?.loadMode && s.phase === 'playing';
-  show('dpad', aiming && isTouch);
   document.body.classList.toggle('aiming', aiming);
-  show('joyzone', !aiming && isTouch && s.phase !== 'meeting');
+  show('joyzone', isTouch && s.phase !== 'meeting');
+  const it0 = aiming && me.carry ? s.items.find(i => i.id === me.carry) : null;
+  show('swipe-hint', isTouch && !!it0 && orientations(it0.type).length > 1);
   const canCall = s.phase === 'playing' && s.canCallOut && (s.openBreaks > 0 || s.game === 'sabotage') && me && !me.out && !me.spectator;
   show('hud-callout', canCall && !isTouch);
   show('btn-callout', canCall);
-  show('btn-rot', !!me?.loadMode);
-  $('dash-label').textContent = me?.loadMode ? 'BACK' : 'DASH';
+  $('dash-label').textContent = me?.loadMode ? 'Back' : 'Dash';
   // energy: one friendly tip per round the first time you run low
   if (me && s.phase === 'playing' && (me.energy ?? 1) < 0.3 && !(me.injured > 0) && energyTipRound !== s.level?.seed) { energyTipRound = s.level?.seed; toast('⚡ Running out of energy! Slow down, or stop for a second to catch your breath, before you get hurt.'); }
   renderDuel(s);
@@ -515,6 +516,8 @@ function nearest(s, me) {
   return best;
 }
 
+/** what to press for the main action on this device */
+const actKey = () => (isTouch ? 'the big button' : input.pad.connected ? 'A' : keyName(input.binds.action));
 function renderPrompt(s, me) {
   let text = '', action = 'ACTION';
   if (!me) return;
@@ -522,33 +525,33 @@ function renderPrompt(s, me) {
   else if (me.out) text = '👻 You got kicked off the truck. Float around and watch!';
   else if (s.phase === 'meeting') text = '';
   else if (me.loadMode && me.unloading) {
-    text = scene.pullTarget ? `↩️ ${isTouch ? '✋ PULL' : 'E pulls'} the ${scene.pullTarget.toLowerCase()} off this stack · ${isTouch ? 'BACK' : 'Shift'} to leave` : '↩️ Aim at a stack to pull its top piece';
+    text = scene.pullTarget ? `↩️ ${isTouch ? 'Pull out takes' : actKey() + ' pulls'} the ${scene.pullTarget.toLowerCase()} off this stack · ${isTouch ? 'Back' : keyName(input.binds.dash)} to leave` : '↩️ Aim at a stack to pull its top piece';
     action = 'PULL';
   } else if (me.loadMode) {
     const it = s.items.find(i => i.id === me.carry);
     const f = it ? footprint(it.type, me.cursor?.rot || 0) : null;
     const turn = it && orientations(it.type).length > 1 ? ` · ${isTouch ? 'ROTATE' : 'R'} turn/flip (${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h})` : '';
-    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `🎯 D-pad or drag to aim · ✋ DROP${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
+    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `Stick or drag to aim · swipe turns it · Place${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
     action = 'DROP';
   } else if (!me.carry && !me.dolly && !s.level?.tutorial && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
-    text = `🧩 Hold ${isTouch ? '✋' : 'E'} to unload pieces from the truck and repack`;
+    text = `🧩 Hold ${actKey()} to unload pieces from the truck and repack`;
     action = 'HOLD ↩️';
   } else if (me.flatDolly && !me.carry) {
     const d = s.items.find(i => i.id === me.flatDolly), pc = d?.piece && s.items.find(i => i.id === d.piece);
     text = pc ? `🛞 ${ITEM_TYPES[pc.type].label} on the furniture dolly · push it to the 🚚 truck and place it yourself`
-      : `🛞 Furniture dolly · tap ${isTouch ? '✋' : 'E'} next to a couch, bed, desk or table (take desks/tables apart first)`;
+      : `🛞 Furniture dolly · tap ${actKey()} next to a couch, bed, desk or table (take desks/tables apart first)`;
     action = pc ? 'SET DOWN' : 'LOAD';
   } else if (me.dolly && !me.carry) {
     const d = s.items.find(i => i.id === me.dolly);
     const n = d?.stack?.length || 0;
     text = d?.strain > 0.25 ? '⚠️ A heavy box is crushing the box under it! Get to the truck or restack.'
-      : n ? `🛒 Dolly ${n}/3 · ${n < 3 ? `tap ${isTouch ? '✋' : 'E'} by a box to add it · ` : ''}push it to the truck to unload, top box first`
-      : `🛒 Dolly 0/3 · tap ${isTouch ? '✋' : 'E'} next to boxes to stack them (boxes only)`;
+      : n ? `🛒 Dolly ${n}/3 · ${n < 3 ? `tap ${actKey()} by a box to add it · ` : ''}push it to the truck to unload, top box first`
+      : `🛒 Dolly 0/3 · tap ${actKey()} next to boxes to stack them (boxes only)`;
     action = n < 3 ? 'STACK' : 'SET DOWN';
   } else if (me.carry) {
     const it = s.items.find(i => i.id === me.carry);
     const t = it && ITEM_TYPES[it.type];
-    if (t?.teamCarry && it.n === 1 && s.players.filter(p => !p.out && !p.spectator).length > 1) text = `💪 Need a crewmate on the other end of the ${t.label.toLowerCase()} · ${isTouch ? '🆘' : 'H'} calls for help`;
+    if (t?.teamCarry && it.n === 1 && s.players.filter(p => !p.out && !p.spectator).length > 1) text = `💪 Need a crewmate on the other end of the ${t.label.toLowerCase()} · ${isTouch ? 'Need a hand' : input.pad.connected ? 'Y' : keyName(input.binds.help)} calls for help`;
     else if (t) text = `Carrying ${t.label}${t.heavy && !t.furniture ? ' (heavy = slow!)' : ''} → take it to the 🚚 LOAD ZONE`;
     action = 'SET DOWN';
   } else {
@@ -565,7 +568,13 @@ function renderPrompt(s, me) {
   }
   $('prompt').textContent = text;
   show('prompt', !!text && !s.tutorial); // in training the Coach does the talking
-  $('action-label').textContent = action;
+  // the big button says what it will do right now
+  const WORD = { 'ACTION': ['Grab', ''], 'GRAB': ['Grab', ''], 'SET DOWN': ['Drop', ''], 'DROP': ['Place', ''], 'PULL': ['Pull out', ''],
+    'HOLD ↩️': ['Unload', 'hold'], 'STACK': ['Stack', ''], 'LOAD': ['Load', ''], 'LIFT': ['Lift', ''], 'STEAL': ['Steal', ''],
+    'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'HOLD 🔧': ['Take apart', 'hold'] };
+  const [w, sub] = WORD[action] || [action, ''];
+  if ($('action-label').textContent !== w) $('action-label').textContent = w;
+  $('action-sub').textContent = me.task ? 'keep holding' : sub;
 }
 
 // ---------- events ----------
@@ -601,7 +610,7 @@ function onEvent(e) {
     const r = $('role');
     r.className = myRole ? 'sab' : 'crew';
     r.innerHTML = myRole
-      ? '<div class="card"><div class="big-icon">🕵️</div><h2>You are the SABOTEUR</h2><p>Keep the crew from packing a perfect load. Hold ✋ on desks and tables to jam their bolts, and crush boxes when nobody is looking. Don’t get voted out.</p></div>'
+      ? '<div class="card"><div class="big-icon">🕵️</div><h2>You are the SABOTEUR</h2><p>Keep the crew from packing a perfect load. Hold the action on desks and tables to jam their bolts, and crush boxes when nobody is looking. Don’t get voted out.</p></div>'
       : '<div class="card"><div class="big-icon">🧰</div><h2>You are CREW</h2><p>Pack the truck perfectly before time runs out. Someone on this crew is a saboteur. Watch for crunches and call a meeting to vote them out.</p></div>';
     show(r); sfx(myRole ? 'buzz' : 'coin');
     setTimeout(() => show(r, false), 5000);
@@ -694,34 +703,35 @@ function renderResults(s, me) {
       + (sp ? `${portrait(sp.char)}<div class="w">The saboteur was ${esc(sp.name)}${sp.id === myId ? ' (you!)' : ''}</div>` : '')
       + `<div class="team">Final crew score: ${r.crewScore}</div>`;
   } else
-  $('res-winner').innerHTML = w ? `<div class="w">👑 ${esc(w.name)}${w.id === myId ? ' (you!)' : ''} is Mover of the Day!</div>` : '<div class="w">Nobody stayed on the truck… 🙃</div>';
+  $('res-winner').innerHTML = w ? `<div class="w">${esc(w.name)}${w.id === myId ? ' (you)' : ''} is Mover of the Day</div>` : '<div class="w">Nobody stayed on the truck.</div>';
   // podium: every mover with name on top, place, points, crown for the winner, ✅ when ready to restart
   const live = new Map(s.players.map(p => [p.id, p]));
   const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) ? 0 : n % 10] || 'th');
-  $('res-podium').innerHTML = r.players.map((p, i) => `
-    <div class="pod ${i === 0 && !p.out ? 'p1' : ''} ${p.id === myId ? 'me' : ''} ${p.out ? 'out' : ''}">
-      ${p.id === r.winnerId ? '<span class="crown">👑</span>' : ''}${live.get(p.id)?.ready ? '<span class="rd" title="Ready to restart">✅</span>' : ''}
-      <div class="nm">${esc(p.name)}${p.bot ? ' 🤖' : ''}</div>
-      ${portrait(p.char)}
-      <div class="place">${ordinal(i + 1)}${p.out ? ' · off the truck' : ''}</div>
-      <div class="pts">${p.score}</div>${r.tally?.[p.id] ? `<div class="tl">${r.tally[p.id].pieces} pcs${r.tally[p.id].placement ? ` · packing ${r.tally[p.id].placement}` : ''}</div>` : ''}
-    </div>`).join('');
+  // ranked list: place, mover, what they did, points; status in words
+  $('res-podium').innerHTML = '<ol class="rank-list">' + r.players.map((p, i) => {
+    const t = r.tally?.[p.id], rd = live.get(p.id)?.ready;
+    const what = [t ? `${t.pieces} piece${t.pieces === 1 ? '' : 's'} loaded` : null, t?.placement ? `packing ${t.placement > 0 ? '+' : ''}${t.placement}` : null, p.out ? 'off the truck' : null, rd ? 'ready to restart' : null].filter(Boolean).join(' · ');
+    return `<li class="${p.id === myId ? 'me' : ''} ${p.out ? 'out' : ''} ${p.id === r.winnerId ? 'win' : ''}">
+      <span class="rk">${ordinal(i + 1)}</span><span class="rk-pic">${portrait(p.char)}</span>
+      <span class="rk-who"><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}${p.bot ? ' <small>AI</small>' : ''}</b>${what ? `<small>${what}</small>` : ''}</span>
+      <span class="rk-pts"><b>${p.score}</b><small>points</small></span></li>`;
+  }).join('') + '</ol>';
   const humans = s.players.filter(p => !p.bot);
   const readyN = humans.filter(p => p.ready).length;
   const meReady = !!live.get(myId)?.ready;
-  $('btn-ready').textContent = meReady ? `✅ Ready (${readyN}/${humans.length})` : `🔁 Restart game${humans.length > 1 ? ` (${readyN}/${humans.length} ready)` : ''}`;
+  $('btn-ready').textContent = meReady ? `Ready (${readyN} of ${humans.length})` : `Play again${humans.length > 1 ? ` (${readyN} of ${humans.length} ready)` : ''}`;
   $('btn-ready').classList.toggle('on', meReady);
   $('res-table') && ($('res-table').innerHTML = r.players.map((p, i) => `
     <div class="res-row ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}"><span>#${i + 1}</span>${portrait(p.char)}<span><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}${p.bot ? '<span class="tag-bot">AI</span>' : ''}${p.out ? ' · off the truck' : ''}<br><small>${p.loaded} loaded · ${p.breaks} broken · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}</small></span><span class="s">${p.score}</span><span></span></div>`).join('') +
     `<div class="team">🚚 Team truck value: ${r.teamTotal} pts · ${r.loadedCount}/${r.totalItems} items loaded · ${r.broken} broken${r.difficulty ? ` · AI: ${r.difficulty}` : ''}</div>`);
   $('res-awards').innerHTML = (r.awards || []).filter(a => a.value > 0).map(a => `<div class="award">${a.title}: <b>${esc(a.name)}</b> (${a.value})</div>`).join('');
-  $('res-drive').innerHTML = (r.driveoff ? `🚚 Drive-off safety: <b>${r.driveoff.safety}%</b>${r.driveoff.lost.length ? ' · ' + r.driveoff.lost.map(l => `${esc(l.name)} −${l.amt}`).join(', ') : ''}` : '')
+  $('res-drive').innerHTML = (r.driveoff ? `Drive-off safety <b>${r.driveoff.safety}%</b> <small>(how much of the load arrived without shifting)</small>${r.driveoff.lost.length ? ' · ' + r.driveoff.lost.map(l => `${esc(l.name)} −${l.amt}`).join(', ') : ''}` : '')
     + (r.tally?.[myId] ? (() => { const t = r.tally[myId]; const ln = (lbl, v, cls = '') => `<div class="ln ${v < 0 ? 'neg' : ''} ${cls}"><span>${lbl}</span><span>${v > 0 && cls !== 'tot' ? '+' : ''}${v}</span></div>`;
-        return `<div class="tally"><h4>📋 Your load report</h4>${ln(`${t.pieces} piece${t.pieces === 1 ? '' : 's'} in the truck`, t.base)}${t.condition ? ln('Condition (rot, scuffs)', t.condition) : ''}${t.placement ? ln('Placement (support, heavy low, fragile on top)', t.placement) : ''}${t.damage ? ln('Damaged on the drive', t.damage) : ''}${ln('Load total', t.final, 'tot')}</div>`; })() : '');
+        return `<div class="tally"><h4>Your load report</h4>${ln(`${t.pieces} piece${t.pieces === 1 ? '' : 's'} in the truck`, t.base)}${t.condition ? ln('Condition (rot, scuffs)', t.condition) : ''}${t.placement ? ln('Placement (support, heavy low, fragile on top)', t.placement) : ''}${t.damage ? ln('Damaged on the drive', t.damage) : ''}${ln('Load total', t.final, 'tot')}</div>`; })() : '');
   $('res-board').innerHTML = '';
   if (s.daily) renderBoard($('res-board'), s.daily, 10);
   const training = s.level?.tutorial;
-  $('btn-again').textContent = '🤖 Play a real move vs AI ▶';
+  $('btn-again').textContent = 'Play a real move against AI movers';
   $('res-truth').innerHTML = r.unresolved.length ? '🕵️ <b>The truth comes out…</b><br>' + r.unresolved.map(u => `${esc(u.culprits)} broke a ${esc(u.type.toLowerCase())} and got away with it.`).join('<br>') : '';
   // training: declared above
   show('btn-again', training);
@@ -756,7 +766,7 @@ async function leaveToMenu(askFeedback) {
   await r?.leave(true).catch(() => {});
   snap = null; lastPhase = null;
   history.replaceState(null, '', location.pathname);
-  for (const id of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach', 'train-done']) show(id, false);
+  for (const id of ['hud', 'controls', 'joyzone', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach', 'train-done']) show(id, false);
   $('train-done').dataset.done = '';
   scene.resetDrive();
   route();
@@ -852,32 +862,11 @@ $('fb-skip').onclick = () => answerFeedback(null);
 
 // ---------- truck aiming: D-pad + drag (drop still happens on ACTION) ----------
 const meNow = () => snap?.players.find(p => p.id === myId);
-function aimStep(dir) {
-  const me = meNow();
-  if (!room || !me?.loadMode || !me.cursor) return;
-  const [sx, sy] = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[dir];
-  const st = scene.gridStepFor(sx, sy);
-  room.send('aim', { gx: me.cursor.gx + st.dgx, gz: me.cursor.gz + st.dgz });
-  sfx('tick');
-}
-let dpadRepeat = null;
-$('dpad').addEventListener('pointerdown', (e) => {
-  const b = e.target.closest('button[data-dir]');
-  if (!b) return;
-  e.preventDefault();
-  b.classList.add('down');
-  aimStep(b.dataset.dir);
-  clearInterval(dpadRepeat);
-  dpadRepeat = setInterval(() => aimStep(b.dataset.dir), 220);
-  const up = () => { clearInterval(dpadRepeat); b.classList.remove('down'); };
-  b.addEventListener('pointerup', up, { once: true });
-  b.addEventListener('pointerleave', up, { once: true });
-  b.addEventListener('pointercancel', up, { once: true });
-});
 let lastAim = '';
 function dragAim(e) {
   const me = meNow();
   if (!room || !me?.loadMode) return;
+  if (e.pointerType === 'touch' && e.type === 'pointermove') { const g = touches.get(e.pointerId); if (g && performance.now() - g.t < 160) return; } // might be a swipe
   if (e.pointerType !== 'mouse' && e.type === 'pointermove' && !e.buttons && e.pressure === 0) return;
   const cell = scene.pickGrid(e.clientX, e.clientY);
   if (!cell) return;
@@ -900,6 +889,24 @@ scene.renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && mouseAct) { mouseAct = false; input.actionUp(); } });
 scene.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+// touch gestures on the game view (anywhere that isn't the stick or a button; a second finger works while you steer):
+// walking around, drag to turn the camera; in the truck, a slow drag aims and a quick swipe turns the piece
+const touches = new Map();
+const cv = scene.renderer.domElement;
+cv.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() }); });
+cv.addEventListener('pointermove', (e) => {
+  const g = touches.get(e.pointerId); if (!g) return;
+  const me = meNow();
+  if (!me?.loadMode) scene.camYaw = ((scene.camYaw || 0) - (e.clientX - g.x) * 0.008) % (Math.PI * 2);
+  g.x = e.clientX; g.y = e.clientY;
+});
+const touchEnd = (e) => {
+  const g = touches.get(e.pointerId); if (!g) return;
+  touches.delete(e.pointerId);
+  const me = meNow(), dt = performance.now() - g.t, dist = Math.hypot(e.clientX - g.sx, e.clientY - g.sy);
+  if (me?.loadMode && dt < 300 && dist > 40 && room) { input.s.rotN++; sfx('tick'); }
+};
+cv.addEventListener('pointerup', touchEnd); cv.addEventListener('pointercancel', touchEnd);
 // hold the wheel (middle button) and move the mouse to turn the camera; double-click the wheel to put it back
 let camDrag = null;
 scene.renderer.domElement.addEventListener('pointerdown', (e) => {

@@ -30,20 +30,14 @@
 
   <!-- touch controls -->
   <div id="joyzone" class="hidden"><div id="joybase"><div id="joyknob"></div></div></div>
-  <div id="dpad" class="hidden">
-    <button data-dir="up" aria-label="Aim up">▲</button>
-    <button data-dir="left" aria-label="Aim left">◀</button>
-    <button data-dir="right" aria-label="Aim right">▶</button>
-    <button data-dir="down" aria-label="Aim down">▼</button>
-    <span class="dpad-tip">or drag on the truck</span>
-  </div>
+  <!-- phones: an invisible stick that appears under your thumb (bottom left); buttons bottom right. Rotate = swipe -->
   <div id="controls" class="hidden">
-    <button id="btn-help" class="hidden">🆘<span>HELP</span></button>
-    <button id="btn-callout" class="hidden">📣<span>CALL OUT</span></button>
-    <button id="btn-rot" class="hidden">⟳<span>ROTATE</span></button>
-    <button id="btn-dash">🚀<span id="dash-label">DASH</span></button>
-    <button id="btn-action">✋<span id="action-label">ACTION</span></button>
+    <button id="btn-callout" class="hidden"><b>Call out</b></button>
+    <button id="btn-help" class="hidden"><b>Need a hand</b></button>
+    <button id="btn-dash"><b id="dash-label">Dash</b></button>
+    <button id="btn-action"><b id="action-label">Grab</b><small id="action-sub"></small></button>
   </div>
+  <div id="swipe-hint" class="hidden">Swipe to turn the piece</div>
 
   <!-- HUD -->
   <div id="hud" class="hidden">
@@ -94,7 +88,7 @@
       <a class="book-cta" data-where="gate" href="https://www.starsidemovers.com/book-online?utm_source=letsmoveit&amp;utm_medium=game&amp;utm_campaign=lets-move-it&amp;utm_content=gate" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M2 6h11v10H2zM13 9h4.5l3.5 3.5V16h-8"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg><span>Book a move with Starside Movers</span></a>
       <small class="promo-area">Central Florida only</small>
     </aside>
-    <footer class="powered">Powered by &amp; created by <b>Starside Movers</b></footer>
+    <footer class="powered">Powered by &amp; created by <b>Starside Movers</b> · <a href="/credits.html">Art credits</a></footer>
   </section>
 
   <!-- Home -->
@@ -104,10 +98,10 @@
       <p class="hello" id="home-hi">Welcome back, mover!</p>
       <div class="stats" id="home-stats"></div>
       <nav class="menu-list" aria-label="Main menu">
-        <button class="mi mi-train hidden" id="btn-train" style="--c:#2ec4b6"><span class="ico"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3.5 2.5 8.5 2.5 12 0v-5M22 9v6"/></svg></span><span class="txt"><b>New here? Start training</b><small>Two minutes with a coach</small></span><span class="chev">›</span></button>
+        <button class="mi mi-train hidden" id="btn-train" style="--c:#6fd4a8"><span class="ico"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3.5 2.5 8.5 2.5 12 0v-5M22 9v6"/></svg></span><span class="txt"><b>New here? Start training</b><small>Two minutes with a coach</small></span><span class="chev">›</span></button>
         <button class="mi mi-primary" id="btn-quick" style="--c:#ff8a3d"><span class="ico"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span><span class="txt"><b>Quick Play</b><small>Jump into an open game</small></span><span class="chev">›</span></button>
         <div class="mi-group">
-          <button class="mi" id="btn-solo" style="--c:#a66cff"><span class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8.5 12h.01M15.5 12h.01M9 16h6"/></svg></span><span class="txt"><b>Solo vs 3 AI</b><small>Pick how tough they are</small></span><span class="chev">›</span></button>
+          <button class="mi" id="btn-solo" style="--c:#d6c4aa"><span class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8.5 12h.01M15.5 12h.01M9 16h6"/></svg></span><span class="txt"><b>Solo vs 3 AI</b><small>Pick how tough they are</small></span><span class="chev">›</span></button>
           <div class="seg" id="home-diff" role="group" aria-label="AI difficulty"><button data-level="easy">Easy</button><button data-level="normal">Normal</button><button data-level="hard">Hard</button></div>
         </div>
         <div class="mi-group">
@@ -115,7 +109,7 @@
           <div class="board" id="daily-board"></div>
         </div>
         <div class="mi-group">
-          <button class="mi" id="btn-create" style="--c:#55ffcc"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9.5" r="2.4"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5M15.5 15.2c2.6-.3 4.8 1.3 5.5 4.8"/></svg></span><span class="txt"><b>Play with friends</b><small>Start a crew and share the link</small></span><span class="chev">›</span></button>
+          <button class="mi" id="btn-create" style="--c:#e9a87c"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9.5" r="2.4"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5M15.5 15.2c2.6-.3 4.8 1.3 5.5 4.8"/></svg></span><span class="txt"><b>Play with friends</b><small>Start a crew and share the link</small></span><span class="chev">›</span></button>
           <div class="join-row"><input id="join-code" placeholder="Have an invite? Paste it here" aria-label="Invite link or crew code" /><button id="btn-join">Join</button></div>
         </div>
       </nav>
@@ -149,7 +143,7 @@
       <a class="book-cta" data-where="home" href="https://www.starsidemovers.com/book-online?utm_source=letsmoveit&amp;utm_medium=game&amp;utm_campaign=lets-move-it&amp;utm_content=home" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M2 6h11v10H2zM13 9h4.5l3.5 3.5V16h-8"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg><span>Book a move with Starside Movers</span></a>
       <small class="promo-area">Central Florida only</small>
     </aside>
-    <footer class="powered">Powered by &amp; created by <b>Starside Movers</b></footer>
+    <footer class="powered">Powered by &amp; created by <b>Starside Movers</b> · <a href="/credits.html">Art credits</a></footer>
   </section>
 
   <!-- In-game menu (the round keeps going: it's a crew game) -->
@@ -180,57 +174,58 @@
 
   <!-- Lobby -->
   <section id="lobby" class="screen hidden">
-    <div class="card wide">
-      <div class="logo small"><span class="star">★</span> CREW <b id="lobby-code"></b></div>
-      <div class="share">
-        <input id="share-link" readonly />
-        <button id="btn-copy">Copy invite</button>
-      </div>
-      <h3>Pick your mover</h3>
-      <div class="chars" id="chars"></div>
-      <h3>Game</h3>
-      <div class="modes two" id="games">
-        <button data-game="classic">🏆 Competitive</button>
-        <button data-game="sabotage">🕵️ Sabotage</button>
-      </div>
-      <p class="fine" id="game-desc"></p>
-      <h3>Round</h3>
-      <div class="modes" id="modes">
-        <button data-mode="3min">⏱ 3 min</button>
-        <button data-mode="5min">⏱ 5 min</button>
-        <button data-mode="load">🧩 Full load</button>
-      </div>
-      <div class="house-row"><span id="lobby-house"></span><button class="ghost small" id="btn-reroll">🎲 New house</button></div>
-      <form class="code-row" id="code-form"><label for="code-input">House code <b id="house-code"></b></label><input id="code-input" maxlength="9" autocomplete="off" spellcheck="false" placeholder="Type a code" /><button class="ghost small" type="submit">Use code</button></form>
-      <div class="lobby-pref"><span>Guidance arrow <small>points to the nearest piece, then the truck</small></span><div class="gm-seg" data-set="arrow" role="group" aria-label="Guidance arrow"><button data-v="on">On</button><button data-v="off">Off</button></div></div>
-      <div id="twist-controls">
-        <h3>House twist</h3>
-        <div class="modes" id="twists">
-          <button data-twist="none">🏠 Normal</button><button data-twist="zerog">🪐 Zero-G</button><button data-twist="mansion">🏰 Moon Mansion</button>
-        </div>
-      </div>
-      <p class="setup-note" id="setup-note"></p>
-      <div id="floor-controls">
-        <h3>Floors <small>more floors, more stairs, +30 s per extra floor</small></h3>
-        <div class="modes" id="floors">
-          <button data-floors="1">1 floor</button><button data-floors="2">2 floors</button><button data-floors="3">3 floors</button><button data-floors="4">4 floors</button>
-        </div>
-      </div>
-      <h3>Your suit</h3>
-      <div class="suits" id="suits"></div>
+    <div class="card wide lobby-card">
+      <header class="lb-head">
+        <h1 class="lb-title">Crew <b id="lobby-code"></b></h1>
+        <div class="share"><input id="share-link" readonly aria-label="Invite link" /><button id="btn-copy">Copy invite</button></div>
+      </header>
+
+      <section class="lb-sec" aria-labelledby="lb-mover">
+        <h2 id="lb-mover">Your mover</h2>
+        <div class="chars" id="chars"></div>
+        <div class="lrow"><span class="lb-label">Suit</span><div class="suits" id="suits"></div></div>
+      </section>
+
+      <section class="lb-sec" aria-labelledby="lb-game">
+        <h2 id="lb-game">Game</h2>
+        <div class="lrow"><span class="lb-label">Mode</span><div class="modes two" id="games" role="group" aria-label="Game mode">
+          <button data-game="classic">Competitive</button><button data-game="sabotage">Sabotage</button></div></div>
+        <p class="fine lb-note" id="game-desc"></p>
+        <div class="lrow"><span class="lb-label">Round</span><div class="modes" id="modes" role="group" aria-label="Round length">
+          <button data-mode="3min">3 min</button><button data-mode="5min">5 min</button><button data-mode="load">Full load</button></div></div>
+      </section>
+
+      <section class="lb-sec" aria-labelledby="lb-house">
+        <h2 id="lb-house">House</h2>
+        <div class="house-row"><span id="lobby-house"></span><button class="ghost small" id="btn-reroll">New house</button></div>
+        <form class="code-row" id="code-form"><label for="code-input">House code <b id="house-code"></b></label><input id="code-input" maxlength="9" autocomplete="off" spellcheck="false" placeholder="Type a code" /><button class="ghost small" type="submit">Use code</button></form>
+        <div id="floor-controls" class="lrow"><span class="lb-label">Floors <small>+30 s each extra</small></span><div class="modes" id="floors" role="group" aria-label="Floors">
+          <button data-floors="1">1</button><button data-floors="2">2</button><button data-floors="3">3</button><button data-floors="4">4</button></div></div>
+        <div id="twist-controls" class="lrow"><span class="lb-label">Twist</span><div class="modes" id="twists" role="group" aria-label="House twist">
+          <button data-twist="none">None</button><button data-twist="zerog">Zero-G</button><button data-twist="mansion">Moon Mansion</button></div></div>
+        <p class="setup-note lb-note" id="setup-note"></p>
+      </section>
+
+      <section class="lb-sec" id="bot-controls" aria-labelledby="lb-ai">
+        <h2 id="lb-ai">AI movers</h2>
+        <div class="lrow"><span class="lb-label">Skill</span><div class="diff" id="lobby-diff" role="group" aria-label="AI difficulty">
+          <button data-level="easy">Easy</button><button data-level="normal">Normal</button><button data-level="hard">Hard</button></div></div>
+        <div class="row botrow"><button class="ghost small" id="btn-addbot">Add an AI mover</button><button class="ghost small" id="btn-rmbot">Remove one</button></div>
+      </section>
+
+      <section class="lb-sec" aria-labelledby="lb-you">
+        <h2 id="lb-you">Just for you</h2>
+        <div class="lobby-pref"><span>Guidance arrow <small>points to the nearest piece, then the truck</small></span><div class="gm-seg" data-set="arrow" role="group" aria-label="Guidance arrow"><button data-v="on">On</button><button data-v="off">Off</button></div></div>
+      </section>
+
+      <section class="lb-sec"><div class="lobby-players" id="lobby-players"></div></section>
       <p class="fine" id="quick-note"></p>
-      <div id="bot-controls">
-        <h3>AI movers</h3>
-        <div class="diff" id="lobby-diff" role="group" aria-label="AI difficulty">
-          <button data-level="easy">Easy</button><button data-level="normal">Normal</button><button data-level="hard">Hard</button>
-        </div>
-        <div class="row botrow"><button class="ghost small" id="btn-addbot">＋ Add AI</button><button class="ghost small" id="btn-rmbot">－ Remove AI</button></div>
-      </div>
-      <div class="lobby-players" id="lobby-players"></div>
-      <button class="big alt hidden" id="btn-ready-lobby">✋ I'm ready</button>
-      <button class="big" id="btn-start">Start the move ▶</button>
-      <p class="fine" id="lobby-wait"></p>
-      <p class="tip" id="lobby-tip"></p>
+      <footer class="lb-foot">
+        <button class="big alt hidden" id="btn-ready-lobby">I'm ready</button>
+        <button class="big" id="btn-start">Start the move</button>
+        <p class="fine" id="lobby-wait"></p>
+        <p class="tip" id="lobby-tip"></p>
+      </footer>
     </div>
   </section>
 
@@ -269,10 +264,10 @@
       <div id="res-truth"></div>
       <div id="res-board"></div>
       <div class="res-buttons">
-        <button class="big" id="btn-ready">🔁 Restart game</button>
-        <button class="big alt" id="btn-newgame">🏠 New game</button>
+        <button class="big" id="btn-ready">Play again</button>
+        <button class="big alt" id="btn-newgame">Main menu</button>
       </div>
-      <button class="big hidden" id="btn-again">Play again ▶</button>
+      <button class="big hidden" id="btn-again">Play again</button>
       <p class="fine" id="res-wait"></p>
     </div>
     <div class="res-promo"><aside class="promo">

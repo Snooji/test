@@ -17,7 +17,7 @@ export function drawMinimap(canvas, level, snap, myId, pings, objective = null) 
   const me = snap.players.find(p => p.id === myId), fl = me?.fl || 0, n = level.floors || 1, dz = 40 * fl;
   const onFl = (o) => (o.fl || 0) === fl;
   for (const r of level.rooms.filter(r => (r.storey || 0) === fl).map(r => ({ ...r, z0: r.z0 - dz, z1: r.z1 - dz }))) { g.fillStyle = '#' + r.floor.toString(16).padStart(6, '0'); g.fillRect(X(r.x0), Z(r.z0), (r.x1 - r.x0) * sc, (r.z1 - r.z0) * sc); }
-  g.fillStyle = '#e9e4ff';
+  g.fillStyle = '#f4ead8';
   for (const w0 of level.houseWalls.filter(w => (level.floorOf?.((w.z0 + w.z1) / 2) || 0) === fl)) { const w = { ...w0, z0: w0.z0 - dz, z1: w0.z1 - dz }; g.fillRect(X(w.x0), Z(w.z0), Math.max(1, (w.x1 - w.x0) * sc), Math.max(1, (w.z1 - w.z0) * sc)); }
   g.fillStyle = '#ffd166'; // stairs
   for (const st of level.stairs || []) if (st.b === fl || st.b === fl - 1) g.fillRect(X(st.x0), Z(Math.min(st.zl, st.zh)), (st.x1 - st.x0) * sc, Math.abs(st.zh - st.zl) * sc);

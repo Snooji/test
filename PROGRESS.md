@@ -223,4 +223,16 @@ Verified: 201 unit tests; voxel e2e: menu, solo, controls (rebind, fake controll
       (W = away from it). The truck view stays fixed for aiming
 - [x] Fixed: the training screen's Menu button showed the feedback form over the main menu
 Verified: 201 unit tests; voxel e2e: controls (incl. camera turn), menu, solo, dolly, wave2
+- [x] Redesign (voxel look) per the owner's DESIGN.md rules: warm charcoal / off-white / Starside orange, no purple in the UI or
+      the world (moon ground, sky light, walkway, truck trim), left-aligned cards, words on every control, status in words
+  - Phone controls: an invisible stick appears under your thumb in the bottom left and follows it; bottom right one big button that
+    says what it will do (Grab, Drop, Place, Wrap, Take apart, Lift, Steal, Stack, Pull out) + Dash/Back; Need a hand only while
+    holding a piece that needs one. Swipe on the view turns the camera; in the truck a quick swipe (or a second finger) turns the
+    piece, a slow drag aims, the stick moves the aim. D-pad and Rotate button removed
+  - Lobby: sections (Your mover, Game, House, AI movers, Just for you, Crew) with labels left, segmented controls with words right;
+    crew as a list with status words; Start pinned on desktop
+  - Results: a ranked list (place, mover, pieces loaded, points); scrolls when long with Play again / Main menu always in reach
+  - Prompts and the training coach name the right control for your device and your own key bindings
+- [x] Fixed: Daily House results could push the buttons off screen; e2e-b closes finished pages so the test isn't starved
+Verified: 201 unit tests; voxel e2e: e2e, e2e-b (x2), solo (new phone controls), dolly, wave2, menu, controls; smoke
 

@@ -41,36 +41,51 @@ s = await snap(a);
 log('after AI play: loaded', s.loadedCount, '/', s.totalItems);
 await a.screenshot({ path: `${out}/s05-ai-loading.png` });
 
-// ---- phone: truck D-pad, drag, rotate, drop ----
+// ---- phone: invisible stick, word buttons, swipe to rotate, drag to aim, drop ----
 const b = await player('Bo', 'qa-bo@example.com', { ...devices['iPhone 13'] });
 await b.click('#btn-solo');
 await b.waitForFunction(() => window.__sm.snap?.players?.filter(p => p.bot).length === 3);
 await b.screenshot({ path: `${out}/s06-phone-lobby.png` });
 await b.click('#btn-start');
 await b.waitForFunction(() => window.__sm.snap?.phase === 'playing', null, { timeout: 8000 });
+await wait(800);
+// the stick is invisible until a thumb lands in the bottom left, then appears under it and steers
+const vp = b.viewportSize();
+if (await b.isVisible('#joybase')) errors.push('stick visible before touching');
+const zone = b.locator('#joyzone');
+const sx = vp.width * 0.22, sy = vp.height * 0.8;
+const m0 = await meOf(b);
+await zone.dispatchEvent('pointerdown', { pointerId: 7, clientX: sx, clientY: sy, pointerType: 'touch', isPrimary: true });
+if (!(await b.isVisible('#joybase'))) errors.push('stick did not appear under the thumb');
+const jb = await b.locator('#joybase').boundingBox();
+if (!jb || Math.abs(jb.x + jb.width / 2 - sx) > 4 || Math.abs(jb.y + jb.height / 2 - sy) > 4) errors.push('stick not centred on the thumb');
+await zone.dispatchEvent('pointermove', { pointerId: 7, clientX: sx + 120, clientY: sy, pointerType: 'touch' }); // past the rim: the stick follows
+const jb2 = await b.locator('#joybase').boundingBox();
+if (!jb2 || jb2.x <= jb.x + 20) errors.push('stick did not follow the thumb past its rim');
+await wait(500);
+await zone.dispatchEvent('pointerup', { pointerId: 7, clientX: sx + 120, clientY: sy, pointerType: 'touch' });
+const m1 = await meOf(b);
+if (Math.hypot(m1.x - m0.x, m1.z - m0.z) < 0.5) errors.push('stick did not move the mover');
+// buttons: bottom right, the big one says what it will do; help only shows while holding something
+const ab = await b.locator('#btn-action').boundingBox();
+if (!ab || ab.x + ab.width < vp.width - 40 || ab.y + ab.height < vp.height - 60) errors.push('action button not bottom right');
+if (!/^(Grab|Lift|Wrap|Take apart|Steal|Unload|Load|Stack)$/.test((await b.textContent('#action-label')).trim())) errors.push('action label: ' + await b.textContent('#action-label'));
+if (await b.isVisible('#btn-help')) errors.push('help showing with empty hands');
 await b.evaluate(() => window.__sm.send('debug_give', { type: 'couch' }));
 await b.waitForFunction(() => { const s = window.__sm.snap; return s.players.find(p => p.id === window.__sm.myId)?.loadMode; }, null, { timeout: 5000 });
 await wait(1200);
 const c0 = (await meOf(b)).cursor;
 await b.screenshot({ path: `${out}/s07-phone-truck.png` });
-if (!(await b.isVisible('#dpad'))) errors.push('D-pad not visible in the truck');
-if (await b.isVisible('#joyzone')) errors.push('joystick still visible in the truck');
-let dmoved = 0;
-for (const dir of ['up', 'left', 'down', 'right']) {
-  const before = JSON.stringify((await meOf(b)).cursor);
-  await b.locator(`#dpad button[data-dir="${dir}"]`).dispatchEvent('pointerdown', { pointerId: 1 });
-  await b.locator(`#dpad button[data-dir="${dir}"]`).dispatchEvent('pointerup', { pointerId: 1 });
-  await wait(400);
-  const after = JSON.stringify((await meOf(b)).cursor);
-  log(`dpad ${dir}:`, before, '→', after);
-  if (before !== after) dmoved++;
-}
-if (dmoved < 2) errors.push('D-pad barely moves the aim');
-await b.locator('#btn-rot').dispatchEvent('pointerdown'); await b.locator('#btn-rot').dispatchEvent('pointerup');
+if ((await b.textContent('#action-label')).trim() !== 'Place') errors.push('in the truck the button should say Place, says ' + await b.textContent('#action-label'));
+if (!(await b.isVisible('#swipe-hint'))) errors.push('no swipe hint for a piece that turns');
+// a quick swipe on the view turns the piece
+const cvs = b.locator('#app canvas');
+await cvs.dispatchEvent('pointerdown', { pointerId: 9, clientX: vp.width * 0.6, clientY: vp.height * 0.3, pointerType: 'touch', isPrimary: true });
+await cvs.dispatchEvent('pointerup', { pointerId: 9, clientX: vp.width * 0.6 + 90, clientY: vp.height * 0.3, pointerType: 'touch' });
 await b.waitForFunction((r) => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor?.rot !== r, c0.rot, { timeout: 4000 }).catch(() => {});
 const c1 = (await meOf(b)).cursor;
-log('rotate:', c0.rot, '→', c1.rot);
-if (c1.rot === c0.rot) errors.push('ROTATE did not change orientation');
+log('swipe rotate:', c0.rot, '→', c1.rot);
+if (c1.rot === c0.rot) errors.push('a swipe did not turn the piece');
 // drag across the truck
 const box = await b.evaluate(() => { const c = document.querySelector('#app canvas'); return { w: c.clientWidth, h: c.clientHeight }; });
 let moved = false;

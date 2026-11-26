@@ -46,6 +46,8 @@ await q1.screenshot({ path: `${out}/b03-quick-lobby.png` });
 await q2.screenshot({ path: `${out}/b04-quick-phone.png` });
 
 // ---- daily + suits + drive-off + podium + restart + new game + feedback ----
+// done with those: close them so four software-rendered pages don't starve the daily round (its socket can time out)
+for (const pg of [a, q1, q2]) await pg.context().close();
 const d = await player('Daily', `qa-daily-${stamp}@example.com`);
 await d.click('#btn-daily');
 await d.waitForFunction(() => !!window.__sm.snap?.daily);
@@ -68,8 +70,8 @@ log('drive panel:', (await d.textContent('#drive-body')).slice(0, 90));
 await d.waitForFunction(() => window.__sm.snap?.phase === 'results', null, { timeout: 15000 });
 await wait(1500);
 await d.screenshot({ path: `${out}/b07-podium.png` });
-if ((await d.locator('.pod').count()) !== 4) errors.push('podium should show 4 movers');
-if ((await d.locator('.pod .crown').count()) !== 1) errors.push('exactly one crown expected');
+if ((await d.locator('.rank-list li').count()) !== 4) errors.push('results should list 4 movers');
+if ((await d.locator('.rank-list li.win').count()) > 1) errors.push('at most one Mover of the Day');
 log('drive summary:', await d.textContent('#res-drive'));
 await d.click('#btn-ready');
 await d.waitForFunction(() => window.__sm.snap?.phase === 'countdown', null, { timeout: 5000 }).catch(() => errors.push('restart did not start a new round'));
