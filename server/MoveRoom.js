@@ -1448,7 +1448,7 @@ export class MoveRoom extends Room {
     this.tally = tally;
     this.pendingEnd = [reason, forcedWinnerId, winners];
     this.phase = 'driveoff';
-    this.driveT = check.damaged.length ? 7 : 5;
+    this.driveT = check.damaged.length ? 8 : 6; // ramp in, shutter down, then the drive
     this.event({ kind: 'driveoff', safety: check.safety, damaged: check.damaged.map(d => ({ id: d.id, name: d.name, reason: d.reason, by: d.by })) });
   }
 

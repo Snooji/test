@@ -668,18 +668,26 @@ export function buildTruck(scene) {
   g.add(new THREE.Mesh(pads.geometry(), glowMat));
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), new THREE.MeshBasicMaterial({ map: labelTexture('★ STARSIDE MOVERS', { fg: '#fff', font: 'bold 34px system-ui', w: 420, h: 100 }), transparent: true }));
   logo.rotation.x = -Math.PI / 2; logo.rotation.z = Math.PI / 2; logo.position.set((x1 + TRUCK.cabX1) / 2 + 0.1, 2.92, 0); g.add(logo);
-  const r = TRUCK.ramp, rb = new Batch();
-  rb.cbox(0, 0, 0, r.x1 - r.x0, 0.12, r.z1 - r.z0 - 0.6, 0x8a86a6, 0.3);
-  const ramp = new THREE.Mesh(rb.geometry(), voxMat);
-  ramp.position.set((r.x0 + r.x1) / 2, fy / 2, 0); ramp.rotation.z = Math.atan2(fy, r.x1 - r.x0); ramp.receiveShadow = true; g.add(ramp);
+  // a U-Haul style ramp: narrow, thin, ribbed aluminium with side lips, hinged at the truck so it can slide away under the floor
+  const r = TRUCK.ramp, run = r.x1 - r.x0, RL = Math.hypot(run, fy), RW = 1.5, rb = new Batch(), AL = 0xb9bcc0, RIB = 0xd8dadc, LIP = 0x8e9196;
+  rb.box(-RL, -0.05, -RW / 2, 0, 0, RW / 2, AL, 0.3);                                                  // the deck, 5 cm thick
+  for (let x = -RL + 0.12; x < -0.05; x += 0.24) rb.box(x, 0, -RW / 2 + 0.06, x + 0.06, 0.025, RW / 2 - 0.06, RIB, 0.3); // grip ribs
+  for (const sz of [-1, 1]) rb.box(-RL, -0.05, sz * RW / 2 - (sz > 0 ? 0.06 : 0), 0, 0.07, sz * RW / 2 + (sz < 0 ? 0.06 : 0), LIP, 0.3); // side lips
+  rb.box(-RL - 0.08, -0.05, -RW / 2, -RL, -0.01, RW / 2, LIP, 0.3);                                    // toe plate
+  const ramp = new THREE.Group(), rm = new THREE.Mesh(rb.geometry(), voxMat); rm.castShadow = rm.receiveShadow = true; ramp.add(rm);
+  ramp.position.set(r.x1, fy, 0); ramp.rotation.z = Math.atan2(fy, run); g.add(ramp);
+  scene.ramp = ramp; scene.rampHome = { x: r.x1, y: fy, rot: Math.atan2(fy, run), len: RL };
   const zone = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.12 }));
   zone.rotation.x = -Math.PI / 2; zone.position.set((r.x0 + r.x1) / 2, 0.04, 0); g.add(zone);
   scene.rampZone = zone;
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.8), new THREE.MeshBasicMaterial({ map: labelTexture('LOAD ZONE ▶', { fg: '#55ffcc', font: 'bold 40px system-ui', w: 400, h: 96 }), transparent: true }));
   sign.rotation.x = -Math.PI / 2; sign.position.set((r.x0 + r.x1) / 2 - 0.3, 0.06, r.z1 + 0.7); g.add(sign);
-  const sh = new Batch(); sh.cbox(0, 0, 0, 0.12, GRID.H * CELL + 0.3, wid + 0.6, 0xd9d4f2, 0.3);
+  // roll-up shutter: anchored at the top of the doorway so it comes DOWN as it grows (ribbed, Starside white)
+  const SH = GRID.H * CELL + 0.3, sh = new Batch();
+  for (let y = 0; y < SH - 1e-6; y += 0.2) sh.box(-0.06, -Math.min(SH, y + 0.2), -(wid / 2 + 0.3), 0.06, -y - 0.02, wid / 2 + 0.3, 0xeee4d2, 0.3);
+  for (let y = 0.2; y < SH; y += 0.2) sh.box(-0.07, -y - 0.02, -(wid / 2 + 0.3), 0.07, -y, wid / 2 + 0.3, 0xc9bda8, 0.3);
   const shutter = new THREE.Mesh(sh.geometry(), voxMat);
-  shutter.position.set(x0 - 0.05, fy + (GRID.H * CELL + 0.3) / 2, 0);
+  shutter.position.set(x0 - 0.05, fy + SH, 0);
   shutter.scale.y = 0.001; shutter.visible = false; g.add(shutter);
   scene.shutter = shutter;
   scene.truckGroup = g;

@@ -287,6 +287,7 @@ export class GameScene {
     this.drive = null;
     this.truckGroup.position.x = 0;
     this.shutter.visible = false; this.shutter.scale.y = 0.001;
+    if (this.ramp && this.rampHome) { this.ramp.position.set(this.rampHome.x, this.rampHome.y, 0); this.ramp.rotation.z = this.rampHome.rot; this.ramp.visible = true; }
   }
 
   // ---------- sync ----------
@@ -822,15 +823,24 @@ export class GameScene {
     if (this.drive) {
       const d = this.drive;
       d.t += dt;
-      this.shutter.scale.y = Math.min(1, d.t / 1.2);
-      const go = Math.max(0, d.t - 1.6);
+      // 1) the ramp swings up level and slides away under the truck floor, 2) the shutter rolls down, 3) off it goes
+      const ease = (k) => k * k * (3 - 2 * k), seg = (a, b) => ease(Math.min(1, Math.max(0, (d.t - a) / (b - a))));
+      if (this.ramp && this.rampHome) {
+        const h = this.rampHome, up = seg(0, 0.5), slide = seg(0.5, 1.3);
+        this.ramp.rotation.z = h.rot * (1 - up);
+        this.ramp.position.y = h.y - 0.1 * up;                      // just under the floor surface
+        this.ramp.position.x = h.x + h.len * slide;                 // into the slot
+        this.ramp.visible = slide < 0.98;
+      }
+      this.shutter.scale.y = Math.max(0.001, seg(1.3, 2.5));
+      const go = Math.max(0, d.t - 2.7);
       const dx = Math.min(80, 3 * go * go);
       this.truckGroup.position.x = dx;
       this.truckGroup.position.y = go > 0 ? Math.abs(Math.sin(d.t * 18)) * 0.05 : 0;
       for (const v of this.items.values()) {
         if (v.data?.state !== 'loaded') continue;
         v.obj.position.x = (v.obj.userData.baseX ?? v.obj.position.x) + dx;
-        if (d.damaged.has(v.data.id) && d.t > 2.3 && v.obj.visible) {
+        if (d.damaged.has(v.data.id) && d.t > 3.4 && v.obj.visible) {
           if (!d.burst) { d.burst = true; this.shakeT = 0.5; }
           const b = sprite('💥', { font: 'bold 70px system-ui', w: 96, h: 96 }, [1.4, 1.4]);
           b.position.copy(v.obj.position); b.position.y += 1.2;

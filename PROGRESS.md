@@ -249,4 +249,6 @@ Verified: 201 unit tests; voxel e2e: e2e, e2e-b (x2), solo (new phone controls),
 - [x] Boxes: plain cardboard with tape; fragile = red broken wine glass, heavy = anvil (on the lid and the front), standard = blank;
       same look on the floor, in hand and in the truck; no floating tags. Downloaded box model + credit removed
 Verified: 208 unit tests; AI sim 16-28 loaded per round, hard bots 0 breaks; all voxel e2e suites + smoke pass
+- [x] Truck: a thin, narrow, ribbed aluminium ramp (U-Haul style) with side lips, hinged at the truck. End of round: the ramp swings
+      up and slides away under the floor, the ribbed shutter rolls down from the top, then the truck drives off (+1 s drive-off time)
 
