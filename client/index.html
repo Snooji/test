@@ -47,6 +47,13 @@
   </div>
 
   <!-- HUD -->
+  <!-- tap battle: above the HUD, the stick and the buttons so every tap lands -->
+  <div id="duel" class="hidden" aria-live="polite">
+    <div class="dl-title">Tap battle · <span id="duel-t">5</span> s</div>
+    <div class="dl-bar"><span id="duel-na"></span><i id="duel-fill"></i><span id="duel-nb"></span></div>
+    <button id="duel-btn">TAP!</button>
+    <div class="dl-hint">Tap as fast as you can (or mash the action key / Space). Each tap counts by how much energy you have left, and tapping tires you. Most points in 5 s wins the lift.</div>
+  </div>
   <div id="hud" class="hidden">
     <div class="topbar">
       <div class="pill" id="hud-timer">3:00</div>
@@ -63,12 +70,6 @@
     <canvas id="minimap" width="220" height="130" aria-label="Minimap"></canvas>
     <div id="countdown" class="hidden"></div>
     <div id="scoreboard"></div>
-    <div id="duel" class="hidden" aria-live="polite">
-      <div class="dl-title">Tap battle · <span id="duel-t">5</span> s</div>
-      <div class="dl-bar"><span id="duel-na"></span><i id="duel-fill"></i><span id="duel-nb"></span></div>
-      <button id="duel-btn">TAP!</button>
-      <div class="dl-hint">Tap as fast as you can (or mash the action key / Space). Each tap counts by how much energy you have left, and tapping tires you. Most points in 5 s wins the lift.</div>
-    </div>
     <div id="toasts"></div>
     <div id="prompt" class="hidden"></div>
     <div id="keyhelp">WASD move · <kbd>E</kbd> tap = grab/drop, hold = wrap/disassemble · <kbd>Shift</kbd> dash/back · <kbd>R</kbd> rotate/flip · <kbd>H</kbd> call for help · <kbd>Q</kbd> call out · <kbd>Enter</kbd> chat · in the truck you can also click the grid</div>
@@ -169,7 +170,7 @@
         <li><span>Screen shake</span><div class="gm-seg" data-set="shake" role="group" aria-label="Screen shake"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
       </ul>
       <h3>Controls</h3>
-      <p class="gm-note">Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrow keys (or a controller's left stick). Pick any other key for each action. Mouse: left click grabs or drops, hold left to wrap or take apart, right click places in the truck, hold the wheel and move to turn the camera (double-click the wheel to reset).</p>
+      <p class="gm-note">Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrow keys (or a controller's left stick). Pick any other key for each action. Mouse: left click grabs or drops, hold left to wrap or take apart, right click places in the truck, hold the wheel and move to turn the camera, in the truck too (double-click the wheel to reset). Controller: right stick turns the camera.</p>
       <ul class="gm-list" id="gm-keys"></ul>
       <p class="gm-note" id="gm-keynote" aria-live="polite"></p>
       <button class="gm-btn" id="gm-keys-reset">Reset keys to default</button>
@@ -244,7 +245,10 @@
       <header class="mt-head"><h2 class="siren">Crew meeting</h2><p class="timer-row"><b class="timer" id="meeting-timer">25</b> seconds to vote</p></header>
       <p id="meeting-sub"></p>
       <div class="vote-grid" id="vote-grid" role="group" aria-label="Vote"></div>
-      <button id="btn-skip" class="ghost">Skip vote</button>
+      <div class="mt-actions">
+        <button id="btn-skip" class="ghost" aria-pressed="false">Skip</button>
+        <button id="btn-vote" class="big" disabled>Pick someone</button>
+      </div>
     </div>
   </section>
 

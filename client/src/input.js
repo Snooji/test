@@ -105,12 +105,12 @@ export class Input {
     if (this.padLoop) return;
     const step = () => {
       const gp = this.firstPad();
-      if (!gp) { this.padLoop = null; this.pad.x = this.pad.z = 0; return; }
+      if (!gp) { this.padLoop = null; this.pad.x = this.pad.z = this.pad.cam = 0; return; }
       const dead = (v) => (Math.abs(v) < 0.25 ? 0 : (v - Math.sign(v) * 0.25) / 0.75);
       let x = dead(gp.axes[0] || 0), z = dead(gp.axes[1] || 0);
       const b = (i) => !!gp.buttons[i]?.pressed;
       if (b(14)) x = -1; if (b(15)) x = 1; if (b(12)) z = -1; if (b(13)) z = 1; // d-pad
-      this.pad.x = x; this.pad.z = z;
+      this.pad.x = x; this.pad.z = z; this.pad.cam = dead(gp.axes[2] || 0); // right stick: turn the camera
       const was = (i) => !!this.pad.prev[i], edge = (i) => b(i) && !was(i);
       if (edge(PAD.menu)) this.onMenu?.();
       if (this.mash) { if (edge(PAD.action)) this.mash(); } // tap battle: A mashes
@@ -166,7 +166,7 @@ export class Input {
       const u = (e) => { e.preventDefault(); b.classList.remove('down'); up?.(); };
       b.addEventListener('pointerup', u); b.addEventListener('pointerleave', u); b.addEventListener('pointercancel', u);
     };
-    btn('btn-action', () => this.actionDown(), () => this.actionUp());
+    btn('btn-action', () => (this.mash ? this.mash() : this.actionDown()), () => this.actionUp()); // in a tap battle it mashes too
     btn('btn-dash', () => this.s.dashN++);
     btn('btn-callout', () => this.onCallout?.());
     btn('btn-rot', () => this.s.rotN++);

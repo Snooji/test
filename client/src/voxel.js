@@ -338,11 +338,17 @@ function loadedPiece(type, wrapped, dims) {
   return g;
 }
 
+/** Two-wheel hand truck. Local +z is the nose (where the boxes sit, away from the mover); the red frame, the wheels and
+ *  the black grips are at -z, the end the mover holds. */
 function dolly() {
-  const steel = 0x9aa3b8, red = 0xe63946;
-  const v = new Vox().box(0, 0.1, 0, 0.8, 0.1, 0.6, steel);
-  for (const s of [-1, 1]) v.box(s * 0.32, 0.75, -0.25, 0.1, 1.3, 0.1, red).cyl(s * 0.44, 0.16, -0.22, 0.16, 0.1, 0x1a1a24, 'x');
-  v.box(0, 1.4, -0.25, 0.74, 0.1, 0.1, red).box(0, 0.8, -0.25, 0.74, 0.1, 0.1, red);
+  const steel = 0x9aa3b8, red = 0xe63946, black = 0x1a1a24;
+  const v = new Vox().box(0, 0.05, -0.12, 0.8, 0.08, 0.62, steel); // nose plate, running back under the frame
+  for (const s of [-1, 1]) {
+    v.box(s * 0.32, 0.5, -0.45, 0.08, 0.9, 0.08, red)          // uprights behind the stack
+      .cyl(s * 0.44, 0.17, -0.42, 0.17, 0.1, black, 'x')        // wheels at the foot of the frame
+      .box(s * 0.32, 0.9, -0.62, 0.11, 0.11, 0.34, black);     // grips at hand height, reaching back to the mover
+  }
+  v.box(0, 0.45, -0.45, 0.72, 0.08, 0.08, red).box(0, 0.91, -0.45, 0.72, 0.08, 0.08, red);
   const g = new THREE.Group(); g.add(v.mesh()); return g;
 }
 

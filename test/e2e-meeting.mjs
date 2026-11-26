@@ -15,6 +15,10 @@ const link = await a.inputValue('#share-link');
 const b = await player('Bo', 'bo@example.com', link);
 const c = await player('Cy', 'cy@example.com', link);
 await a.waitForFunction(() => window.__sm.snap?.players.length === 3);
+for (const p of [b, c]) await p.click('#btn-ready-lobby');
+// three pages software-rendering 3D at once is slow enough to run out the 25 s meeting; the guests only need tiny windows
+for (const p of [b, c]) await p.setViewportSize({ width: 360, height: 640 });
+await a.waitForSelector('#btn-start:not([disabled])');
 await a.click('#btn-start'); await a.waitForFunction(() => window.__sm.snap?.phase === 'playing');
 // Bo secretly breaks something
 const bId = await b.evaluate(() => window.__sm.myId);
@@ -24,12 +28,22 @@ await a.waitForSelector('#hud-callout:not(.hidden)');
 await a.screenshot({ path: `${out}/10-crunch.png` });
 await c.click('#hud-callout');
 await a.waitForSelector('#meeting:not(.hidden)');
+await a.evaluate(() => window.__sm.send('debug_long_meeting')); // three software-rendered browsers are slow
 await a.fill('#chat-input', 'I saw Bo near the fragile box!'); await a.press('#chat-input', 'Enter');
 await wait(300);
-for (const p of [a, c]) await p.click(`.vote[data-id="${bId}"]`);
+// pick, change your mind, pick again: nothing is sent until Submit
+const aId = await a.evaluate(() => window.__sm.myId);
+await a.click(`.vote[data-id="${aId}"]`); await a.click('#btn-skip'); await a.click(`.vote[data-id="${bId}"]`);
+if (!(await a.textContent('#btn-vote')).includes('Bo')) errors.push('submit button should name the pick');
+await wait(300);
+if ((await a.evaluate(() => window.__sm.snap.meeting.voted)).length) errors.push('picking should not send a vote');
+await c.click(`.vote[data-id="${bId}"]`);
+for (const p of [a, c]) await p.click('#btn-vote');
+await a.waitForFunction(() => window.__sm.snap.meeting?.voted.length === 2);
+if (!(await a.isDisabled(`.vote[data-id="${bId}"]`))) errors.push('submitted vote should be locked');
 await wait(300);
 await a.screenshot({ path: `${out}/11-meeting.png` });
-await b.click('#btn-skip');
+await b.click('#btn-skip'); await b.click('#btn-vote');
 await a.waitForSelector('#verdict:not(.hidden)');
 const verdict = await a.textContent('#verdict');
 console.log('verdict:', verdict);

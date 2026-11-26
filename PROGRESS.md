@@ -172,6 +172,15 @@ Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2
 ## Round 11 (2026-11-25/26): share image, real homes (in progress: floors, redesign, detail)
 - [x] Share image: voxel crew carrying boxes and a couch to the truck under a warm night sky (client/public/og.png, source in tools/og); absolute og:image URLs
 - [x] Home Screen icon and favicon: Nova holding a fragile box on orange (client/icon.html + src/icon.js, rendered by tools/og/icons.mjs); separate pulled-back maskable icons for Android; warm theme colour; service worker cache v2, icons and manifest network-first so updates reach returning players
+- [x] Player feedback round:
+      - Truck camera turns too (wheel drag, a drag off the truck floor or a second finger on phones, controller right stick), up to ~50° each
+        way; WASD / stick aim follows the turned view (e2e-controls checks D moves the cursor right on screen)
+      - Voting: tap a mover (or Skip) to pick, change your mind freely, Submit locks it in. Phones: chat starts collapsed in meetings and
+        the vote buttons stay above an open chat (they were hidden under it)
+      - Tap battle: the panel sat under the invisible stick's touch area, so taps left of centre were lost; it's on top now and the stick
+        is off during a battle. The phone action button mashes too ("Tap!"). Server tap allowance is a 4-tap burst + 15/s, so taps a phone
+        network delivers bunched together all count (half were dropped before), autoclickers still capped. test/e2e-duel.mjs
+      - Two-wheel dolly faces the right way: mover behind the red frame holding new black grips, boxes on the nose plate in front
 - [x] Homes: a real plan, front column of shared rooms (living with the front door, dining, kitchen), a 4 m hallway, a back column of
       private rooms (bedrooms, bathroom, office, laundry); cottages (bedroom + en-suite off the living room); Moon Mansion = two wings
       joined by a passage. Every room type has its own size range (ROOM_SIZES in shared/level.js) and never grows past it

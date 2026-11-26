@@ -128,10 +128,11 @@ function renderDuel(s) {
   myDuel = d ? d.item : null;
   input.mash = myDuel ? duelTap : null; // controller A mashes too
   show('duel', !!d);
+  $('joyzone').style.pointerEvents = d ? 'none' : ''; // nobody walks in a tap battle; don't let the stick eat taps
   if (!d) return;
   const pa = s.players.find(p => p.id === d.a), pb = s.players.find(p => p.id === d.b);
   const mine = d.a === myId ? d.ca : d.cb, theirs = d.a === myId ? d.cb : d.ca;
-  $('duel-t').textContent = Math.ceil(d.t) + 's';
+  $('duel-t').textContent = Math.ceil(d.t);
   $('duel-na').textContent = `${d.a === myId ? 'You' : pa?.name || '?'} ${Math.round(d.ca)}`;
   $('duel-nb').textContent = `${Math.round(d.cb)} ${d.b === myId ? 'You' : pb?.name || '?'}`;
   $('duel-fill').style.width = `${Math.round(100 * (d.ca + 1) / (d.ca + d.cb + 2))}%`;
@@ -255,8 +256,11 @@ setInterval(() => {
   const ws = room.connection?.transport?.ws; // a dropped socket: stop sending until reconnect/leave handling kicks in
   if (ws && ws.readyState !== 1) return;
   if (menuOpen) { room.send('input', { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 }); return; }
-  const r = input.read(), yaw = scene.camYaw || 0;
-  if (yaw && !meNow()?.loadMode) { // the camera is turned: "up" means away from the camera
+  const r = input.read(), yaw = scene.camYaw || 0, mine = meNow();
+  if (mine?.loadMode && scene.truckYaw && Math.hypot(r.mx, r.mz) > 0.5) { // truck view turned: push the cursor the way it looks on screen
+    const big = Math.abs(r.mx) > Math.abs(r.mz), st = scene.gridStepFor(big ? Math.sign(r.mx) : 0, big ? 0 : Math.sign(r.mz));
+    room.send('input', { ...r, mx: -st.dgz, mz: st.dgx }); // server: +mz = gx+1, +mx = gz-1
+  } else if (yaw && !mine?.loadMode) { // the camera is turned: "up" means away from the camera
     const c = Math.cos(yaw), sn = Math.sin(yaw);
     room.send('input', { ...r, mx: +(r.mx * c + r.mz * sn).toFixed(2), mz: +(-r.mx * sn + r.mz * c).toFixed(2) });
   } else room.send('input', r);
@@ -295,7 +299,7 @@ function onPhase(phase, prev) {
   const chatty = phase === 'lobby' || phase === 'meeting';
   show('chat', chatty);
   show('chat-toggle', chatty && isTouch);
-  $('chat').classList.toggle('collapsed', isTouch && phase === 'lobby'); // phones: tap 💬 to open
+  $('chat').classList.toggle('collapsed', isTouch && chatty); // phones: tap Chat to open (in a meeting it would cover the vote buttons)
   input.enabled = phase !== 'meeting' && !menuOpen;
   if (!['playing', 'countdown', 'meeting', 'driveoff'].includes(phase)) closeGameMenu();
   if (phase === 'meeting') { myVote = null; sfx('alarm'); }
@@ -574,11 +578,12 @@ function renderPrompt(s, me) {
       if (me.task) text = me.task.kind === 'wrap' ? '🧣 Wrapping… keep holding!' : '🔧 Disassembling… keep holding!';
     }
   }
+  if (myDuel) { text = ''; action = 'TAP'; } // tap battle: the panel explains; the big button mashes
   setText('prompt', text);
   show('prompt', !!text && !s.tutorial); // in training the Coach does the talking
   // the big button says what it will do right now
   const WORD = { 'ACTION': ['Grab', ''], 'GRAB': ['Grab', ''], 'SET DOWN': ['Drop', ''], 'DROP': ['Place', ''], 'PULL': ['Pull out', ''],
-    'HOLD ↩️': ['Unload', 'hold'], 'STACK': ['Stack', ''], 'LOAD': ['Load', ''], 'LIFT': ['Lift', ''], 'STEAL': ['Steal', ''],
+    'HOLD ↩️': ['Unload', 'hold'], 'STACK': ['Stack', ''], 'LOAD': ['Load', ''], 'LIFT': ['Lift', ''], 'STEAL': ['Steal', ''], 'TAP': ['Tap!', 'tap battle'],
     'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'HOLD 🔧': ['Take apart', 'hold'] };
   const [w, sub] = WORD[action] || [action, ''];
   if ($('action-label').textContent !== w) setText('action-label', w);
@@ -655,28 +660,39 @@ function renderMeeting(s, me) {
   const m = s.meeting;
   if (!m) return;
   const caller = s.players.find(p => p.id === m.callerId);
-  const canVote = me && !me.out && !me.spectator && !m.voted.includes(myId);
+  const locked = m.voted.includes(myId); // submitted: final
+  const canVote = me && !me.out && !me.spectator && !locked;
   $('meeting-sub').textContent = s.game === 'sabotage'
-    ? `${caller?.name || 'Someone'} called a meeting. Who is the saboteur? Vote them off. Vote wrong and an innocent mover leaves the truck.`
-    : `${caller?.name || 'Someone'} heard a crunch. Who broke it? Talk it out, then vote. Wrong call = the caller takes the hit.`;
+    ? `${caller?.name || 'Someone'} called a meeting. Who is the saboteur? Pick a mover, then submit. Vote wrong and an innocent mover leaves the truck.`
+    : `${caller?.name || 'Someone'} heard a crunch. Who broke it? Talk it out, pick a mover, then submit. Wrong call = the caller takes the hit.`;
   $('meeting-timer').textContent = m.timeLeft;
+  // narrow screens: an open chat sits over the bottom of the screen, so keep the vote buttons above it
+  const chatH = innerWidth < 760 && getComputedStyle($('chat')).display !== 'none' ? $('chat').offsetHeight : 0;
+  const pad = chatH ? `${chatH + 16}px` : '';
+  if ($('meeting').style.paddingBottom !== pad) $('meeting').style.paddingBottom = pad;
   const key = JSON.stringify([m.voted, myVote, canVote, s.players.map(p => p.id + p.out)]);
-  if ($('vote-grid').dataset.key !== key) {
-    $('vote-grid').dataset.key = key;
-    $('vote-grid').innerHTML = s.players.filter(p => !p.spectator).map(p => `
-      <button class="vote ${myVote === p.id ? 'picked' : ''} ${m.voted.includes(p.id) ? 'voted' : ''}" data-id="${p.id}" ${!canVote || p.out ? 'disabled' : ''} aria-pressed="${myVote === p.id}">
-        ${portrait(p.char)}<div><div><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}</div><div class="sub">${p.out ? 'off the truck' : `${p.score} pts · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}`}</div></div>
-        <span class="vst">${myVote === p.id ? 'Your vote' : m.voted.includes(p.id) ? 'Has voted' : ''}</span>
-      </button>`).join('');
-  }
-  $('btn-skip').disabled = !canVote;
+  if ($('vote-grid').dataset.key === key) return;
+  $('vote-grid').dataset.key = key;
+  $('vote-grid').innerHTML = s.players.filter(p => !p.spectator).map(p => `
+    <button class="vote ${myVote === p.id ? 'picked' : ''} ${m.voted.includes(p.id) ? 'voted' : ''}" data-id="${p.id}" ${!canVote || p.out ? 'disabled' : ''} aria-pressed="${myVote === p.id}">
+      ${portrait(p.char)}<div><div><b>${esc(p.name)}</b>${p.id === myId ? ' (you)' : ''}</div><div class="sub">${p.out ? 'off the truck' : `${p.score} pts · ${p.strikes} strike${p.strikes === 1 ? '' : 's'}`}</div></div>
+      <span class="vst">${myVote === p.id ? (locked ? 'Your vote' : 'Picked') : m.voted.includes(p.id) ? 'Has voted' : ''}</span>
+    </button>`).join('');
+  const skip = $('btn-skip'), go = $('btn-vote'), name = s.players.find(p => p.id === myVote)?.name;
+  skip.disabled = !canVote; skip.setAttribute('aria-pressed', String(myVote === 'skip'));
+  go.disabled = !canVote || !myVote;
+  go.textContent = locked ? (myVote === 'skip' ? 'Skipped. Waiting for the crew' : `Voted ${name || ''}. Waiting for the crew`)
+    : !canVote ? 'You can’t vote' : !myVote ? 'Pick someone' : myVote === 'skip' ? 'Submit: skip' : `Submit vote: ${name}`;
 }
+// tap a mover (or Skip) to pick; tap again to un-pick; change your mind as often as you like until you press Submit
+function pickVote(id) { myVote = myVote === id ? null : id; sfx('blip'); if (snap) renderMeeting(snap, meNow()); }
 $('vote-grid').addEventListener('click', (e) => {
   const b = e.target.closest('.vote');
   if (!b || b.disabled || !room) return;
-  myVote = b.dataset.id; room.send('vote', { target: myVote }); sfx('blip');
+  pickVote(b.dataset.id);
 });
-$('btn-skip').onclick = () => { if (room) { myVote = 'skip'; room.send('vote', { target: 'skip' }); } };
+$('btn-skip').onclick = () => { if (room && !$('btn-skip').disabled) pickVote('skip'); };
+$('btn-vote').onclick = () => { if (room && myVote && !$('btn-vote').disabled) { room.send('vote', { target: myVote }); sfx('tick'); } };
 
 // ---------- chat ----------
 function onChat(c) {
@@ -898,7 +914,8 @@ let lastAim = '';
 function dragAim(e) {
   const me = meNow();
   if (!room || !me?.loadMode) return;
-  if (e.pointerType === 'touch' && e.type === 'pointermove') { const g = touches.get(e.pointerId); if (g && performance.now() - g.t < 160) return; } // might be a swipe
+  if (e.pointerType === 'touch' && e.type === 'pointerdown' && touches.size > 0) return; // second finger: turning the camera
+  if (e.pointerType === 'touch' && e.type === 'pointermove') { const g = touches.get(e.pointerId); if (g && (g.cam || performance.now() - g.t < 160)) return; } // turning the camera, or might be a swipe
   if (e.pointerType !== 'mouse' && e.type === 'pointermove' && !e.buttons && e.pressure === 0) return;
   const cell = scene.pickGrid(e.clientX, e.clientY);
   if (!cell) return;
@@ -922,14 +939,18 @@ scene.renderer.domElement.addEventListener('pointerdown', (e) => {
 addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && mouseAct) { mouseAct = false; input.actionUp(); } });
 scene.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 // touch gestures on the game view (anywhere that isn't the stick or a button; a second finger works while you steer):
-// walking around, drag to turn the camera; in the truck, a slow drag aims and a quick swipe turns the piece
+// walking around, drag to turn the camera; in the truck, drag on the truck floor to aim, drag off it (or with a second finger) to turn the camera
 const touches = new Map();
 const cv = scene.renderer.domElement;
-cv.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() }); });
+cv.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  // in the truck one finger on the truck floor aims; a finger that lands off it, or a second finger, turns the camera
+  const cam = !meNow()?.loadMode || touches.size > 0 || !scene.pickGrid(e.clientX, e.clientY);
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), cam });
+});
 cv.addEventListener('pointermove', (e) => {
   const g = touches.get(e.pointerId); if (!g) return;
-  const me = meNow();
-  if (!me?.loadMode) scene.camYaw = ((scene.camYaw || 0) - (e.clientX - g.x) * 0.008) % (Math.PI * 2);
+  if (g.cam) turnCam(-(e.clientX - g.x) * 0.008);
   g.x = e.clientX; g.y = e.clientY;
 });
 const touchEnd = (e) => {
@@ -939,19 +960,24 @@ const touchEnd = (e) => {
   void me; void dt; void dist; // (turning a piece is the Rotate / Flip buttons now)
 };
 cv.addEventListener('pointerup', touchEnd); cv.addEventListener('pointercancel', touchEnd);
+/** Turn the camera: all the way round while walking; in the truck, up to about 50° either side so the walls don't hide the load. */
+function turnCam(d) {
+  if (meNow()?.loadMode) scene.truckYaw = Math.max(-0.9, Math.min(0.9, (scene.truckYaw || 0) + d));
+  else scene.camYaw = ((scene.camYaw || 0) + d) % (Math.PI * 2);
+}
 // hold the wheel (middle button) and move the mouse to turn the camera; double-click the wheel to put it back
 let camDrag = null;
 scene.renderer.domElement.addEventListener('pointerdown', (e) => {
   if (e.pointerType !== 'mouse' || e.button !== 1) return;
   e.preventDefault(); // no auto-scroll
   const now = performance.now();
-  if (now - (camDrag?.up || 0) < 300) { scene.camYaw = 0; camDrag = null; return; }
+  if (now - (camDrag?.up || 0) < 300) { scene.camYaw = 0; scene.truckYaw = 0; camDrag = null; return; }
   camDrag = { x: e.clientX, id: e.pointerId };
   scene.renderer.domElement.setPointerCapture(e.pointerId);
 });
 scene.renderer.domElement.addEventListener('pointermove', (e) => {
   if (!camDrag?.id || e.pointerId !== camDrag.id) return;
-  scene.camYaw = ((scene.camYaw || 0) + (e.clientX - camDrag.x) * 0.008) % (Math.PI * 2);
+  turnCam((e.clientX - camDrag.x) * 0.008);
   camDrag.x = e.clientX;
 });
 addEventListener('pointerup', (e) => { if (e.button === 1 && camDrag?.id) camDrag = { up: performance.now() }; });
@@ -973,6 +999,7 @@ let last = performance.now(), lastMap = 0;
 function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  if (input.pad.cam && snap?.phase === 'playing' && !menuOpen) turnCam(-input.pad.cam * dt * 2.4);
   scene.frame(dt);
   const inPlay = snap && !$('hud').classList.contains('hidden');
   if (inPlay) scene.adapt(dt);
@@ -983,4 +1010,4 @@ requestAnimationFrame(loop);
 route();
 
 // expose for automated smoke checks
-window.__sm = { get snap() { return snap; }, get myId() { return myId; }, inRamp, send: (t, m) => room?.send(t, m), scene };
+window.__sm = { get snap() { return snap; }, get myId() { return myId; }, get room() { return room; }, inRamp, send: (t, m) => room?.send(t, m), scene };

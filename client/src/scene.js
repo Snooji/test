@@ -504,7 +504,7 @@ export class GameScene {
       if (it.type === 'flatdolly') { const pu = it.pusher && this.players.get(it.pusher); if (pu) o.rotation.y = pu.face - Math.PI / 2; } // pushed lengthwise
       if (it.type === 'dolly') {
         const pusher = it.pusher && this.players.get(it.pusher);
-        if (pusher) o.rotation.y = pusher.face + Math.PI;
+        if (pusher) o.rotation.y = pusher.face; // frame and grips toward the mover, nose (and the boxes) ahead
         if (!o.userData.warn) { o.userData.warn = sprite('⚠️ CRUSHING!', { fg: '#ff4466', stroke: '#171310', font: 'bold 40px system-ui' }, [2.2, 0.55]); o.userData.warn.position.y = 3.1; o.add(o.userData.warn); }
         o.userData.warn.visible = it.strain > 0.25;
         if (it.strain > 0.25) o.userData.warn.material.opacity = 0.5 + Math.abs(Math.sin(t * (6 + it.strain * 10))) * 0.5;
@@ -533,7 +533,7 @@ export class GameScene {
       const walking = Math.hypot(v.root.position.x - p.x, v.root.position.z - p.z) > 0.03;
       v.root.userData.body.traverse(o => {
         if (o.userData.arm === undefined) return;
-        const target = carrying ? -2.7 : walking ? Math.sin(t * 12 + o.userData.arm) * 0.6 : 0;
+        const target = carrying ? -2.7 : p.dolly ? -1.5 : walking ? Math.sin(t * 12 + o.userData.arm) * 0.6 : 0; // two-wheel dolly: hands on its grips
         o.rotation.x += (target - o.rotation.x) * Math.min(1, dt * 12);
       });
       if (carrying && !v.wasCarrying) v.squash = 0.25; // little squash when lifting
@@ -739,8 +739,9 @@ export class GameScene {
     } else { this.camTarget.set(-2, 0, 0); this.camOff = [0, 34, 20]; }
     const zoom = me && !me.loadMode ? (this.camZoom || 1) : 1; // settings: Close / Normal / Far (walking around only)
     let [ox, oy, oz] = this.camOff.map(v => v * zoom);
-    if (me && !me.loadMode && this.camYaw) { // middle-mouse drag turns the camera around you
-      const c = Math.cos(this.camYaw), sn = Math.sin(this.camYaw);
+    const yaw = !me || this.drive ? 0 : me.loadMode ? this.truckYaw || 0 : this.camYaw || 0; // turned by the player (walking around and in the truck)
+    if (yaw) {
+      const c = Math.cos(yaw), sn = Math.sin(yaw);
       [ox, oz] = [ox * c + oz * sn, -ox * sn + oz * c];
     }
     const k = 4;

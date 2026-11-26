@@ -72,6 +72,22 @@ await p.evaluate(() => window.__sm.send('debug_tp', { x: 10.6, z: 0 }));
 await p.waitForFunction(() => window.__sm.snap.players.find(x => x.id === window.__sm.myId).loadMode, null, { timeout: 5000 }).catch(() => errors.push('did not enter the truck'));
 await wait(900);
 await p.screenshot({ path: `${out}/controls-truck.png` });
+// the camera turns in the truck too (wheel drag), up to ~50° so the walls don't hide the load
+await p.mouse.move(640, 400); await p.mouse.down({ button: 'middle' }); await p.mouse.move(1000, 400, { steps: 8 }); await p.mouse.up({ button: 'middle' });
+const ty = await p.evaluate(() => window.__sm.scene.truckYaw);
+if (!(Math.abs(ty) > 0.5 && Math.abs(ty) <= 0.9 + 1e-9)) errors.push('wheel drag did not turn the truck camera: ' + ty);
+await wait(1200);
+await p.screenshot({ path: `${out}/controls-truck-turned.png` });
+// with the view turned, D still moves the cursor to the right on screen
+const want = await p.evaluate(() => window.__sm.scene.gridStepFor(1, 0));
+const cur = async () => p.evaluate(() => ({ ...window.__sm.snap.players.find(x => x.id === window.__sm.myId).cursor }));
+await p.evaluate(() => window.__sm.send('aim', { gx: 3, gz: 2 })); await wait(300); // away from the walls
+const c0 = await cur();
+await p.keyboard.down('KeyD'); // hold until the cursor moves (this software-rendered browser is slow), then compare direction
+await p.waitForFunction((c) => { const k = window.__sm.snap.players.find(x => x.id === window.__sm.myId).cursor; return k.gx !== c.gx || k.gz !== c.gz; }, c0, { timeout: 3000 }).catch(() => {});
+await p.keyboard.up('KeyD');
+const c1 = await cur();
+if (Math.sign(c1.gx - c0.gx) !== want.dgx || Math.sign(c1.gz - c0.gz) !== want.dgz) errors.push(`turned truck view: D moved the cursor ${c1.gx - c0.gx},${c1.gz - c0.gz}, expected ${want.dgx},${want.dgz}`);
 await p.mouse.click(640, 400, { button: 'right' });
 await p.waitForFunction(() => !window.__sm.snap.players.find(x => x.id === window.__sm.myId).carry, null, { timeout: 3000 }).catch(() => errors.push('right click did not place in the truck'));
 if (!(await p.innerHTML('#keyhelp')).includes('Right click')) errors.push('mouse not in key help');

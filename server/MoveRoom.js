@@ -16,7 +16,10 @@ export const ENERGY = {
   regenStill: 0.35, regenWalk: 0.1, injurySecs: 7, injuryMult: 0.55,
   injuries: ['twisted an ankle', 'pulled a back muscle', 'stubbed a toe', 'tweaked a knee'],
 };
-const DUEL_SECONDS = 5, DUEL_MIN_GAP = 0.05, DUEL_TAP_COST = 0.008; // ~40 taps (a full 5 s of mashing) = a third of your energy
+const DUEL_SECONDS = 5, DUEL_TAP_COST = 0.008; // ~40 taps (a full 5 s of mashing) = a third of your energy
+// tap allowance: refills at 15 taps/s and holds up to 4, so taps a phone network delivers bunched together all count,
+// while an autoclicker gets a 4-tap burst and then 15/s at most
+const DUEL_TAP_RATE = 15, DUEL_TAP_BURST = 4;
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
@@ -143,6 +146,15 @@ export class MoveRoom extends Room {
         it.wrapped = true; it.assembled = false; it.state = 'carried'; it.carriers = [p.id]; p.carry = it.id;
         p.x = 11.2; p.z = 0; it.x = p.x; it.z = p.z;
       });
+      this.onMessage('debug_duel', (c) => { // two AI movers carry the couch right next to you, and you challenge them
+        const p = this.players.get(c.sessionId), [x, y] = [...this.bots.values()].map(b => b.p);
+        const it = [...this.items.values()].find(i => i.type === 'couch');
+        if (!p || !x || !y || !it || this.phase !== 'playing' || p.carry) return;
+        it.wrapped = true; it.state = 'carried'; it.carriers = [x.id, y.id]; x.carry = y.carry = it.id;
+        x.task = y.task = null; x.x = it.x - 1.2; x.z = it.z; y.x = it.x + 1.2; y.z = it.z; p.x = it.x + 1.4; p.z = it.z + 0.6;
+        this.startDuel(p, it);
+      });
+      this.onMessage('debug_long_meeting', () => { if (this.meeting) this.meeting.timeLeft = 120; }); // slow test browsers
       this.onMessage('debug_break', (c) => {
         const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === 'fragile');
         if (it && this.phase === 'playing') { it.state = 'broken'; this.recordBreak(it, [c.sessionId], 'got crushed'); }
@@ -728,7 +740,7 @@ export class MoveRoom extends Room {
     if (holders.some(h => h.loadMode || h.duel)) return;
     const victim = holders.sort((a, b) => dist(p, a) - dist(p, b))[0];
     if (!victim) return;
-    const d = { item: item.id, a: p.id, b: victim.id, t: DUEL_SECONDS, ca: 0, cb: 0, last: {} };
+    const d = { item: item.id, a: p.id, b: victim.id, t: DUEL_SECONDS, ca: 0, cb: 0, tok: { [p.id]: DUEL_TAP_BURST, [victim.id]: DUEL_TAP_BURST } };
     this.duels.set(item.id, d);
     p.duel = item.id; victim.duel = item.id;
     const label = ITEM_TYPES[item.type].label.toLowerCase();
@@ -739,9 +751,8 @@ export class MoveRoom extends Room {
     if (!p?.duel) return;
     const d = this.duels?.get(p.duel);
     if (!d) return;
-    const now = this.elapsed || 0;
-    if (now - (d.last[p.id] ?? -1) < DUEL_MIN_GAP) return; // no autoclickers: ~20 taps/s max
-    d.last[p.id] = now;
+    if ((d.tok[p.id] ?? 0) < 1) return; // over the allowance: an autoclicker
+    d.tok[p.id] -= 1;
     this.duelPoint(d, p);
   }
   /** one tap: worth as much as you have energy left (a worn-out mover barely moves the bar), and it tires you */
@@ -754,6 +765,7 @@ export class MoveRoom extends Room {
     if (!this.duels?.size) return;
     for (const [id, d] of this.duels) {
       const a = this.players.get(d.a), b = this.players.get(d.b), item = this.items.get(id);
+      for (const k of [d.a, d.b]) d.tok[k] = Math.min(DUEL_TAP_BURST, (d.tok[k] ?? 0) + dt * DUEL_TAP_RATE);
       for (const who of [a, b]) { // AI movers mash too, at a human pace set by difficulty: a slow start, and they tire
         const bot = who && this.bots.get(who.id);
         if (!bot) continue;

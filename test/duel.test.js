@@ -47,10 +47,29 @@ test('steal: the challenger who taps more takes that end of the lift', () => {
   assert.equal(P.C.carry, couch.id); assert.equal(P.B.carry, null);
 });
 
-test('steal: the holder who taps more keeps it; taps faster than ~20/s do not count', () => {
+test('steal: taps that reach the server bunched together (phone network) all count', () => {
   const { room, P, couch, send } = setup();
   P.C.x = couch.x + 0.9; P.C.z = couch.z + 0.4; tap(room, P.C);
-  for (let i = 0; i < 50; i++) send('C', 'duelTap');  // autoclicker burst in one instant: counts once
+  const d = room.duels.get(couch.id);
+  for (let i = 0; i < 10; i++) { send('C', 'duelTap'); send('C', 'duelTap'); room.tick(DT * 4); } // 2 taps per 0.2 s, arriving together
+  assert.ok(d.ca > 17, `bunched taps counted: ${d.ca} of 20`); // 20 taps, each worth a little under 1 as energy drains
+});
+
+test('steal: an autoclicker is capped (a burst counts a few, a held rate tops out around 15/s)', () => {
+  const { room, P, couch, send } = setup();
+  P.C.x = couch.x + 0.9; P.C.z = couch.z + 0.4; tap(room, P.C);
+  const d = room.duels.get(couch.id);
+  for (let i = 0; i < 50; i++) send('C', 'duelTap');
+  assert.ok(d.ca <= 4.01, `burst counted ${d.ca}`);
+  const before = d.ca;
+  for (let k = 0; k < 20; k++) { for (let i = 0; i < 10; i++) send('C', 'duelTap'); room.tick(DT); } // 200 taps/s for 1 s
+  assert.ok(d.ca - before <= 16, `held autoclicker counted ${d.ca - before} in 1 s`);
+});
+
+test('steal: the holder who taps more keeps it; an autoclicker burst does not win it', () => {
+  const { room, P, couch, send } = setup();
+  P.C.x = couch.x + 0.9; P.C.z = couch.z + 0.4; tap(room, P.C);
+  for (let i = 0; i < 50; i++) send('C', 'duelTap');  // autoclicker burst in one instant: counts a few
   mash(room, send, 'B', 20);
   for (let t = 0; t < 6; t += DT) room.tick(DT);
   assert.deepEqual([...couch.carriers].sort(), ['A', 'B']);

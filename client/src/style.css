@@ -618,6 +618,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .vote.picked { background: rgba(255,209,102,.08); outline: 1px solid var(--gold); outline-offset: -1px; }
 .vote:disabled { opacity: .6; } .vote.voted::after { content: none; }
 .vst { font-size: 12px; color: var(--mute); } .vote.picked .vst { color: var(--gold); }
+.mt-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; align-items: stretch; }
+.mt-actions .ghost, .mt-actions .big { margin: 0; min-height: 52px; }
+#btn-skip[aria-pressed="true"] { outline: 1px solid var(--gold); outline-offset: -1px; color: var(--gold); }
 /* role card, verdict, countdown */
 #role { background: rgba(23,19,16,.72); }
 #role .card { text-align: left; max-width: 420px; } #role .big-icon { font-size: 34px; }
