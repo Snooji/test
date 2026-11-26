@@ -66,9 +66,8 @@ test('room sizes stay in range on every floor (stairwells included)', () => {
     for (const r of L.rooms) {
       const lim = ROOM_SIZES[r.role];
       assert.ok(lim, `${r.role} has limits`);
-      const len = r.z1 - r.z0, dep = r.x1 - r.x0;
-      assert.ok(len >= lim.len[0] - 0.01 && len <= lim.len[1] + 0.01, `seed ${s}: ${r.name} (floor ${r.storey}) length ${len}`);
-      assert.ok(dep >= lim.dep[0] - 0.01 && dep <= lim.dep[1] + 0.01, `seed ${s}: ${r.name} (floor ${r.storey}) depth ${dep}`);
+      const a = r.z1 - r.z0, b = r.x1 - r.x0, inR = (v, [lo, hi]) => v >= lo - 0.01 && v <= hi + 0.01; // rooms can be turned either way
+      assert.ok((inR(a, lim.len) && inR(b, lim.dep)) || (inR(b, lim.len) && inR(a, lim.dep)), `seed ${s}: ${r.name} (floor ${r.storey}) ${b.toFixed(2)} × ${a.toFixed(2)} outside ${lim.len} / ${lim.dep}`);
     }
   }
 });

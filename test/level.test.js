@@ -171,9 +171,8 @@ test('every room type stays within its own size range (no giant bedrooms)', asyn
       for (const r of L.rooms) {
         const lim = ROOM_SIZES[r.role];
         assert.ok(lim, `seed ${seed}: ${r.role} has size limits`);
-        const len = r.z1 - r.z0, dep = r.x1 - r.x0;
-        assert.ok(len >= lim.len[0] - 0.01 && len <= lim.len[1] + 0.01, `seed ${seed} ${JSON.stringify(opts)}: ${r.name} length ${len} outside ${lim.len}`);
-        assert.ok(dep >= lim.dep[0] - 0.01 && dep <= lim.dep[1] + 0.01, `seed ${seed} ${JSON.stringify(opts)}: ${r.name} depth ${dep} outside ${lim.dep}`);
+        const a = r.z1 - r.z0, b = r.x1 - r.x0, inR = (v, [lo, hi]) => v >= lo - 0.01 && v <= hi + 0.01; // either way round
+        assert.ok((inR(a, lim.len) && inR(b, lim.dep)) || (inR(b, lim.len) && inR(a, lim.dep)), `seed ${seed} ${JSON.stringify(opts)}: ${r.name} ${b.toFixed(2)} × ${a.toFixed(2)} outside ${lim.len} / ${lim.dep}`);
       }
     }
   }
@@ -196,7 +195,7 @@ test('hallways are narrow like a real home (about 1.5 movers wide) and nothing i
   for (let seed = 1; seed <= 150; seed++) for (const opts of [{}, { mansion: true }, { exact: true }]) {
     const L = generateLevel(seed * 7919, opts);
     for (const h of L.rooms.filter(r => r.role === 'hall')) {
-      const clear = (h.x1 - h.x0) - 0.4; // wall centre to wall centre, minus one wall thickness
+      const clear = Math.min(h.x1 - h.x0, h.z1 - h.z0) - 0.4; // across the hallway (it can run either way), wall centre to wall centre, minus one wall thickness
       assert.ok(clear >= 1.35 && clear <= 1.6, `seed ${seed}: hallway clear width ${clear.toFixed(2)} m`);
       for (const [t, x, z] of L.items) {
         const it = ITEM_TYPES[t], hw = Math.max(it.w, 1) / 2, hd = Math.max(it.d, 1) / 2;

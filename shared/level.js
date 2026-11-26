@@ -2,12 +2,8 @@
 // browser build the identical house from just one number.
 import { ITEM_TYPES, buildExactLoad, createGrid, placeItem } from './logic.js';
 import { TRUCK_WALLS, HOUSE_WALLS, ROOMS, PROPS, ITEM_SPAWNS, CAT_WAYPOINTS, WORLD } from './world.js';
-
-const T = 0.4; // wall thickness
-const DOOR = 3.2;
-const HALL_W = 1.9; // hallway, wall centre to wall centre (1.5 m clear)
-const wallH = (x0, x1, z) => ({ x0, x1, z0: z - T / 2, z1: z + T / 2 });
-const wallV = (x, z0, z1) => ({ x0: x - T / 2, x1: x + T / 2, z0, z1 });
+import { planHouse, buildWalls, ROOM_SIZES, T, DOOR } from './houseplan.js';
+export { ROOM_SIZES };
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -19,19 +15,12 @@ export function mulberry32(seed) {
   };
 }
 
-/** Size limits per room type, metres: len = along the house (z), dep = depth of its column (x). */
-export const ROOM_SIZES = {
-  living: { len: [7, 10], dep: [8, 10] }, dining: { len: [6, 8], dep: [8, 10] }, kitchen: { len: [5, 7], dep: [8, 10] },
-  main: { len: [7, 9], dep: [6.5, 8] }, bedroom: { len: [6, 9], dep: [6.5, 8] }, kids: { len: [6, 7], dep: [6.5, 8] },
-  office: { len: [5, 7], dep: [6.5, 8] }, bathroom: { len: [5, 5.5], dep: [6.5, 8] }, laundry: { len: [5, 6], dep: [6.5, 8] },
-  hall: { len: [10, 26], dep: [1.9, 1.9] }, passage: { len: [4, 6], dep: [6.5, 8] },
-  // upstairs (multi-floor houses): the stairwell, and rooms that fit the deep front column
-  stairs: { len: [7, 7.5], dep: [6.5, 8] }, garage: { len: [6, 8], dep: [8, 10] }, den: { len: [6, 9], dep: [6.5, 10] }, play: { len: [5, 8], dep: [6.5, 10] }, storage: { len: [4, 6], dep: [6.5, 10] },
-};
 /** Floors: each floor k sits in its own strip of the server's flat map, shifted FLOOR_DZ·k along z; the browser stacks them STOREY_H apart. */
 export const FLOOR_DZ = 40, STOREY_H = 2.8;
 // stairwell: two side-by-side flights (switchback), each LANE_W wide between rails, with a landing at each end
-const LANE_W = 1.7, RAIL = 0.15, LANDING = 1.4;
+// a landing 1.5 m deep leaves a walkable band (minus a mover's reach at each side) wider than the AI's 0.5 m path grid, wherever the
+// stairwell lands; at 1.4 m some positions fell between grid points and the AI couldn't cross the landing
+const LANE_W = 1.7, RAIL = 0.15, LANDING = 1.5;
 const ROOM_NAMES = ['Living Room', 'Kitchen', 'Bedroom', 'Star Office', 'Kids Room', 'Dining Room', 'Game Room', 'Observatory', 'Laundry', 'Garage', 'Den', 'Library'];
 const FLOORS = [0x3b3561, 0x2f4f5e, 0x4a3358, 0x33465e, 0x45385e, 0x2e5456, 0x503a4e, 0x3a4a6a];
 const PREFIX = ['Crater', 'Nebula', 'Comet', 'Orbit', 'Lunar', 'Stardust', 'Galaxy', 'Meteor', 'Eclipse', 'Aurora'];
@@ -123,158 +112,30 @@ export function generateLevel(seed, opts = {}) {
   const RI = (a, b) => Math.floor(R(a, b + 1));
   const pick = (arr) => arr[Math.floor(rng() * arr.length)];
 
-  // ---- a real-house plan: a front column of shared rooms (living / dining / kitchen), a hallway, and a back column of
-  //      private rooms (bedrooms, bathroom, office). Every room type stretches only within its own size range. ----
-  const sz = (role) => ROOM_SIZES[role];
-  let stairLen = null;                                             // the stairwell is the same size on every floor
-  const pickLen = (role) => role === 'stairs' && stairLen ? stairLen : Math.round(R(...sz(role).len) * 2) / 2;
-  const x1 = mansion ? RI(-6, -2) : RI(-6, 2);                    // right wall (front door); the ramp starts at x=9.4
-  const MAXD = 26;                                                 // the house stays within z -13..13
-  // front column: living (front door) with dining and kitchen either side or in a row
-  const tiny = !mansion && !exact && !multi && rng() < 0.18;                 // a small cottage: living + kitchen, bedroom straight off the living room
-  const frontRoles = tiny ? ['living', 'kitchen'] : ['living', 'dining', 'kitchen'];
-  if (!tiny && rng() < 0.5) frontRoles.reverse();                       // kitchen-dining-living or living-dining-kitchen
-  const garage = !tiny && rng() < 0.3;                                    // an attached garage, through the kitchen
-  if (garage) { if (frontRoles[0] === 'kitchen') frontRoles.unshift('garage'); else frontRoles.push('garage'); }
-  const openPlan = !tiny && rng() < 0.45;                                 // living and dining joined by a wide opening
-  const frontLens = frontRoles.map(pickLen);
-  let D = frontLens.reduce((a, b) => a + b, 0);
-  // back column(s): bedrooms first, then bathroom / office / laundry, until each is as long as the front.
-  // A Moon Mansion has two wings of private rooms, joined by a short passage at the end of the middle wing.
-  const fit = (roles, lens, target) => {
-    const lim = (r) => r === 'stairs' && stairLen ? [stairLen, stairLen] : sz(r).len;
-    for (let pass = 0; pass < 3; pass++) {
-      let diff = target - lens.reduce((a, b) => a + b, 0);
-      for (let i = 0; i < lens.length && Math.abs(diff) > 0.01; i++) {
-        const [lo, hi] = lim(roles[i]);
-        const nl = Math.max(lo, Math.min(hi, lens[i] + diff));
-        diff -= nl - lens[i]; lens[i] = nl;
-      }
-    }
-    return lens.reduce((a, b) => a + b, 0);
-  };
-  const fillColumn = (wanted, D) => {
-    const roles = [], lens = [];
-    for (const role of wanted) {
-      const used = lens.reduce((a, b) => a + b, 0);
-      const len = pickLen(role);
-      if (used + len > MAXD + 0.01) continue;
-      if (used >= D && roles.length) break;
-      roles.push(role); lens.push(len);
-    }
-    return { roles, lens, wanted };
-  };
-  const wings = mansion ? 2 : 1;
-  const nBeds = tiny ? 1 : mansion ? 3 : exact ? 2 : RI(1, 3);
-  const bedRoles = Array.from({ length: nBeds }, (_, i) => (i === 0 ? 'main' : i === 2 ? 'kids' : 'bedroom'));
-  const columns = [];
-  if (multi) { // bedrooms go upstairs; downstairs keeps the stairwell, office, bathroom and laundry
-    columns.push(fillColumn(mansion ? ['stairs', 'passage', 'bathroom', 'office'] : ['stairs', 'office', 'bathroom', 'laundry'], D));
-    if (mansion) columns.push(fillColumn(['den', 'laundry', 'office', 'bathroom'], D));
-  } else if (wings === 1) {
-    // private rooms in a seeded order (a bedroom always among the first two, so there's one before the column fills up)
-    const want = tiny ? [...bedRoles, 'bathroom'] : [...bedRoles, 'bathroom', 'office', 'laundry'];
-    if (!tiny) {
-      for (let i = want.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [want[i], want[j]] = [want[j], want[i]]; }
-      const b = want.findIndex(r => r === 'main' || r === 'bedroom' || r === 'kids');
-      if (b > 1) want.unshift(...want.splice(b, 1));
-    }
-    columns.push(fillColumn(want, D));
-  }
-  else {
-    columns.push(fillColumn(['passage', bedRoles[0], 'bathroom', 'office'], D));
-    columns.push(fillColumn([bedRoles[1], bedRoles[2], 'laundry', 'office', 'bathroom'], D));
-  }
-  D = Math.min(MAXD, Math.max(D, ...columns.map(c => c.lens.reduce((a, b) => a + b, 0))));
-  D = fit(frontRoles, frontLens, D);
-  for (const c of columns) { const B = fit(c.roles, c.lens, D); if (Math.abs(B - D) > 0.01) D = fit(frontRoles, frontLens, B); }
-  // every wing must come out exactly as long as the house with each room inside its own limits: add or drop rooms until it does
-  const settle = (c, extraRoles = ['office', 'laundry', 'bathroom', 'office', 'laundry']) => {
-    const lo = (r) => r === 'stairs' && stairLen ? stairLen : sz(r).len[0], hi = (r) => r === 'stairs' && stairLen ? stairLen : sz(r).len[1];
-    for (let guard = 0; guard < 10; guard++) {
-      const got = fit(c.roles, c.lens, D);
-      if (Math.abs(got - D) < 0.01) break;
-      if (got < D) {
-        const minSum = c.roles.reduce((a, r) => a + lo(r), 0);
-        const order = extraRoles.map((_, i) => extraRoles[(guard + i) % extraRoles.length]);
-        const role = order.find(r => minSum + lo(r) <= D + 0.01);
-        if (role) { c.roles.push(role); c.lens.push(lo(role)); continue; }
-        // no single room fits the gap: search for a set of rooms (stairwell/passage kept, wanted rooms first) that can stretch to fit
-        const fixed = c.roles.filter(r => r === 'stairs' || r === 'passage'), pool = [...(c.wanted || []).filter(r => !fixed.includes(r)), ...extraRoles, ...extraRoles];
-        let best = null;
-        const dfs = (roles, from) => {
-          if (best) return;
-          const mn = roles.reduce((a, r) => a + lo(r), 0), mx = roles.reduce((a, r) => a + hi(r), 0);
-          if (mn > D + 0.01) return;
-          if (mx >= D - 0.01) { best = roles; return; }
-          for (let j = from; j < pool.length && !best; j++) dfs([...roles, pool[j]], j + 1);
-        };
-        dfs(fixed, 0);
-        if (!best) break;
-        c.roles = best; c.lens = best.map(lo);
-      } else if (c.roles.length > 1) { c.roles.pop(); c.lens.pop(); }
-    }
-    return c;
-  };
-  for (const c of columns) settle(c);
-  const r1 = (v) => Math.round(v * 2) / 2;
-  const wF = r1(R(...sz('living').dep));
+  // ---- the plan: hallways in one of several shapes, rooms sliced around them either way round (shared/houseplan.js) ----
+  const plan = planHouse(rng, { exact, mansion, floors: nFloors });
+  const x1 = mansion ? RI(-6, -2) : RI(-6, 2);                    // front wall (front door); the ramp starts at x=9.4
+  const D = plan.D, x0 = +(x1 - plan.W).toFixed(3);
   const z0r = Math.round(R(-1.5, 1.5) - D / 2);
-  let z0 = Math.max(-13, Math.min(13 - D, z0r)), z1 = z0 + D;
-  let rooms = [], doors = [], innerWalls = [];
-  const stack = (roles, lens, xa, xb) => { let z = z0; roles.forEach((role, i) => { const zz = i === roles.length - 1 ? z1 : z + lens[i]; rooms.push({ x0: xa, x1: xb, z0: z, z1: zz, role: role === 'main' || role === 'kids' ? 'bedroom' : role, kind: role, storey: 0 }); z = zz; }); };
-  const xF0 = x1 - wF;
-  stack(frontRoles, frontLens, xF0, x1);
-  const addH = (xa, xb, at, w = DOOR) => { const c = R(xa + w / 2 + 0.8, xb - w / 2 - 0.8); doors.push({ vertical: false, at, c, w }); innerWalls.push(wallH(xa, c - w / 2, at), wallH(c + w / 2, xb, at)); };
-  for (let i = 1; i < frontRoles.length; i++) {
-    const r = rooms[i], pair = [rooms[i - 1].role, r.role].sort().join();
-    addH(r.x0, r.x1, r.z0, openPlan && pair === 'dining,living' ? 5 : DOOR);
-  }
-  const vWall = (x, cs) => { let z = z0; for (const c of [...cs].sort((a, b) => a - b)) { innerWalls.push(wallV(x, z, c - DOOR / 2)); z = c + DOOR / 2; doors.push({ vertical: true, at: x, c }); } innerWalls.push(wallV(x, z, z1)); };
-  const doorIn = (r) => R(r.z0 + DOOR / 2 + 0.8, r.z1 - DOOR / 2 - 0.8);
-  const living = rooms.find(r => r.role === 'living');
-  let xCur = xF0, x0 = xF0;
-  const wingX = [];                                     // back wall of each wing (upstairs floors line up with these)
-  if (tiny) { // cottage: the bedroom opens straight off the living room; en-suite bathroom off the bedroom
-    const c = columns[0], wB = r1(R(...sz('bedroom').dep));
-    x0 = xF0 - wB; stack(c.roles, c.lens, x0, xF0);
-    vWall(xF0, [doorIn(living)]);
-    const backs = rooms.filter(r => r.x1 === xF0);
-    for (let i = 1; i < backs.length; i++) addH(backs[i].x0, backs[i].x1, backs[i].z0);
-  } else {
-    const kit = rooms.find(r => r.role === 'kitchen');
-    let prevOpen = [doorIn(living), ...(kit && rng() < 0.5 ? [doorIn(kit)] : [])]; // openings from the rooms on the near side of this hallway
-    columns.forEach((c, ci) => {
-      const hx1 = xCur, hx0 = xCur - HALL_W;               // the hallway: 1.5 m clear, about one and a half movers wide
-      rooms.push({ x0: hx0, x1: hx1, z0, z1, role: 'hall', kind: 'hall', storey: 0 });
-      vWall(hx1, prevOpen);
-      const wB = r1(R(...sz('bedroom').dep)), bx0 = hx0 - wB;
-      wingX.push(bx0);
-      const first = rooms.length;
-      stack(c.roles, c.lens, bx0, hx0);
-      const backs = rooms.slice(first);
-      for (let i = 1; i < backs.length; i++) innerWalls.push(wallH(backs[i].x0, backs[i].x1, backs[i].z0)); // private rooms: separate walls
-      vWall(hx0, backs.map(doorIn));                        // every private room opens onto its hallway
-      // the next wing is reached through this wing's passage (a hall-type room), so open its far side
-      const pass = backs.find(r => r.kind === 'passage'); // a passage room links this hallway to the next one
-      prevOpen = pass ? [doorIn(pass)] : [];
-      xCur = bx0; x0 = bx0;
-    });
-  }
-  const W = x1 - x0;
+  let z0 = Math.max(-13, Math.min(13 - D, z0r)), z1 = z0 + D;     // the house stays within z -13..13
+  const r3 = (v) => Math.round(v * 1000) / 1000;
+  plan.floors.forEach((f, k) => { for (const r of f.rooms) { r.x0 = r3(r.x0 + x1); r.x1 = r3(r.x1 + x1); r.z0 = r3(r.z0 + z0 + FLOOR_DZ * k); r.z1 = r3(r.z1 + z0 + FLOOR_DZ * k); r.storey = k; } });
+  const living = plan.floors[0].rooms.find(r => r.kind === 'living');
   // front door on the living room's outer wall, facing the truck
   let fd = Math.max(Math.max(z0, -10.5) + 2.5, Math.min(Math.min(z1, 10.5) - 2.5, R(living.z0 + 2.4, living.z1 - 2.4)));
-  const houseWalls = [
-    wallH(x0, x1, z0), wallH(x0, x1, z1), wallV(x0, z0, z1),
-    wallV(x1, z0, fd - DOOR * 0.6), wallV(x1, fd + DOOR * 0.6, z1),
-    ...innerWalls,
-  ].filter(w => w.x1 - w.x0 > 0.05 && w.z1 - w.z0 > 0.05);
+  fd = Math.max(living.z0 + 2.2, Math.min(living.z1 - 2.2, fd));
+  let rooms = [], doors = [], opens = [], conns = [];
+  const houseWalls = [];
+  plan.floors.forEach((f, k) => {
+    const built = buildWalls(rng, f.rooms, f.conns, k === 0 ? { frontDoor: fd, x1 } : {});
+    houseWalls.push(...built.walls); doors.push(...built.doors); opens.push(...built.opens);
+    rooms.push(...f.rooms); conns.push(...f.conns);
+  });
 
-  // ---- upstairs: the same footprint and stairwell, bedrooms along the hallway ----
+  // ---- stairs: two flights side by side in the stairwell (the same spot on every floor), rails along them ----
   const stairs = [];
   if (multi) {
-    const sr = rooms.find(r => r.role === 'stairs');
-    stairLen = sr.z1 - sr.z0;
+    const sr = rooms.find(r => r.role === 'stairs' && r.storey === 0);
     const lx = sr.x0 + T / 2, lanes = [[lx, lx + LANE_W], [lx + LANE_W + RAIL, lx + 2 * LANE_W + RAIL]];
     const zl = sr.z0 + T / 2 + LANDING, zh = sr.z1 - T / 2 - LANDING;
     for (let b = 0; b < nFloors - 1; b++) { const [a, c] = lanes[b % 2]; stairs.push({ b, x0: a, x1: c, zl, zh, dir: b % 2 ? -1 : 1 }); }
@@ -292,47 +153,7 @@ export function generateLevel(seed, opts = {}) {
       }
       return out;
     };
-    houseWalls.push(...rails(0));
-    const bedKinds = ['main', 'bedroom', 'kids'];
-    for (let k = 1; k < nFloors; k++) {
-      const off = FLOOR_DZ * k;
-      const saved = [rooms, doors, innerWalls];
-      rooms = []; doors = []; innerWalls = [];
-      let beds = bedKinds.filter((_, i) => i % (nFloors - 1) === k - 1);
-      // back wing(s) first: stairwell (+ passage in a mansion), this floor's bedrooms, then a bathroom / office / laundry
-      const cols = wingX.map((_, ci) => {
-        const want = ci === 0 ? ['stairs', ...(mansion ? ['passage'] : []), ...beds, 'bathroom', 'office', 'laundry'] : [...beds, 'bathroom', 'laundry', 'office'];
-        const c = settle(fillColumn(want, D));
-        beds = beds.filter(b => !c.roles.includes(b));
-        return c;
-      });
-      const deep = wF > 8; // a deep front column suits a family room / playroom; a shallower one takes the leftover bedrooms
-      const front = settle(fillColumn(deep ? ['den', 'play', 'storage'] : [...beds, 'bathroom', 'office', 'den'], D), deep ? ['storage', 'den', 'play'] : ['office', 'bathroom', 'den']);
-      stack(front.roles, front.lens, xF0, x1);
-      const fr = rooms.slice();
-      for (let i = 1; i < fr.length; i++) innerWalls.push(wallH(fr[i].x0, fr[i].x1, fr[i].z0));
-      let prev = fr.map(doorIn), xc = xF0;
-      cols.forEach((c, ci) => {
-        const hx1 = xc, hx0 = xc - HALL_W, bx0 = wingX[ci];
-        rooms.push({ x0: hx0, x1: hx1, z0, z1, role: 'hall', kind: 'hall', storey: 0 });
-        vWall(hx1, prev);
-        const first = rooms.length;
-        stack(c.roles, c.lens, bx0, hx0);
-        const backs = rooms.slice(first);
-        for (let i = 1; i < backs.length; i++) innerWalls.push(wallH(backs[i].x0, backs[i].x1, backs[i].z0));
-        vWall(hx0, backs.map(doorIn));
-        const pass = backs.find(r => r.kind === 'passage');
-        prev = pass ? [doorIn(pass)] : [];
-        xc = bx0;
-      });
-      const walls = [wallH(x0, x1, z0), wallH(x0, x1, z1), wallV(x0, z0, z1), wallV(x1, z0, z1), ...innerWalls, ...rails(k)]
-        .filter(w => w.x1 - w.x0 > 0.05 && w.z1 - w.z0 > 0.05);
-      const up = { rooms, doors, walls };
-      [rooms, doors, innerWalls] = saved;
-      for (const r of up.rooms) { r.z0 += off; r.z1 += off; r.storey = k; rooms.push(r); }
-      for (const d of up.doors) { if (d.vertical) d.c += off; else d.at += off; doors.push(d); }
-      for (const w of up.walls) houseWalls.push({ ...w, z0: w.z0 + off, z1: w.z1 + off });
-    }
+    for (let k = 0; k < nFloors; k++) for (const w of rails(k)) houseWalls.push({ ...w, z0: w.z0 + FLOOR_DZ * k, z1: w.z1 + FLOOR_DZ * k });
   }
 
   // ---- half of all houses are mirror images (north–south), so the same pieces make a different-feeling plan ----
@@ -341,24 +162,19 @@ export function generateLevel(seed, opts = {}) {
     const mz = (z) => 2 * FLOOR_DZ * Math.max(0, Math.round(z / FLOOR_DZ)) - z;   // flip within the floor's own strip
     const flip = (o) => { const a = mz(o.z1), b = mz(o.z0); o.z0 = a; o.z1 = b; };
     rooms.forEach(flip); houseWalls.forEach(flip);
-    for (const d of doors) { if (d.vertical) d.c = mz(d.c); else d.at = mz(d.at); }
+    for (const d of [...doors, ...opens]) { if (d.vertical) d.c = mz(d.c); else d.at = mz(d.at); }
     for (const st of stairs) { const a = -st.zh, b = -st.zl; st.zl = a; st.zh = b; st.dir = -st.dir; }
     [z0, z1] = [-z1, -z0]; fd = -fd;
   }
 
-  // ---- which rooms connect: every door joins the two rooms either side of it ----
+  // ---- which rooms connect: every door and opening joins two rooms; the stairs join floor to floor ----
   rooms.sort((a, b) => (a.x0 - b.x0) || (a.z0 - b.z0));
-  rooms.forEach(r => { delete r.done; });
-  const roomAtPt = (x, z) => rooms.findIndex(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+  const idx = new Map(rooms.map((r, i) => [r, i]));
   const links = rooms.map(() => new Set());
-  for (const d of doors) {
-    const a = d.vertical ? roomAtPt(d.at - 0.5, d.c) : roomAtPt(d.c, d.at - 0.5);
-    const b = d.vertical ? roomAtPt(d.at + 0.5, d.c) : roomAtPt(d.c, d.at + 0.5);
-    if (a >= 0 && b >= 0 && a !== b) { links[a].add(b); links[b].add(a); }
-  }
+  for (const c of conns) { const a = idx.get(c.a), b = idx.get(c.b); links[a].add(b); links[b].add(a); }
   const wells = rooms.map((r, i) => i).filter(i => rooms[i].role === 'stairs').sort((a, b) => rooms[a].storey - rooms[b].storey);
-  for (let i = 1; i < wells.length; i++) { links[wells[i - 1]].add(wells[i]); links[wells[i]].add(wells[i - 1]); } // the stairs join floor to floor
-  const front = Math.max(0, rooms.findIndex(r => Math.abs(r.x1 - x1) < 0.01 && fd >= r.z0 && fd <= r.z1));
+  for (let i = 1; i < wells.length; i++) { links[wells[i - 1]].add(wells[i]); links[wells[i]].add(wells[i - 1]); }
+  const front = idx.get(living);
   const hops = rooms.map(() => Infinity); hops[front] = 0;
   for (const q = [front]; q.length;) { const i = q.shift(); for (const j of links[i]) if (hops[j] === Infinity) { hops[j] = hops[i] + 1; q.push(j); } }
   const area = (r) => (r.x1 - r.x0) * (r.z1 - r.z0);
@@ -401,10 +217,10 @@ export function generateLevel(seed, opts = {}) {
     house: { x0, x1, z0, z1 }, yardDistance: +(9.4 - x1).toFixed(1),
     rooms, walls: [...houseWalls, ...TRUCK_WALLS], houseWalls, props: [], items: [], cat: [],
     frontDoor: { x: x1, z: fd }, floors: nFloors, stairs,
-    variant: { mirrored, openPlan, garage },
+    variant: { mirrored, openPlan: plan.openPlan, garage: plan.garage, layout: plan.layout },
     doors: doors.map(d => ({ vertical: d.vertical, at: d.at, c: d.c, w: d.w || DOOR })), // inner doorways (for frames, lintels, decor)
   });
-  level.doorsBetween = (a, b) => (links[rooms.indexOf(a)]?.has(rooms.indexOf(b)) ? 1 : 0);
+  level.doorsBetween = (a, b) => (links[rooms.indexOf(a)]?.has(rooms.indexOf(b)) ? 1 : 0); // a door or an opening
   level.hopsFromFront = (r) => hops[rooms.indexOf(r)];
 
   // ---- the inventory, room by room: [type, room index or -1 for anywhere] ----
@@ -461,8 +277,9 @@ export function generateLevel(seed, opts = {}) {
   }
 
   // ---- place everything: clear of walls, doors and each other, furniture in its own room ----
-  const doorPts = [...doors.flatMap(d => { const p = d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }; // wide openings: keep their whole width clear
-    return d.w > DOOR ? [p, { ...p, x: p.x - (d.w / 2 - 1) }, { ...p, x: p.x + (d.w / 2 - 1) }] : [p]; }), level.frontDoor];
+  const doorPts = [...opens.map(o => (o.vertical ? { x: o.at, z: o.c } : { x: o.c, z: o.at })), ...doors.flatMap(d => { const p = d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }; // wide openings: keep their whole width clear
+    const k = d.vertical ? 'z' : 'x'; // along the wall the doorway is cut in
+    return d.w > DOOR ? [p, { ...p, [k]: p[k] - (d.w / 2 - 1) }, { ...p, [k]: p[k] + (d.w / 2 - 1) }] : [p]; }), level.frontDoor];
   const placed = [];
   const totalArea = rooms.reduce((a, r) => a + area(r), 0);
   const open = rooms.filter(r => r.role !== 'hall' && r.role !== 'stairs'), openArea = open.reduce((a, r) => a + area(r), 0);

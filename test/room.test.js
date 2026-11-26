@@ -561,12 +561,12 @@ test('daily house: same seed for everyone that day', () => {
   assert.equal(room.bots.size, 3, 'daily is a solo run vs AI');
 });
 
-test('Moon Mansion twist builds a big 6-room house', () => {
+test('Moon Mansion twist builds a big house: more rooms than any family home (10+), 450 m² or more', () => {
   const { room, join, send } = makeRoom({});
   join('A', 'Ada');
   send('A', 'twist', { twist: 'mansion' });
-  const h = room.level.house;
-  assert.ok(h.x1 - h.x0 >= 24.5 && room.level.rooms.length >= 5, `${h.x1 - h.x0} wide, ${room.level.rooms.length} rooms`);
+  const h = room.level.house, area = (h.x1 - h.x0) * (h.z1 - h.z0); // wide, or deep (a side-wing mansion)
+  assert.ok(area >= 450 && room.level.rooms.length >= 10, `${(h.x1 - h.x0).toFixed(1)} × ${(h.z1 - h.z0).toFixed(1)}, ${room.level.rooms.length} rooms`);
 });
 
 test('Zero-G twist: gravity cuts out on a cycle and floor items drift', () => {

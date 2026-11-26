@@ -181,6 +181,14 @@ Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2
         is off during a battle. The phone action button mashes too ("Tap!"). Server tap allowance is a 4-tap burst + 15/s, so taps a phone
         network delivers bunched together all count (half were dropped before), autoclickers still capped. test/e2e-duel.mjs
       - Two-wheel dolly faces the right way: mover behind the red frame holding new black grips, boxes on the nose plate in front
+- [x] Procedural floor plans (shared/houseplan.js): every match a different plan, not a resized one. Hallway shapes: spine behind the
+      shared rooms, cross hall to the back, T (spine + branch), side wing (hall across the house, shared rooms one side, private the
+      other), cottage (no hall); mansions get two wings or halls both sides. Rooms are sliced around the halls either way round, each in
+      its size range (ROOM_SIZES now checked either orientation). Walls are built from the rooms: a wall where rooms meet, a door gap
+      where they connect (anywhere along the shared wall), nothing where halls join. Upstairs keeps the stairwell and halls, new rooms.
+      Measured on 160 seeds: 93 distinct room-connection shapes (old generator 31), hallways 71 along z / 69 along x (old: all along z).
+      Stair landings 1.4 → 1.5 m so the AI's 0.5 m path grid always finds a way across wherever the stairwell lands. AI sim: 1 floor
+      84% loaded (old 85%), 2 floors 67% (old 61%). test/houseplan.test.js
 - [x] Homes: a real plan, front column of shared rooms (living with the front door, dining, kitchen), a 4 m hallway, a back column of
       private rooms (bedrooms, bathroom, office, laundry); cottages (bedroom + en-suite off the living room); Moon Mansion = two wings
       joined by a passage. Every room type has its own size range (ROOM_SIZES in shared/level.js) and never grows past it
