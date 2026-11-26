@@ -199,3 +199,9 @@ Verified: unit tests all pass (house tests over 600 generated houses), AI sims l
 - From here on: voxel look only (classic stays as it is, no new work)
 Verified: unit tests (196) pass incl. stair walks (no jumps, never in a wall), team lift + dolly rules, bot fetching from upstairs;
 AI sim on 3-floor houses loads 12–21 of ~30 in 3 min; voxel browser suites pass (dolly suite flaked once on timing, passed on rerun)
+- [x] In-game Menu button (top right, Esc on keyboard): Back to the game, Sound, Music, Camera (Close / Normal / Far), Screen shake,
+      Quit to main menu (asks first). Your mover stands still while it's open; the round keeps going. Bottom sheet on phones
+- [x] Nova and Cosmo rebuilt as chibi voxel astronauts on the crew's own grid (big bevelled helmet, glossy visor, coloured trim
+      that the suit unlocks recolour, chest panel, backpack, swinging arms)
+- [x] Fixed the black square under every mover: the fade code reset the shadow to opaque each snapshot; now a soft round shadow
+- [x] Voxel surfaces: no more grid outlines

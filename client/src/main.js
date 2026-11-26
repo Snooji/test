@@ -243,7 +243,7 @@ setInterval(() => {
   if (!room || !snap) return;
   const ws = room.connection?.transport?.ws; // a dropped socket: stop sending until reconnect/leave handling kicks in
   if (ws && ws.readyState !== 1) return;
-  room.send('input', input.read());
+  room.send('input', menuOpen ? { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0 } : input.read());
 }, 50);
 
 // ---------- snapshots ----------
@@ -280,7 +280,8 @@ function onPhase(phase, prev) {
   show('chat', chatty);
   show('chat-toggle', chatty && isTouch);
   $('chat').classList.toggle('collapsed', isTouch && phase === 'lobby'); // phones: tap 💬 to open
-  input.enabled = phase !== 'meeting';
+  input.enabled = phase !== 'meeting' && !menuOpen;
+  if (!['playing', 'countdown', 'meeting', 'driveoff'].includes(phase)) closeGameMenu();
   if (phase === 'meeting') { myVote = null; sfx('alarm'); }
   if (phase === 'lobby') $('lobby-tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   if (phase === 'countdown') {
@@ -725,18 +726,69 @@ $('set-news').onchange = async () => {
     $('set-note').textContent = r.ok ? (on ? '✅ You’ll get newsletters and offers.' : '✅ Unsubscribed. No more emails.') : 'Could not save. Try again.';
   } catch { $('set-note').textContent = 'Could not save. Try again.'; }
 };
-$('btn-newgame').onclick = async () => {
+$('btn-newgame').onclick = () => leaveToMenu(true);
+async function leaveToMenu(askFeedback) {
+  closeGameMenu();
   const r = room; room = null;
   try { sessionStorage.removeItem('sm_rt'); } catch {}
   await r?.leave(true).catch(() => {});
   snap = null; lastPhase = null;
   history.replaceState(null, '', location.pathname);
-  for (const id of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach']) show(id, false);
+  for (const id of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach', 'train-done']) show(id, false);
+  $('train-done').dataset.done = '';
   scene.resetDrive();
   route();
+  if (!askFeedback) return;
   let asked = null; try { asked = localStorage.getItem('sm_fb_day'); } catch {}
   if (asked !== todayUTC()) show('feedback');
-};
+}
+
+// ---------- in-game menu: resume, settings, quit ----------
+let menuOpen = false;
+const pref = (k, d) => { try { return localStorage.getItem('sm_' + k) ?? d; } catch { return d; } };
+const savePref = (k, v) => { try { localStorage.setItem('sm_' + k, v); } catch {} };
+function applyPrefs() {
+  scene.camZoom = { close: 0.8, normal: 1, far: 1.45 }[pref('cam', 'normal')] || 1;
+  scene.noShake = pref('shake', 'on') === 'off';
+}
+function syncGameMenu() {
+  const val = { sound: isMuted() ? 'off' : 'on', music: isMusicOn() ? 'on' : 'off', cam: pref('cam', 'normal'), shake: pref('shake', 'on') };
+  for (const seg of document.querySelectorAll('.gm-seg')) for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === val[seg.dataset.set]));
+}
+function openGameMenu() {
+  if (menuOpen) return;
+  menuOpen = true; input.enabled = false;
+  syncGameMenu(); show('gm-confirm', false); show('game-menu');
+  $('hud-menu').setAttribute('aria-expanded', 'true');
+  $('gm-resume').focus();
+}
+function closeGameMenu() {
+  if (!menuOpen) return;
+  menuOpen = false; input.enabled = snap?.phase !== 'meeting';
+  show('game-menu', false);
+  $('hud-menu').setAttribute('aria-expanded', 'false');
+}
+$('hud-menu').onclick = () => (menuOpen ? closeGameMenu() : openGameMenu());
+$('gm-resume').onclick = closeGameMenu;
+$('game-menu').addEventListener('click', (e) => { if (e.target.id === 'game-menu') closeGameMenu(); }); // tap outside the sheet
+for (const seg of document.querySelectorAll('.gm-seg')) seg.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const k = seg.dataset.set, v = b.dataset.v;
+  if (k === 'sound') { setMuted(v === 'off'); syncSound(); }
+  else if (k === 'music') { setMusic(v === 'on'); syncMusic(); }
+  else { savePref(k, v); applyPrefs(); }
+  syncGameMenu();
+});
+$('gm-quit').onclick = () => { show('gm-confirm'); $('gm-quit-no').focus(); };
+$('gm-quit-no').onclick = () => { show('gm-confirm', false); $('gm-quit').focus(); };
+$('gm-quit-yes').onclick = () => leaveToMenu(false);
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || $('hud').classList.contains('hidden')) return;
+  if (document.activeElement?.tagName === 'INPUT') return; // chat box handles its own Escape
+  e.preventDefault();
+  menuOpen ? closeGameMenu() : openGameMenu();
+});
+applyPrefs();
 const answerFeedback = (v) => {
   if (v) { track(v); toast(v === 'feedback_up' ? '🙌 Thanks! Noted.' : '🙏 Thanks for the honesty!'); }
   try { localStorage.setItem('sm_fb_day', todayUTC()); } catch {}
@@ -793,17 +845,6 @@ function renderTrainingDone(s) {
   $('td-portrait').innerHTML = portrait(me?.char || 'nova');
   scene.setBanner(myId, '✅ TRAINING COMPLETE');
 }
-const leaveToMenu = async () => {
-  const r = room; room = null;
-  try { sessionStorage.removeItem('sm_rt'); } catch {}
-  await r?.leave(true).catch(() => {});
-  snap = null; lastPhase = null;
-  history.replaceState(null, '', location.pathname);
-  for (const id of ['hud', 'controls', 'joyzone', 'dpad', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'drive', 'coach', 'train-done']) show(id, false);
-  $('train-done').dataset.done = '';
-  scene.resetDrive();
-  route();
-};
 $('td-menu').onclick = leaveToMenu;
 $('td-play').onclick = async () => { await leaveToMenu(); connect(null, { solo: true, difficulty: 'easy' }); };
 

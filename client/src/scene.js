@@ -344,7 +344,7 @@ export class GameScene {
         if (v.energyKey !== bucket) { v.energyKey = bucket; v.energy.material.map?.dispose(); v.energy.material.map = energyTexture(en, p.injured); v.energy.material.needsUpdate = true; }
       }
       if (v.energy) v.energy.visible = showE;
-      v.root.traverse(o => { if (o.userData.isXray) { o.visible = !p.out; return; } if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
+      v.root.traverse(o => { if (o.userData.isXray) { o.visible = !p.out; return; } if (o.userData.blob) return; /* the blob shadow stays soft */ if (o.material && o !== v.label) { o.material.transparent = p.out; o.material.opacity = p.out ? 0.35 : 1; } });
     }
     for (const [id, v] of this.players) if (!seen.has(id)) { this.scene.remove(v.root); this.players.delete(id); }
 
@@ -455,7 +455,7 @@ export class GameScene {
     this.emotes.push({ s, t: 0 });
   }
 
-  shake() { this.shakeT = 0.4; }
+  shake() { if (!this.noShake) this.shakeT = 0.4; }
 
   /** little physics particles: shards, dust, confetti */
   burst(x, y, z, colors, n = 18, speed = 4, life = 1.2, size = 1) {
@@ -849,7 +849,8 @@ export class GameScene {
       this.camTarget.set(v.root.position.x - (wide ? 7 : 0), 0, v.root.position.z + (wide ? 0 : 3));
       this.camOff = [-4, 15, 14];
     } else { this.camTarget.set(-2, 0, 0); this.camOff = [0, 34, 20]; }
-    const [ox, oy, oz] = this.camOff;
+    const zoom = me && !me.loadMode ? (this.camZoom || 1) : 1; // settings: Close / Normal / Far (walking around only)
+    const [ox, oy, oz] = this.camOff.map(v => v * zoom);
     const k = 4;
     this.camera.position.x = damp(this.camera.position.x, this.camTarget.x + ox, k, dt);
     this.camera.position.y = damp(this.camera.position.y, this.camTarget.y + oy, k, dt);

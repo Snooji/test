@@ -16,16 +16,7 @@ export const VS = 0.1; // model voxel size in metres
 const LITE = typeof location !== 'undefined' && new URLSearchParams(location.search).get('lite') === '1';
 
 // ---------- shared materials ----------
-const gridTex = (() => {
-  const c = document.createElement('canvas'); c.width = c.height = 32;
-  const g = c.getContext('2d');
-  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 32, 32);
-  g.fillStyle = 'rgba(40,30,80,.16)'; g.fillRect(0, 0, 32, 2); g.fillRect(0, 0, 2, 32);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
-  return t;
-})();
-export const voxMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: gridTex });
+export const voxMat = new THREE.MeshLambertMaterial({ vertexColors: true }); // flat colour per voxel face, no outlines
 const plainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true }); // lit-looking bits: lamp shade, antenna tips, screens
 
@@ -161,20 +152,38 @@ function withArms(body, arms, material) {
   for (const [s, x, y, len, hex, hand] of arms) { const a = armMesh(len, hex, hand, material); a.position.set(s * x, y, 0.02); a.userData.arm = s; g.add(a); }
   return g;
 }
-function astronaut(suit, visor, material) {
-  const white = 0xf1f3fa;
-  const v = new Vox()
-    .box(-0.15, 0.1, 0.03, 0.2, 0.2, 0.3, 0xd9dde8).box(0.15, 0.1, 0.03, 0.2, 0.2, 0.3, 0xd9dde8)   // boots
-    .box(-0.14, 0.32, 0, 0.2, 0.26, 0.24, suit).box(0.14, 0.32, 0, 0.2, 0.26, 0.24, suit)           // legs
-    .box(0, 0.72, 0, 0.6, 0.56, 0.44, suit)                                                          // torso
-    .box(0, 0.5, 0, 0.62, 0.08, 0.46, shade(suit, 0.6))                                              // belt
-    .box(0, 0.8, 0.24, 0.2, 0.16, 0.06, 0xffd166)                                                    // chest badge
-    .box(0, 0.76, -0.29, 0.44, 0.46, 0.16, 0xd9dde8)                                                 // backpack
-    .ell(0, 1.27, 0, 0.36, 0.33, 0.34, white)                                                        // helmet
-    .box(0, 1.28, 0.26, 0.44, 0.24, 0.12, visor)                                                     // visor
-    .box(0.2, 1.66, 0, 0.1, 0.3, 0.1, white);                                                        // antenna
-  const tip = new Vox().box(0.2, 1.86, 0, 0.12, 0.12, 0.12, suit);
-  const g = withArms(v.mesh(material), [[-1, 0.4, 0.98, 0.44, white, suit], [1, 0.4, 0.98, 0.44, white, suit]], material);
+/** Chibi astronaut on the crew's own voxel grid (1/16 m, ~26 voxels tall): big rounded helmet, glossy visor, small white
+ *  suit with coloured trim (the suit unlock recolours the trim), chest panel, backpack, swinging arms. */
+function astronaut(trim, visor, material) {
+  const U = 1 / 16, WHITE = 0xf4f5fa, SHADE = 0xdfe3ec, GREY = 0xb9c0cf, SOLE = 0x4a4f5e;
+  const hi = shade(visor, 2.2) & 0xffffff, rim = 0x9aa3b5;
+  const v = new Vox(U);
+  const F = (i0, i1, j0, j1, k0, k1, c) => v.fill(i0, i1, j0, j1, k0, k1, c);
+  // boots + legs
+  for (const [a, b] of [[-4, -1], [1, 4]]) { F(a, b, 0, 1, -2, 3, SOLE); F(a, b, 1, 2, -2, 3, GREY); F(a, b, 2, 5, -1, 2, WHITE); F(a, b, 4, 5, -1, 2, SHADE); }
+  // torso, belt, chest panel with buttons
+  F(-4, 4, 5, 11, -2, 2, WHITE); F(-4, 4, 5, 6, -2, 2, trim);
+  F(-2, 2, 7, 10, 2, 3, SHADE); v.set(-2, 8, 2, 0xe63946); v.set(-1, 8, 2, 0x3a86ff); v.set(0, 8, 2, 0xffd166); v.set(1, 9, 2, 0x2ec4b6);
+  // backpack with a trim stripe
+  F(-3, 3, 5, 11, -4, -2, SHADE); F(-3, 3, 9, 10, -4, -2, trim);
+  // helmet: a 12×11×10 block with bevelled edges
+  for (let i = -6; i < 6; i++) for (let j = 11; j < 22; j++) for (let k = -5; k < 5; k++) {
+    const ei = i === -6 || i === 5, ek = k === -5 || k === 4, top = j === 21, bot = j === 11;
+    if ((ei && ek) || (top && (ei || ek)) || (bot && (ei || ek))) continue;
+    v.set(i, j, k, j === 11 ? trim : WHITE);
+  }
+  F(-5, 5, 12, 20, 5, 6, rim);                                   // visor rim
+  F(-4, 4, 13, 19, 5, 6, visor);                                 // visor
+  v.set(-3, 17, 5, hi); v.set(-2, 17, 5, hi); v.set(-3, 16, 5, hi); v.set(2, 14, 5, shade(visor, 1.5)); // glossy highlights
+  F(-7, -6, 14, 18, -2, 2, trim); F(6, 7, 14, 18, -2, 2, trim);  // ear pieces
+  F(3, 4, 22, 25, 0, 1, GREY);                                   // antenna
+  const tip = new Vox(U).fill(3, 4, 25, 26, 0, 1, trim);
+  const g = new THREE.Group();
+  g.add(v.mesh(material));
+  for (const sgn of [-1, 1]) { // arms hang from the shoulder so they can swing and lift
+    const a = new Vox(U).fill(-1, 1, -5, 0, -1, 2, WHITE).fill(-1, 1, -6, -5, -1, 2, trim).mesh(material);
+    a.position.set(sgn * 5 * U, 11 * U, 0); a.userData.arm = sgn; g.add(a);
+  }
   g.add(tip.mesh(glowMat));
   return g;
 }
@@ -205,15 +214,29 @@ function zibble(tint, material) {
   return g;
 }
 
+/** soft round contact shadow under every mover (one shared texture) */
+const blobTex = (() => {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  r.addColorStop(0, 'rgba(20,14,8,.55)'); r.addColorStop(0.6, 'rgba(20,14,8,.25)'); r.addColorStop(1, 'rgba(20,14,8,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false });
+function blobShadow() {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.0), blobMat);
+  m.rotation.x = -Math.PI / 2; m.position.y = 0.02; m.renderOrder = 1; m.userData.blob = true;
+  return m;
+}
+
 function rosterMover(char) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   attachModel(body, `/models/chars/${char}.glb`);
   root.add(body);
   root.userData.body = body;
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
-  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02;
-  root.add(shadow);
+  root.add(blobShadow());
   return root;
 }
 
@@ -227,9 +250,7 @@ export function makeMover(char, suit = null) {
   g.traverse(o => { if (o.material === glowMat) o.material = glow; });
   root.add(g);
   root.userData.body = g;
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
-  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02;
-  root.add(shadow);
+  root.add(blobShadow());
   return root;
 }
 

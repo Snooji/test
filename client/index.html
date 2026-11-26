@@ -55,9 +55,10 @@
       <div class="pill crew hidden" id="hud-crew">🧰 Crew 0</div>
       <button class="pill danger hidden" id="hud-callout">📣 CALL OUT <kbd>Q</kbd></button>
       <button class="pill help hidden" id="hud-help">🆘 NEED A HAND <kbd>H</kbd></button>
-      <button class="pill icon" id="hud-sound" aria-label="Toggle sound">🔊</button>
-      <button class="pill icon" id="hud-music" aria-label="Toggle music">🎵</button>
+      <button class="pill icon hidden" id="hud-sound" aria-label="Toggle sound">🔊</button>
+      <button class="pill icon hidden" id="hud-music" aria-label="Toggle music">🎵</button>
     </div>
+    <button class="gm-open" id="hud-menu" aria-haspopup="dialog" aria-controls="game-menu" aria-expanded="false"><span class="burger" aria-hidden="true"><i></i><i></i><i></i></span><span>Menu</span></button>
     <canvas id="minimap" width="220" height="130" aria-label="Minimap"></canvas>
     <div id="countdown" class="hidden"></div>
     <div id="scoreboard"></div>
@@ -150,6 +151,26 @@
     </aside>
     <footer class="powered">Powered by &amp; created by <b>Starside Movers</b></footer>
   </section>
+
+  <!-- In-game menu (the round keeps going: it's a crew game) -->
+  <div id="game-menu" class="gm hidden" role="dialog" aria-modal="true" aria-labelledby="gm-title">
+    <div class="gm-sheet">
+      <div class="gm-head"><h2 id="gm-title">Menu</h2><p>The round keeps going while this is open. Your mover stands still.</p></div>
+      <button class="gm-btn gm-primary" id="gm-resume">Back to the game <kbd>Esc</kbd></button>
+      <h3>Settings</h3>
+      <ul class="gm-list">
+        <li><span>Sound effects</span><div class="gm-seg" data-set="sound" role="group" aria-label="Sound effects"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
+        <li><span>Music</span><div class="gm-seg" data-set="music" role="group" aria-label="Music"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
+        <li><span>Camera</span><div class="gm-seg" data-set="cam" role="group" aria-label="Camera distance"><button data-v="close">Close</button><button data-v="normal">Normal</button><button data-v="far">Far</button></div></li>
+        <li><span>Screen shake</span><div class="gm-seg" data-set="shake" role="group" aria-label="Screen shake"><button data-v="on">On</button><button data-v="off">Off</button></div></li>
+      </ul>
+      <button class="gm-btn gm-quit" id="gm-quit">Quit to main menu</button>
+      <div class="gm-confirm hidden" id="gm-confirm" role="alertdialog" aria-labelledby="gm-confirm-text">
+        <p id="gm-confirm-text">Leave this game? Your crew keeps playing without you, and this round won't count for you.</p>
+        <div class="gm-confirm-row"><button class="gm-btn gm-quit" id="gm-quit-yes">Leave game</button><button class="gm-btn" id="gm-quit-no">Stay</button></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Lobby -->
   <section id="lobby" class="screen hidden">
