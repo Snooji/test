@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { ITEM_TYPES, GRID } from '../../shared/logic.js';
 import { CELL, TRUCK } from '../../shared/world.js';
+import { STOREY_H, FLOOR_DZ } from '../../shared/level.js';
 import { sprite, labelTexture } from './models.js';
 import { rosterEntry } from '../../shared/roster.js';
 import { attachModel, instanceModels } from './assets.js';
@@ -383,54 +384,106 @@ export function buildWorld(scene) {
 }
 
 export const WALL_H = 2.4; // tall enough to hide what's in the next room
+const SLAB = 0.3;          // upstairs floors are this thick
+/** rectangles of [x0,z0,x1,z1] with the holes cut out (stairwell openings) */
+export function cutHoles(rect, holes) {
+  let parts = [rect];
+  for (const [hx0, hz0, hx1, hz1] of holes) {
+    const next = [];
+    for (const [x0, z0, x1, z1] of parts) {
+      if (hx1 <= x0 || hx0 >= x1 || hz1 <= z0 || hz0 >= z1) { next.push([x0, z0, x1, z1]); continue; }
+      if (hz0 > z0) next.push([x0, z0, x1, hz0]);
+      if (hz1 < z1) next.push([x0, hz1, x1, z1]);
+      const a = Math.max(z0, hz0), c = Math.min(z1, hz1);
+      if (hx0 > x0) next.push([x0, a, hx0, c]);
+      if (hx1 < x1) next.push([hx1, a, x1, c]);
+    }
+    parts = next;
+  }
+  return parts.filter(([x0, z0, x1, z1]) => x1 - x0 > 0.01 && z1 - z0 > 0.01);
+}
+
 export function buildHouse(scene, level) {
   const g = new THREE.Group();
-  scene.house = g; scene.level = level;
-  const b = new Batch(), fd = level.frontDoor;
-  const walkLen = Math.max(0.1, 9.4 - fd.x);
-  b.box(fd.x, 0, fd.z - 1.5, fd.x + walkLen, 0.03, fd.z + 1.5, 0x57507a, 0.75);                        // walkway
-  const dz = Math.abs(fd.z) + 2.6;
-  b.box(5.4, 0, -dz, 9.4, 0.025, dz, 0x57507a, 0.75);                                                  // driveway
+  scene.house = g; scene.level = level; scene.storeys = [];
+  const n = level.floors || 1, H = STOREY_H, DZ = FLOOR_DZ;
   const rng = mulberryFor((level.seed ?? 7) * 31 + 5);
-  const fb = new Batch(); // floors: patterned per room type, no block grid
-  for (const r of level.rooms) { b.box(r.x0, 0, r.z0, r.x1, 0.035, r.z1, 0x2a2340, 1); floorPattern(fb, r, rng); }
-  // walls: split down their thickness so each side shows the colour + skirting of the room it faces (warm siding outside)
   const roomAt = (x, z) => level.rooms.find(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
   const OUT = { wall: 0xe3cfae, skirt: 0x7a5a3a };
-  for (const w of level.houseWalls) {
-    const alongX = (w.x1 - w.x0) >= (w.z1 - w.z0), len = alongX ? w.x1 - w.x0 : w.z1 - w.z0;
-    const n = Math.max(1, Math.round(len)), step = len / n;
-    for (let i = 0; i < n; i++) {
-      const a0 = (alongX ? w.x0 : w.z0) + i * step, a1 = a0 + step, mid = (a0 + a1) / 2;
-      for (const side of [-1, 1]) {
-        const tx = alongX ? mid : (side < 0 ? w.x0 - 0.3 : w.x1 + 0.3), tz = alongX ? (side < 0 ? w.z0 - 0.3 : w.z1 + 0.3) : mid;
-        const tiles = roomAt(tx, tz)?.tiles || OUT;
-        const half = alongX ? [a0, side < 0 ? w.z0 : (w.z0 + w.z1) / 2, a1, side < 0 ? (w.z0 + w.z1) / 2 : w.z1] : [side < 0 ? w.x0 : (w.x0 + w.x1) / 2, a0, side < 0 ? (w.x0 + w.x1) / 2 : w.x1, a1];
-        const [hx0, hz0, hx1, hz1] = alongX ? [half[0], half[1], half[2], half[3]] : [half[0], half[1], half[2], half[3]];
-        b.box(hx0, 0, hz0, hx1, WALL_H, hz1, tiles.wall, 0.42);
-        const pad = 0.02; // skirting sticks out a touch on its own side only
-        b.box(alongX ? hx0 : (side < 0 ? hx0 - pad : hx0), 0, alongX ? (side < 0 ? hz0 - pad : hz0) : hz0, alongX ? hx1 : (side < 0 ? hx1 : hx1 + pad), 0.16, alongX ? (side < 0 ? hz1 : hz1 + pad) : hz1, tiles.skirt, 0.42);
+  const fd = level.frontDoor;
+  const pots = [], foods = [];
+  for (let k = 0; k < n; k++) {
+    // each floor is built in the server's own coordinates (its strip of the map), then lifted into place over the ground floor
+    const sg = new THREE.Group(); sg.position.set(0, k * H, -DZ * k); g.add(sg); scene.storeys.push(sg);
+    const onK = (z) => level.floorOf(z) === k;
+    const b = new Batch(), fb = new Batch();
+    if (k === 0) {
+      const walkLen = Math.max(0.1, 9.4 - fd.x);
+      b.box(fd.x, 0, fd.z - 1.5, fd.x + walkLen, 0.03, fd.z + 1.5, 0x57507a, 0.75);                    // walkway
+      const dz = Math.abs(fd.z) + 2.6;
+      b.box(5.4, 0, -dz, 9.4, 0.025, dz, 0x57507a, 0.75);                                              // driveway
+    }
+    const holes = level.stairs.filter(st => st.b === k - 1).map(st => [st.x0, Math.min(st.zl, st.zh) + DZ * k, st.x1, Math.max(st.zl, st.zh) + DZ * k]);
+    for (const r of level.rooms.filter(r => (r.storey || 0) === k)) {
+      for (const [x0, z0, x1, z1] of cutHoles([r.x0, r.z0, r.x1, r.z1], holes)) {
+        b.box(x0, k ? -SLAB : 0, z0, x1, 0.035, z1, k ? 0x6b5a48 : 0x2a2340, 1);                      // upstairs: a real slab under the floor
+        floorPattern(fb, { ...r, x0, z0, x1, z1 }, rng);
       }
     }
-    b.box(w.x0 - 0.01, WALL_H, w.z0 - 0.01, w.x1 + 0.01, WALL_H + 0.08, w.z1 + 0.01, 0xcfae84, 0.42);     // wooden cap
+    // walls: split down their thickness so each side shows the colour + skirting of the room it faces (warm siding outside)
+    for (const w of level.houseWalls.filter(w => onK((w.z0 + w.z1) / 2))) {
+      if (w.rail) continue; // banisters are drawn with the stairs
+      const alongX = (w.x1 - w.x0) >= (w.z1 - w.z0), len = alongX ? w.x1 - w.x0 : w.z1 - w.z0;
+      const nn = Math.max(1, Math.round(len)), step = len / nn;
+      for (let i = 0; i < nn; i++) {
+        const a0 = (alongX ? w.x0 : w.z0) + i * step, a1 = a0 + step, mid = (a0 + a1) / 2;
+        for (const side of [-1, 1]) {
+          const tx = alongX ? mid : (side < 0 ? w.x0 - 0.3 : w.x1 + 0.3), tz = alongX ? (side < 0 ? w.z0 - 0.3 : w.z1 + 0.3) : mid;
+          const tiles = roomAt(tx, tz)?.tiles || OUT;
+          const [hx0, hz0, hx1, hz1] = alongX ? [a0, side < 0 ? w.z0 : (w.z0 + w.z1) / 2, a1, side < 0 ? (w.z0 + w.z1) / 2 : w.z1] : [side < 0 ? w.x0 : (w.x0 + w.x1) / 2, a0, side < 0 ? (w.x0 + w.x1) / 2 : w.x1, a1];
+          b.box(hx0, k ? -SLAB : 0, hz0, hx1, WALL_H, hz1, tiles.wall, 0.42);
+          const pad = 0.02; // skirting sticks out a touch on its own side only
+          b.box(alongX ? hx0 : (side < 0 ? hx0 - pad : hx0), 0, alongX ? (side < 0 ? hz0 - pad : hz0) : hz0, alongX ? hx1 : (side < 0 ? hx1 : hx1 + pad), 0.16, alongX ? (side < 0 ? hz1 : hz1 + pad) : hz1, tiles.skirt, 0.42);
+        }
+      }
+      b.box(w.x0 - 0.01, WALL_H, w.z0 - 0.01, w.x1 + 0.01, WALL_H + 0.08, w.z1 + 0.01, 0xcfae84, 0.42);     // wooden cap
+    }
+    // stairs: solid wooden steps up from this floor, a banister on each open side; around the opening upstairs, a railing
+    const TREAD = 0xb07a4a, NOSE = 0x7a4f2c, BAN = 0x5c3a22, POST = 0xe8dcc4;
+    for (const st of level.stairs) {
+      const z0 = st.zl + DZ * k, z1 = st.zh + DZ * k, steps = 12, run = (z1 - z0) / steps;
+      if (st.b === k) {
+        for (let i = 0; i < steps; i++) {
+          const top = H * (i + 1) / steps, za = st.dir > 0 ? z0 + i * run : z1 - (i + 1) * run, zb = za + run;
+          b.box(st.x0, 0, za, st.x1, top - 0.05, zb, 0x8a6446, 0.42);                                  // riser block
+          b.box(st.x0, top - 0.05, za, st.x1, top, zb, TREAD, 0.42);                                   // tread
+          b.box(st.x0, top - 0.06, st.dir > 0 ? za : zb - 0.06, st.x1, top, st.dir > 0 ? za + 0.06 : zb, NOSE, 0.42);
+          for (const x of [st.x0 - 0.08, st.x1 + 0.0]) b.box(x, top, za, x + 0.08, top + 0.9, zb, i % 3 ? POST : BAN, 0.42); // stepped banister
+        }
+      } else if (st.b === k - 1) { // the stairwell opening on the floor above: railings on the open sides
+        const zc = st.dir > 0 ? z0 : z1;
+        b.box(st.x0, 0, zc - 0.05, st.x1, 0.95, zc + 0.05, BAN, 0.42);
+        b.box(st.x1, 0, Math.min(z0, z1), st.x1 + 0.1, 0.95, Math.max(z0, z1), BAN, 0.42);
+        for (let z = Math.min(z0, z1); z < Math.max(z0, z1); z += 0.5) b.box(st.x1, 0, z, st.x1 + 0.1, 0.9, z + 0.06, POST, 0.42);
+      }
+    }
+    for (const p of level.props.filter(p => onK(p.z))) {
+      if (p.kind === 'rug') b.box(p.x - p.w / 2, 0.04, p.z - p.d / 2, p.x + p.w / 2, 0.06, p.z + p.d / 2, p.color, 0.3);
+      else if (p.kind === 'counter') { b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3); const along = p.w >= p.d; for (let q = -1; q <= 1; q += 2) foods.push({ x: p.x + (along ? q * p.w * 0.25 : 0), y: 0.9 + k * H, z: p.z - DZ * k + (along ? 0 : q * p.d * 0.25), rot: rng() * 6.28, h: 0.32 }); }
+      else if (p.kind === 'plant') pots.push({ ...p, y: k * H, z: p.z - DZ * k, n: Math.floor(rng() * 4) });
+      else if (p.kind === 'mailbox') new Vox().box(0, 0.5, 0, 0.1, 1, 0.1, 0xcccccc).box(0, 1.1, 0, 0.5, 0.36, 0.3, 0x2ec4b6).box(0.2, 1.36, 0, 0.06, 0.2, 0.06, 0xe63946).into(b, p.x, 0, p.z);
+    }
+    if (k === 0) b.box(fd.x + 0.2, 0.04, fd.z - 1.7, fd.x + 1.4, 0.06, fd.z + 1.7, 0xffd166, 0.3);       // door mat
+    const m = new THREE.Mesh(b.geometry(), voxMat); m.castShadow = m.receiveShadow = true; sg.add(m);
+    const fm = new THREE.Mesh(fb.geometry(), plainMat); fm.receiveShadow = true; sg.add(fm);
+    for (const r of level.rooms.filter(r => (r.storey || 0) === k)) { // room names stay as soft floor decals
+      const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
+      l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.05, r.role === 'stairs' ? r.z1 - 0.6 : r.z0 + 1.3); sg.add(l);
+    }
   }
-  const pots = [], foods = [];
-  for (const p of level.props) {
-    if (p.kind === 'rug') b.box(p.x - p.w / 2, 0.04, p.z - p.d / 2, p.x + p.w / 2, 0.06, p.z + p.d / 2, p.color, 0.3);
-    else if (p.kind === 'counter') { b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3); const along = p.w >= p.d; for (let k = -1; k <= 1; k += 2) foods.push({ x: p.x + (along ? k * p.w * 0.25 : 0), y: 0.9, z: p.z + (along ? 0 : k * p.d * 0.25), rot: rng() * 6.28, h: 0.32 }); }
-    else if (p.kind === 'plant') pots.push({ ...p, n: Math.floor(rng() * 4) });
-    else if (p.kind === 'mailbox') new Vox().box(0, 0.5, 0, 0.1, 1, 0.1, 0xcccccc).box(0, 1.1, 0, 0.5, 0.36, 0.3, 0x2ec4b6).box(0.2, 1.36, 0, 0.06, 0.2, 0.06, 0xe63946).into(b, p.x, 0, p.z);
-  }
-  b.box(fd.x + 0.2, 0.04, fd.z - 1.7, fd.x + 1.4, 0.06, fd.z + 1.7, 0xffd166, 0.3);                     // door mat
-  const m = new THREE.Mesh(b.geometry(), voxMat); m.castShadow = m.receiveShadow = true; g.add(m);
-  const fm = new THREE.Mesh(fb.geometry(), plainMat); fm.receiveShadow = true; g.add(fm);
-  for (let n = 0; n < 4; n++) instanceModels(g, `/models/env/pot${n}.glb`, pots.filter(p => p.n === n).map(p => ({ x: p.x, z: p.z, rot: rng() * 6.28, h: 1.0 })));
+  for (let q = 0; q < 4; q++) instanceModels(g, `/models/env/pot${q}.glb`, pots.filter(p => p.n === q).map(p => ({ x: p.x, y: p.y, z: p.z, rot: rng() * 6.28, h: 1.0 })));
   instanceModels(g, '/models/env/food1.glb', foods);
   if (!LITE) decorateYard(g, level, rng);
-  for (const r of level.rooms) { // room names stay as soft floor decals
-    const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
-    l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.05, r.z0 + 1.3); g.add(l);
-  }
   scene.scene.add(g);
 }
 
@@ -514,7 +567,7 @@ function floorPattern(fb, r, rng) {
 
 /** a lawn round the house and downloaded trees, rocks, flowers, benches and lamp posts (one draw call per model) */
 function decorateYard(g, level, rng) {
-  const xs = level.rooms.flatMap(r => [r.x0, r.x1]), zs = level.rooms.flatMap(r => [r.z0, r.z1]);
+  const g0 = level.rooms.filter(r => !r.storey), xs = g0.flatMap(r => [r.x0, r.x1]), zs = g0.flatMap(r => [r.z0, r.z1]); // the ground floor's footprint
   const hx0 = Math.min(...xs), hx1 = Math.max(...xs), hz0 = Math.min(...zs), hz1 = Math.max(...zs);
   const L = { x0: hx0 - 8, x1: Math.min(hx1 + 9, 8.4), z0: hz0 - 8, z1: hz1 + 8 };
   const lawn = new Batch(), G = [0x4f9a4a, 0x5aa654, 0x4a9145];

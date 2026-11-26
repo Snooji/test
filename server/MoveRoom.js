@@ -54,6 +54,8 @@ export class MoveRoom extends Room {
     this.daily = /^\d{4}-\d{2}-\d{2}$/.test(options.daily || '') ? options.daily : null;
     this.twist = ['zerog', 'mansion'].includes(options.twist) ? options.twist : 'none';
     if (this.daily) { this.seedOverride = dailySeed(this.daily); this.soloPending = true; this.solo = true; }
+    // floors (1–4): the crew chief picks in the lobby; the daily house picks 1 or 2 from its seed
+    this.floors = this.daily ? 1 + (this.seedOverride % 2) : Math.max(1, Math.min(4, Math.round(Number(options.floors) || 1)));
     if (this.quick) { this.soloPending = true; this.autoStartAt = 0; }
     if (this.tutorialMode) { this.soloPending = false; this.solo = true; }
     this.zeroG = false; this.zeroT = 0;
@@ -155,6 +157,11 @@ export class MoveRoom extends Room {
       const was = this.twist; this.twist = m.twist;
       if ((was === 'mansion') !== (this.twist === 'mansion') && !this.classic) { this.newLevel(); this.resetWorld(); }
       else this.level.twist = this.twist;
+    });
+    this.onMessage('floors', (c, m) => {
+      const n = Math.round(Number(m?.floors));
+      if (!hostInLobby(c) || !(n >= 1 && n <= 4) || this.daily || this.tutorialMode || this.classic || n === this.floors) return;
+      this.floors = n; this.newLevel(); this.resetWorld();
     });
     this.onMessage('suit', (c, m) => {
       const p = this.players.get(c.sessionId);
@@ -325,7 +332,7 @@ export class MoveRoom extends Room {
   newLevel() {
     this.level = this.tutorialMode ? tutorialLevel()
       : this.classic ? classicLevel()
-      : generateLevel(this.seedOverride ?? newSeed(), { exact: this.isExact(), mansion: this.twist === 'mansion' });
+      : generateLevel(this.seedOverride ?? newSeed(), { exact: this.isExact(), mansion: this.twist === 'mansion', floors: this.floors });
     if (this.daily) this.level.daily = this.daily; else this.seedOverride = null;
     this.level.twist = this.twist;
     this.nav = createNav(this.level);
@@ -348,7 +355,7 @@ export class MoveRoom extends Room {
     if (this.dollyOn && !this.tutorialMode) {
       const spot = freeSpot(this.level, this.level.items.map(([, x, z]) => ({ x, z })));
       this.items.set('dolly', { id: 'dolly', type: 'dolly', x: spot.x, z: spot.z, state: 'floor', stack: [], uses: 0, strainT: 0, strain: 0, pusher: null, carriers: [], earned: {}, task: null, helpers: [], g: null });
-      const spot2 = freeSpot(this.level, [...this.level.items.map(([, x, z]) => ({ x, z })), spot]);
+      const spot2 = freeSpot(this.level, [...this.level.items.map(([, x, z]) => ({ x, z })), spot], Math.random, 0); // the furniture dolly lives downstairs
       this.items.set('flatdolly', { id: 'flatdolly', type: 'flatdolly', x: spot2.x, z: spot2.z, state: 'floor', piece: null, pusher: null, respawnAt: 0, carriers: [], earned: {}, task: null, helpers: [], g: null });
     }
     this.level.items.forEach(([type, x, z], i) => {
@@ -375,7 +382,8 @@ export class MoveRoom extends Room {
       p.spectator = i >= MAX_MOVERS;
       this.placeAtSpawn(p, i++);
     }
-    this.timeLeft = this.tutorialMode ? 3600 : RULES.MODES[this.mode] + (this.twist === 'mansion' && this.mode !== 'load' ? 60 : 0);
+    this.timeLeft = this.tutorialMode ? 3600 : RULES.MODES[this.mode] + (this.twist === 'mansion' && this.mode !== 'load' ? 60 : 0)
+      + (this.mode !== 'load' ? 30 * ((this.level.floors || 1) - 1) : 0); // more stairs, more time
     this.tutorial = this.tutorialMode ? { step: -1 } : null;
     this.autoStartAt = 0; this.zeroG = false; this.zeroT = 0;
     if (this.quick && this.listing) Promise.resolve().then(() => this.lock()).catch(() => {}); // stop Quick Play matching into a live round
@@ -418,6 +426,7 @@ export class MoveRoom extends Room {
       for (const p of this.players.values()) this.updatePlayer(p, dt);
       this.separate();
       this.updateTeamCarries(dt);
+      this.applyStairs();
       this.updateEnergy(dt);
       this.updateTasks(dt);
       this.updateDollies(dt);
@@ -437,6 +446,7 @@ export class MoveRoom extends Room {
     } else if (this.phase === 'lobby') {
       for (const p of this.players.values()) this.freeMove(p, dt, 1);
       this.separate();
+      this.applyStairs();
       if (this.quick && this.autoStartAt > 0 && (this.autoStartAt -= dt) <= 0) { this.autoStartAt = 0; this.startRound(); }
     }
     for (const p of this.players.values()) { p.pending.tapN = 0; p.pending.dashN = 0; p.pending.rotN = 0; }
@@ -558,6 +568,11 @@ export class MoveRoom extends Room {
       const ox = p.x, oz = p.z, of = p.face;
       this.freeMove(p, dt, mult);
       if (fd && this.flatBlocked(p, fd)) { p.x = ox; p.z = oz; p.face = of; } // the dolly (and the piece on it) can't go through walls
+      if (fd && this.level.floors > 1 && (this.level.onStairs(p.x, p.z) || this.level.onStairs(fd.x, fd.z) || this.level.onStairs(p.x + Math.sin(p.face) * this.flatReach(fd), p.z + Math.cos(p.face) * this.flatReach(fd)))) {
+        // the four-wheel furniture dolly stays downstairs (the two-wheel dolly tips back and bumps up the steps)
+        p.x = ox; p.z = oz; p.face = of;
+        if (!p.bot && (this.elapsed - (p.stairHintAt || -99)) > 6) { p.stairHintAt = this.elapsed; this.tell(p, 'The furniture dolly stays downstairs. Carry the piece up or down the stairs, or use the two-wheel dolly for boxes.'); }
+      }
       if (item) { item.x = p.x + Math.sin(p.face) * 0.2; item.z = p.z + Math.cos(p.face) * 0.2; }
       if (dly) { dly.x = p.x + Math.sin(p.face) * 0.9; dly.z = p.z + Math.cos(p.face) * 0.9; }
       if (fd) { const off = this.flatReach(fd); fd.x = p.x + Math.sin(p.face) * off; fd.z = p.z + Math.cos(p.face) * off; fd.face = p.face; this.syncFlatPiece(fd); }
@@ -780,7 +795,7 @@ export class MoveRoom extends Room {
   updateFlatDolly() {
     const d = this.items.get('flatdolly');
     if (d?.state !== 'gone' || (this.elapsed || 0) < d.respawnAt) return;
-    const spot = freeSpot(this.level, [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z })));
+    const spot = freeSpot(this.level, [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z })), Math.random, 0);
     Object.assign(d, { state: 'floor', x: spot.x, z: spot.z });
     this.event({ kind: 'toast', text: `🛞 A furniture dolly is waiting in the ${this.level.roomAt(spot.x, spot.z)}.` });
   }
@@ -984,6 +999,34 @@ export class MoveRoom extends Room {
       }
       // a tap from either carrier sets it down
       if (cs.some(c => c.pending.tapN)) this.releaseCarry(cs[0]);
+    }
+  }
+
+  /** Past the middle of a flight you're on the next floor (a different strip of the map, same spot on screen).
+   *  Whatever you hold comes with you; a team lift moves when the piece itself crosses, carriers and all. */
+  applyStairs() {
+    const L = this.level;
+    if (!(L.floors > 1)) return;
+    const move = (o, dz) => { o.z += dz; if (o.pz !== undefined) o.pz += dz; };
+    for (const p of this.players.values()) {
+      if (p.loadMode) continue;
+      const item = p.carry ? this.items.get(p.carry) : null;
+      if (item && item.carriers.length > 1) continue;
+      const dz = L.stairShift(p.x, p.z);
+      if (!dz) continue;
+      move(p, dz);
+      if (item) move(item, dz);
+      const dly = this.dollyOf(p), fd = this.flatOf(p);
+      if (dly) move(dly, dz);
+      if (fd) { move(fd, dz); this.syncFlatPiece(fd); }
+    }
+    for (const item of this.items.values()) {
+      if (item.state === 'carried' && item.carriers.length > 1) {
+        const dz = L.stairShift(item.x, item.z);
+        if (!dz) continue;
+        move(item, dz);
+        for (const id of item.carriers) { const c = this.players.get(id); if (c) move(c, dz); }
+      } else if (item.state === 'floor') { const dz = L.stairShift(item.x, item.z); if (dz) move(item, dz); } // set down on the stairs: it rests on that step
     }
   }
 
@@ -1412,7 +1455,8 @@ export class MoveRoom extends Room {
       duels: [...(this.duels?.values() || [])].map(d => ({ item: d.item, a: d.a, b: d.b, t: +Math.max(0, d.t).toFixed(1), ca: d.ca, cb: d.cb })),
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
-      level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
+      floors: this.floors,
+      level: { seed: this.level.seed, classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,

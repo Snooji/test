@@ -1,4 +1,4 @@
-// Headless playtest: node test/sim.mjs [rounds] [mode 3min|5min|load] [game classic|sabotage] [seconds]
+// Headless playtest: node test/sim.mjs [rounds] [mode 3min|5min|load] [game classic|sabotage] [seconds] (FLOORS=n env for multi-floor houses)
 import { MoveRoom } from '../server/MoveRoom.js';
 const rounds = Number(process.argv[2]) || 4;
 const MODE = process.argv[3] || '3min', GAME = process.argv[4] || 'classic', SECS = Number(process.argv[5]) || 180;
@@ -6,7 +6,7 @@ const rows = [];
 for (const diff of ['easy', 'normal', 'hard']) for (let r = 0; r < rounds; r++) {
   const room = new MoveRoom(); room.onMessage = () => {}; room.setSimulationInterval = () => {}; room.clients = [];
   let meetings = 0; room.broadcast = (t, m) => { if (t === 'evt' && m.kind === 'meeting') meetings++; };
-  room.onCreate({ seed: 7000 + r * 131, difficulty: diff, game: GAME });
+  room.onCreate({ seed: 7000 + r * 131, difficulty: diff, game: GAME, floors: Number(process.env.FLOORS) || 1 });
   room.mode = MODE; room.newLevel(); room.resetWorld();
   for (let i = 0; i < 4; i++) room.addBot();
   room.startRound();

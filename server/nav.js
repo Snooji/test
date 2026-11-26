@@ -1,13 +1,18 @@
 // Grid A* pathfinding over a level's walls, for AI movers. One nav per level.
 import { WORLD } from '../shared/world.js';
 
-const STEP = 0.5, X0 = WORLD.x0, Z0 = WORLD.z0;
-const NX = Math.ceil((WORLD.x1 - WORLD.x0) / STEP), NZ = Math.ceil((WORLD.z1 - WORLD.z0) / STEP);
+const STEP = 0.5;
 const CLEAR_R = 0.55; // a bit wider than a mover so paths keep off walls where there's room
 const TIGHT_R = 0.47; // narrow hallways: just wider than a mover (0.45); allowed, but costs more so open floor is preferred
 
 export function createNav(level) {
 const hitsWall = level.hitsWall;
+const B = level.world || WORLD; // multi-floor houses: the grid covers every floor's strip
+const X0 = B.x0, Z0 = B.z0, NX = Math.ceil((B.x1 - B.x0) / STEP), NZ = Math.ceil((B.z1 - B.z0) / STEP);
+const floorOf = level.floorOf || (() => 0), shift = level.stairShift || (() => 0);
+const DK = Math.round(40 / STEP); // one floor = this many grid rows
+/** stepping into the top half of a flight lands you on the next floor (same spot on screen): a portal */
+const portal = (i, k) => { const s = shift(X0 + (i + 0.5) * STEP, Z0 + (k + 0.5) * STEP); return s ? [i, k + Math.sign(s) * DK] : [i, k]; };
 const walk = new Uint8Array(NX * NZ);
 for (let i = 0; i < NX; i++) for (let k = 0; k < NZ; k++) {
   const x = X0 + (i + 0.5) * STEP, z = Z0 + (k + 0.5) * STEP;
@@ -38,14 +43,16 @@ function clearLine(a, b, r = 0.45) {
 
 /** Returns [{x,z}...] from start to goal (inclusive), smoothed; null if unreachable. */
 function findPath(start, goal) {
-  if (clearLine(start, goal, 0.5)) return [{ x: start.x, z: start.z }, { x: goal.x, z: goal.z }];
+  const sameFloor = floorOf(start.z) === floorOf(goal.z);
+  if (sameFloor && clearLine(start, goal, 0.5)) return [{ x: start.x, z: start.z }, { x: goal.x, z: goal.z }];
   const s = nearestWalkable(...cellOf(start.x, start.z));
   const g = nearestWalkable(...cellOf(goal.x, goal.z));
   if (!s || !g) return null;
   const goalPt = walk[cellOf(goal.x, goal.z)[0] + cellOf(goal.x, goal.z)[1] * NX] > 0 && !hitsWall(goal.x, goal.z, 0.45) ? { x: goal.x, z: goal.z } : center(...g);
   const N = NX * NZ, gScore = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), closed = new Uint8Array(N);
   const si = s[0] + s[1] * NX, gi = g[0] + g[1] * NX;
-  const h = (i, k) => { const dx = Math.abs(i - g[0]), dk = Math.abs(k - g[1]); return Math.max(dx, dk) + 0.414 * Math.min(dx, dk); };
+  const kOn = (k) => k - DK * floorOf(Z0 + (k + 0.5) * STEP); // row as seen from above (all floors stacked): keeps the estimate honest
+  const h = (i, k) => { const dx = Math.abs(i - g[0]), dk = Math.abs(kOn(k) - kOn(g[1])); return Math.max(dx, dk) + 0.414 * Math.min(dx, dk); };
   // binary heap of [f, idx]
   const heap = [];
   const push = (f, idx) => { heap.push([f, idx]); let c = heap.length - 1; while (c > 0) { const p = (c - 1) >> 1; if (heap[p][0] <= heap[c][0]) break; [heap[p], heap[c]] = [heap[c], heap[p]]; c = p; } };
@@ -59,9 +66,10 @@ function findPath(start, goal) {
     const ci = cur % NX, ck = (cur / NX) | 0;
     for (let di = -1; di <= 1; di++) for (let dk = -1; dk <= 1; dk++) {
       if (!di && !dk) continue;
-      const ni = ci + di, nk = ck + dk;
-      if (!ok(ni, nk)) continue;
+      if (!ok(ci + di, ck + dk)) continue;
       if (di && dk && (!ok(ci + di, ck) || !ok(ci, ck + dk))) continue; // no corner cutting
+      const [ni, nk] = portal(ci + di, ck + dk);
+      if (!ok(ni, nk)) continue;
       const nIdx = ni + nk * NX, cost = gScore[cur] + (di && dk ? 1.414 : 1) * (walk[nIdx] === 2 ? 1.6 : 1);
       if (cost < gScore[nIdx]) { gScore[nIdx] = cost; from[nIdx] = cur; push(cost + h(ni, nk), nIdx); }
     }
@@ -75,7 +83,7 @@ function findPath(start, goal) {
   const out = [raw[0]];
   let anchor = 0;
   for (let i = 2; i < raw.length; i++) {
-    if (!clearLine(raw[anchor], raw[i], 0.45)) { out.push(raw[i - 1]); anchor = i - 1; }
+    if (floorOf(raw[i].z) !== floorOf(raw[anchor].z) || !clearLine(raw[anchor], raw[i], 0.45)) { out.push(raw[i - 1]); anchor = i - 1; }
   }
   out.push(raw[raw.length - 1]);
   return out;

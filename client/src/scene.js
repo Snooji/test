@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ITEM_TYPES, GRID, footprint, shapeCells, SUITS } from '../../shared/logic.js';
 import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
-import { levelFromSnapshot } from '../../shared/level.js';
+import { levelFromSnapshot, STOREY_H, FLOOR_DZ } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
 import { VOXEL } from './style.js';
 import * as VX from './voxel.js';
@@ -162,14 +162,17 @@ export class GameScene {
     drive.rotation.x = -Math.PI / 2; drive.position.set(7.4, 0.014, 0); drive.receiveShadow = true; s.add(drive);
     // room floors + labels
     for (const r of level.rooms) {
-      const f = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), mat(r.floor));
-      f.rotation.x = -Math.PI / 2; f.position.set((r.x0 + r.x1) / 2, 0.02, (r.z0 + r.z1) / 2); f.receiveShadow = true; s.add(f);
+      if (!r.storey) { // upstairs floors are slabs (with the stairwell cut out), added below
+        const f = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), mat(r.floor));
+        f.rotation.x = -Math.PI / 2; f.position.set((r.x0 + r.x1) / 2, 0.02, (r.z0 + r.z1) / 2); f.receiveShadow = true; s.add(f);
+      }
       const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
       l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.03, r.z0 + 1.3); s.add(l);
     }
     // walls
     const wallMat = mat(0xe9e4ff), trimMat = mat(0x8f7bff);
     for (const w of level.houseWalls) {
+      if (w.rail) continue; // banisters come with the stairs
       const h = 2.4; // tall enough to hide what's in the next room (movers show through as silhouettes)
       const m = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0, h, w.z1 - w.z0), wallMat);
       m.position.set((w.x0 + w.x1) / 2, h / 2, (w.z0 + w.z1) / 2); m.castShadow = m.receiveShadow = true; s.add(m);
@@ -188,6 +191,29 @@ export class GameScene {
     // front door mat
     const dm = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 3.4), mat(0xffd166));
     dm.rotation.x = -Math.PI / 2; dm.position.set(fd.x + 0.8, 0.03, fd.z); s.add(dm);
+    this.storeys = [s];
+    const n = level.floors || 1;
+    if (n > 1) { // upper floors: each built in its own strip of the map, lifted into place over the ground floor
+      for (let k = 1; k < n; k++) { const sg = new THREE.Group(); sg.position.set(0, k * STOREY_H, -FLOOR_DZ * k); s.add(sg); this.storeys.push(sg); }
+      for (const c of [...s.children]) { if (this.storeys.includes(c)) continue; const k = level.floorOf(c.position.z); if (k > 0) { s.remove(c); this.storeys[k].add(c); } }
+      const slab = (k, x0, z0, x1, z1, color) => { const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 0.3, z1 - z0), mat(color)); m.position.set((x0 + x1) / 2, -0.13, (z0 + z1) / 2); m.receiveShadow = true; this.storeys[k].add(m); };
+      for (const r of level.rooms.filter(r => r.storey > 0)) {
+        const holes = level.stairs.filter(st => st.b === r.storey - 1).map(st => [st.x0, Math.min(st.zl, st.zh) + FLOOR_DZ * r.storey, st.x1, Math.max(st.zl, st.zh) + FLOOR_DZ * r.storey]);
+        for (const [x0, z0, x1, z1] of VX.cutHoles([r.x0, r.z0, r.x1, r.z1], holes)) slab(r.storey, x0, z0, x1, z1, r.floor);
+      }
+      const wood = mat(0xb07a4a), rail = mat(0x5c3a22);
+      for (const st of level.stairs) {
+        const k = st.b, z0 = st.zl + FLOOR_DZ * k, z1 = st.zh + FLOOR_DZ * k, steps = 12, run = (z1 - z0) / steps;
+        for (let i = 0; i < steps; i++) {
+          const top = STOREY_H * (i + 1) / steps, za = st.dir > 0 ? z0 + i * run : z1 - (i + 1) * run;
+          const m = new THREE.Mesh(new THREE.BoxGeometry(st.x1 - st.x0, top, run), wood); m.position.set((st.x0 + st.x1) / 2, top / 2, za + run / 2); m.castShadow = m.receiveShadow = true; this.storeys[k].add(m);
+          for (const x of [st.x0 - 0.04, st.x1 + 0.04]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, run), rail); b.position.set(x, top + 0.45, za + run / 2); this.storeys[k].add(b); }
+        }
+        const zc = (st.dir > 0 ? z0 : z1) + FLOOR_DZ; // stairwell edge upstairs
+        const e = new THREE.Mesh(new THREE.BoxGeometry(st.x1 - st.x0, 0.95, 0.1), rail); e.position.set((st.x0 + st.x1) / 2, 0.47, zc); this.storeys[k + 1].add(e);
+        const sd = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.95, Math.abs(z1 - z0)), rail); sd.position.set(st.x1 + 0.05, 0.47, (z0 + z1) / 2 + FLOOR_DZ); this.storeys[k + 1].add(sd);
+      }
+    }
     this.scene.add(s);
   }
 
@@ -264,16 +290,31 @@ export class GameScene {
   }
 
   // ---------- sync ----------
+  /** server position → drawn position (adds fl and y; z moves back over the ground floor). Safe to call twice. */
+  project(o) {
+    const L = this.level;
+    if (!o || o.x === undefined || o.fl !== undefined || !L) return o;
+    o.fl = L.floorOf(o.z); o.y = L.renderY(o.x, o.z); o.z -= FLOOR_DZ * o.fl;
+    return o;
+  }
+
   apply(snap, myId) {
     this.snap = snap;
     this.myId = myId;
     const lv = snap.level;
-    const lvKey = lv && JSON.stringify([lv.seed, lv.classic, lv.exact, lv.mansion, lv.tutorial]);
+    const lvKey = lv && JSON.stringify([lv.seed, lv.classic, lv.exact, lv.mansion, lv.tutorial, lv.floors || 1]);
     if (lv && this.levelKey !== lvKey) {
       this.levelKey = lvKey;
       this.buildHouse(levelFromSnapshot(lv));
       for (const v of this.items.values()) this.scene.remove(v.obj);
       this.items.clear();
+    }
+    // multi-floor houses: the server keeps each floor in its own strip of the map; draw everything stacked over the
+    // ground floor instead (fl = floor, y = height, z back over the footprint). Done once per snapshot, in place.
+    if ((this.level?.floors || 1) > 1) {
+      for (const p of snap.players) this.project(p);
+      for (const it of snap.items) if (it.state !== 'loaded') this.project(it);
+      this.project(snap.cat);
     }
     // players
     const seen = new Set();
@@ -466,16 +507,16 @@ export class GameScene {
   }
 
   /** 🆘 beacon: a pulsing ring + light pillar where someone needs a hand. */
-  ping(x, z) {
+  ping(x, z, y = 0, fl = 0) {
     const g = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.1, 32), new THREE.MeshBasicMaterial({ color: 0xff4466, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08; g.add(ring);
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6, 8, 1, true), new THREE.MeshBasicMaterial({ color: 0xff4466, transparent: true, opacity: 0.5, depthWrite: false }));
     pillar.position.y = 3; g.add(pillar);
     const icon = sprite('🆘', { font: 'bold 64px system-ui', w: 96, h: 96 }, [1, 1]); icon.position.y = 3.4; g.add(icon);
-    g.position.set(x, 0, z);
+    g.position.set(x, y, z);
     this.scene.add(g);
-    this.pings.push({ g, ring, t: 0 });
+    this.pings.push({ g, ring, t: 0, fl });
   }
 
   /** Screen point → truck grid cell (for drag-to-aim). null when not over the truck. */
@@ -509,6 +550,11 @@ export class GameScene {
     const snap = this.snap;
     const t = performance.now() / 1000;
     let me = null;
+    const myFl = snap?.players.find(p => p.id === this.myId)?.fl || 0;
+    (this.storeys || []).forEach((g, k) => { if (k) g.visible = k <= myFl; }); // floors above you are lifted off
+    // only your floor's movers and things show (plus anyone on the stairs next to it); the floor below stays under the floorboards
+    const seen = (o) => { const f = o.fl || 0; return f === myFl || (Math.abs(f - myFl) <= 1 && Math.abs((o.y || 0) - f * STOREY_H) > 0.01); };
+    for (const pg of this.pings || []) pg.g.visible = (pg.fl || 0) === myFl;
     for (const [id, v] of this.players) {
       const p = v.data;
       if (!p) continue;
@@ -516,6 +562,8 @@ export class GameScene {
       const r = v.root;
       r.position.x = damp(r.position.x, p.x, 14, dt);
       r.position.z = damp(r.position.z, p.z, 14, dt);
+      r.position.y = damp(r.position.y, p.y || 0, 14, dt);
+      r.visible = seen(p);
       let df = p.face - v.face; df = Math.atan2(Math.sin(df), Math.cos(df));
       v.face += df * Math.min(1, dt * 12);
       v.root.userData.body.rotation.y = v.face;
@@ -561,7 +609,8 @@ export class GameScene {
         if (dv) {
           o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
           o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
-          o.position.y = damp(o.position.y, 0.36, 14, dt);
+          o.position.y = damp(o.position.y, 0.36 + (dv.data?.y || 0), 14, dt);
+          o.visible = seen(it);
           o.rotation.y = dv.obj.rotation.y;
         }
         continue;
@@ -572,7 +621,8 @@ export class GameScene {
           const idx = d.stack.indexOf(it.id);
           o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
           o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
-          o.position.y = damp(o.position.y, 0.14 + idx * 0.82, 14, dt);
+          o.position.y = damp(o.position.y, 0.14 + idx * 0.82 + (d.y || 0), 14, dt);
+          o.visible = seen(it);
           o.rotation.y = dv.obj.rotation.y;
         }
         continue;
@@ -590,14 +640,16 @@ export class GameScene {
       const ty = (solo ? 1.85 : team ? (it.n > 1 ? 0.9 : 0.25) : 0) + (snap?.zeroG && it.state === 'floor' ? 0.6 + Math.sin(t * 2 + it.x) * 0.3 : 0);
       o.position.x = damp(o.position.x, it.x, 14, dt);
       o.position.z = damp(o.position.z, it.z, 14, dt);
-      o.position.y = damp(o.position.y, ty, 12, dt);
+      o.position.y = damp(o.position.y, ty + (it.y || 0), 12, dt);
+      if (it.type !== 'flatdolly') o.visible = seen(it);
       if (!(o.userData.pop > 0)) { if (solo) o.scale.setScalar(0.75); else o.scale.setScalar(1); }
     }
     if (snap?.cat) {
+      this.cat.visible = myFl === 0; // the cat lives downstairs
       this.cat.position.x = damp(this.cat.position.x, snap.cat.x, 8, dt);
       this.cat.position.z = damp(this.cat.position.z, snap.cat.z, 8, dt);
       this.cat.rotation.y = snap.cat.face;
-      this.cat.position.y = Math.abs(Math.sin(t * 8)) * 0.05;
+      this.cat.position.y = Math.abs(Math.sin(t * 8)) * 0.05 + (snap.cat.y || 0);
     }
     // arms up while carrying, swinging while walking
     for (const v of this.players.values()) {
@@ -788,7 +840,7 @@ export class GameScene {
     if (this.drive) { /* following the truck (set above) */ }
     else if (me) {
       if (me.loadMode) { this.camTarget.set(15.2, 1.5, 0); this.camOff = [-6, 11, 9]; }
-      else { this.camTarget.set(me.x, 0, me.z); this.camOff = [0, 20, 12]; }
+      else { this.camTarget.set(me.x, me.y || 0, me.z); this.camOff = [0, 20, 12]; }
     } else if (this.demoMode && this.players.size) {
       // menu backdrop: drift between the AI movers; nudge left on wide screens so the action sits beside the menu
       const list = [...this.players.values()];

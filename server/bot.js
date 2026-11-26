@@ -365,8 +365,10 @@ export class Bot {
       this.pathI = 1; this.repathT = 1.5;
       if (!this.path) { this.idle(); this.targetId = null; return; }
     }
-    let wp = this.path[this.pathI];
-    while (wp && Math.hypot(wp.x - src.x, wp.z - src.z) < 0.35 && this.pathI < this.path.length - 1) wp = this.path[++this.pathI];
+    // waypoints on another floor are seen from this floor (same spot, one strip over): walking at them climbs the stairs
+    const L = this.room.level, here = (q) => (L.floors > 1 ? { x: q.x, z: q.z - 40 * (L.floorOf(q.z) - L.floorOf(src.z)) } : q);
+    let wp = this.path[this.pathI] && here(this.path[this.pathI]);
+    while (wp && Math.hypot(wp.x - src.x, wp.z - src.z) < 0.35 && this.pathI < this.path.length - 1) wp = here(this.path[++this.pathI]);
     if (!wp) { this.idle(); return; }
     const dx = wp.x - src.x, dz = wp.z - src.z, d = Math.hypot(dx, dz) || 1;
     let sp = this.cfg.speed;

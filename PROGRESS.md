@@ -185,3 +185,16 @@ Verified: unit tests 171/171 (new duel tests, help-call test) · classic e2e, e2
 - [x] Walls 2.4 m tall (both looks) so they hide the next room; movers behind a wall show as a warm silhouette (stencil, never over themselves)
 - [x] AI eyesight uses an exact line-vs-wall test (no seeing past corners or through walls at a glancing angle)
 Verified: unit tests all pass (house tests over 600 generated houses), AI sims load 22–27 of ~30 items, browser suites pass on both links
+- [x] Floors 1–4 (crew chief picks in the lobby; daily house 1–2): a stairwell room in the back wing with switchback flights,
+      rails and a railed opening upstairs. Upstairs: bedrooms (3 max: bed + dresser each), bathroom, office, family room,
+      playroom, storage along a hallway; living/dining/kitchen stay downstairs. Boxes spread evenly over every floor
+- [x] Server: each floor is its own strip of the map (z + 40 per floor); past the middle of a flight you're on the next floor.
+      Carried pieces, team lifts (piece + both carriers in the same tick) and the two-wheel dolly come along; the furniture
+      dolly stays (and spawns) downstairs. +30 s per extra floor in timed rounds
+- [x] AI: nav plans across floors through the stairs; bots steer at the next waypoint as seen from their own floor
+- [x] Voxel look: floors stacked 2.8 m apart, slabs with the stairwell cut out, solid wooden steps with banisters; floors above
+      you are hidden, only your floor's movers/items/pings show (plus anyone on the stairs); camera follows your height;
+      minimap shows your floor ("Floor 2 of 3") with arrows for crew on other floors
+- From here on: voxel look only (classic stays as it is, no new work)
+Verified: unit tests (196) pass incl. stair walks (no jumps, never in a wall), team lift + dolly rules, bot fetching from upstairs;
+AI sim on 3-floor houses loads 12–21 of ~30 in 3 min; voxel browser suites pass (dolly suite flaked once on timing, passed on rerun)

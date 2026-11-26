@@ -300,7 +300,7 @@ function renderLobby(s, me) {
   const link = `${location.origin}${location.pathname}?room=${room.roomId}`;
   if ($('share-link').value !== link) $('share-link').value = link;
   const host = s.hostId === myId;
-  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist]);
+  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
   if (VOXEL) renderCrewCarousel(s); else $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
@@ -311,6 +311,7 @@ function renderLobby(s, me) {
   for (const b of $('modes').children) { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = !host; }
   for (const b of $('games').children) { b.classList.toggle('on', b.dataset.game === s.game); b.disabled = !host; }
   for (const b of $('twists').children) { b.classList.toggle('on', b.dataset.twist === s.twist); b.disabled = !host || !!s.daily; }
+  for (const b of $('floors').children) { b.classList.toggle('on', Number(b.dataset.floors) === (s.level?.floors || 1)); b.disabled = !host || !!s.daily || !!s.level?.classic; }
   const mySuit = me?.suit || 'classic';
   $('suits').innerHTML = SUITS.map(x => {
     const open = suitUnlocked(x.id, myProfile);
@@ -331,7 +332,7 @@ function renderLobby(s, me) {
   $('btn-ready-lobby').classList.toggle('on', meReadyL);
   $('btn-ready-lobby').textContent = meReadyL ? '✅ Ready! (tap to undo)' : '✋ I\'m ready';
   const lv = s.level;
-  $('lobby-house').innerHTML = lv ? `🏠 <b>${esc(lv.name)}</b> · ${lv.rooms} rooms · ${Math.round(lv.yard)} m to the truck` : '';
+  $('lobby-house').innerHTML = lv ? `🏠 <b>${esc(lv.name)}</b> · ${lv.rooms} rooms${(lv.floors || 1) > 1 ? ` on ${lv.floors} floors` : ''} · ${Math.round(lv.yard)} m to the truck` : '';
   show('btn-reroll', host && lv && !lv.classic);
   show('bot-controls', host || bots.length > 0);
   markDiff($('lobby-diff'), s.difficulty);
@@ -382,6 +383,7 @@ $('chars').addEventListener('click', (e) => {
   try { localStorage.setItem('sm_char', b.dataset.char); } catch {}
   sfx('blip');
 });
+$('floors').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('floors', { floors: Number(b.dataset.floors) }); });
 $('twists').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('twist', { twist: b.dataset.twist }); });
 $('suits').addEventListener('click', (e) => {
   const b = e.target.closest('.suit');
@@ -483,6 +485,7 @@ function nearest(s, me) {
   for (const it of s.items) {
     const stealable = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 2 && !me.carry;
     if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 1) && !stealable) continue;
+    if ((it.fl || 0) !== (me.fl || 0)) continue; // right above or below you is not within reach
     const d = Math.hypot(it.x - me.x, it.z - me.z) - (ITEM_TYPES[it.type].w > 1 ? 0.6 : 0);
     if (d < bd) { bd = d; best = it; }
   }
@@ -598,10 +601,11 @@ function onEvent(e) {
   }
   else if (e.kind === 'go') { $('countdown').innerHTML = 'GO!'; show('countdown'); setTimeout(() => show('countdown', false), 600); sfx('fanfare'); }
   else if (e.kind === 'help') {
-    scene.ping(e.x, e.z);
-    if (e.id !== myId) { toast(e.text, 'help'); sfx('alarm'); buzz([60, 40, 60]); }
+    const at = scene.project({ x: e.x, z: e.z }); // upstairs: drawn over the ground floor, at that floor's height
+    scene.ping(at.x, at.z, at.y || 0, at.fl || 0);
+    if (e.id !== myId) { toast(e.text + (at.fl ? ` (floor ${at.fl + 1})` : ''), 'help'); sfx('alarm'); buzz([60, 40, 60]); }
     else toast('🆘 Help request sent to the crew');
-    helpPings.push({ x: e.x, z: e.z, t: performance.now() });
+    helpPings.push({ x: at.x, z: at.z, fl: at.fl || 0, t: performance.now() });
   }
 }
 const helpPings = [];
