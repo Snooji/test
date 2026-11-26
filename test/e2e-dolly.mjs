@@ -61,8 +61,20 @@ log('at the truck: loadMode', meNow.loadMode, 'holding', meNow.carry, 'top was',
 if (!meNow.loadMode || meNow.carry !== d2.stack[2]) errors.push('top box should come off the dolly first');
 await p.screenshot({ path: `${out}/d03-dolly-unload.png` });
 for (let i = 0; i < 3; i++) {
-  await p.evaluate((gx) => window.__sm.send('aim', { gx, gz: 0 }), i); await wait(200); await tap();
-  await p.waitForFunction((n) => window.__sm.snap.items.filter(it => it.state === 'loaded').length >= n, i + 1, { timeout: 4000 }).catch(() => {});
+  // aim at a spot that fits (confirmed by the server), drop, and wait for THIS box to land (AI movers load things too)
+  const holding = await p.evaluate(async () => {
+    const w = (ms) => new Promise(r => setTimeout(r, ms)), me = () => window.__sm.snap.players.find(x => x.id === window.__sm.myId);
+    for (let gz = 0; gz < 4; gz++) for (let gx = 0; gx < 4; gx++) {
+      window.__sm.send('aim', { gx, gz });
+      for (let k = 0; k < 20 && !(me()?.cursor?.gx === gx && me()?.cursor?.gz === gz); k++) await w(50);
+      await w(150);
+      if (window.__sm.scene.ghostOk) return me()?.carry;
+    }
+    return me()?.carry;
+  });
+  await tap();
+  await p.waitForFunction((hid) => window.__sm.snap.items.find(it => it.id === hid)?.state === 'loaded', holding, { timeout: 5000 }).catch(() => {});
+  await wait(500); // the next box comes off the dolly
 }
 s = await snap();
 const loaded = d2.stack.filter(x => s.items.find(i => i.id === x)?.state === 'loaded').length;

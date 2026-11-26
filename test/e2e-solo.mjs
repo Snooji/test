@@ -120,7 +120,13 @@ const fits = await b.evaluate(async () => {
   const w = (ms) => new Promise(r => setTimeout(r, ms));
   const press = (id) => { const b = document.getElementById(id); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); };
   for (let turn = 0; turn < 6; turn++) { // try every spot, then turn the piece (the real buttons: input counters are cumulative)
-    for (let gx = 0; gx < 4; gx++) for (let gz = 0; gz < 4; gz++) { window.__sm.send('aim', { gx, gz }); await w(250); if (window.__sm.scene.ghostOk) return true; }
+    for (let gx = 0; gx < 4; gx++) for (let gz = 0; gz < 4; gz++) {
+      window.__sm.send('aim', { gx, gz });
+      const cur = () => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor;
+      for (let k = 0; k < 20 && !(cur()?.gx === gx && cur()?.gz === gz); k++) await w(50); // the server has the new aim
+      await w(150); // and the preview has been redrawn for it
+      if (cur()?.gx === gx && cur()?.gz === gz && window.__sm.scene.ghostOk) return true;
+    }
     press(turn % 2 ? 'btn-flip' : 'btn-rot'); await w(400);
   }
   return false;

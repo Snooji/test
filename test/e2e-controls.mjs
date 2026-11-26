@@ -1,6 +1,6 @@
 // Controls, controller, guidance arrow and house codes (voxel look): node test/e2e-controls.mjs [base] [outDir]
 import { chromium } from 'playwright';
-const base = process.argv[2] || 'http://localhost:2567/voxel', out = process.argv[3] || '.';
+const base = process.argv[2] || 'http://localhost:2567', out = process.argv[3] || '.';
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const errors = []; const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });

@@ -13,7 +13,7 @@ async function scan(p, label, include) {
 }
 for (const [dev, ctx] of [['desk', { viewport: { width: 1280, height: 800 } }], ['phone', { ...devices['iPhone 13'] }]]) {
   const p = await (await browser.newContext(ctx)).newPage();
-  await p.goto('http://localhost:2567/voxel'); await wait(1200);
+  await p.goto('http://localhost:2567'); await wait(1200);
   await scan(p, dev + ' gate', '#gate');
   await p.fill('#gate-name', 'Axe'); await p.fill('#gate-email', `qa-axe-${dev}-${Date.now()}@example.com`); await p.click('#gate-form button'); await wait(1200);
   await scan(p, dev + ' home', '#home');

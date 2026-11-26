@@ -1,7 +1,7 @@
 // In-game menu e2e (voxel look): open from the top-right button, settings stick, Escape toggles, quit goes back to the main menu.
 // node test/e2e-menu.mjs [base] [outDir]
 import { chromium, devices } from 'playwright';
-const base = process.argv[2] || 'http://localhost:2567/voxel', out = process.argv[3] || '.';
+const base = process.argv[2] || 'http://localhost:2567', out = process.argv[3] || '.';
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const errors = []; const wait = (ms) => new Promise(r => setTimeout(r, ms));
 async function play(name, email, ctx) {

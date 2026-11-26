@@ -260,4 +260,8 @@ Verified: 208 unit tests; AI sim 16-28 loaded per round, hard bots 0 breaks; all
 - [x] Accessibility: WCAG 2 A/AA scan (axe) of sign-in, home, lobby, HUD, menu and results at desktop + phone is clean
       (fixed the promo badge, Copy invite and the menu's Esc hint). Scan kept as test/e2e-a11y.mjs
 Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan pass
+- [x] One look: the classic look is gone. The voxel game is at the main address; /voxel redirects there (shared invites keep
+      their crew code). Classic house/truck/world/mover/furniture drawing code deleted (models.js 247 → 40 lines)
+- [x] Test flakes fixed: solo and dolly suites now confirm the server has the new aim before trusting the preview, and wait for
+      the specific piece (AI movers load things too); solo falls back to another piece when the AI has the couch
 

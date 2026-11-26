@@ -35,7 +35,9 @@ if (fs.existsSync(dist)) {
       : 'use the unsubscribe link in any of our emails and ask us to delete it, and we’ll remove it';
     res.type('html').send(fs.readFileSync(path.join(dist, 'privacy.html'), 'utf8').replace('{{CONTACT}}', contact));
   });
-  app.get(['/', '/voxel'], (_req, res) => res.sendFile(path.join(dist, 'index.html'))); // /voxel = same game, voxel look (trial)
+  app.get('/', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+  // the voxel look used to live at /voxel: old links and shared invites (…/voxel?room=XYZ) still work
+  app.get('/voxel', (req, res) => res.redirect(301, '/' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '')));
 }
 
 const httpServer = http.createServer(app);

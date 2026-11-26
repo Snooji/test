@@ -3,7 +3,6 @@ import { ITEM_TYPES, GRID, footprint, shapeCells, SUITS } from '../../shared/log
 import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
 import { levelFromSnapshot, STOREY_H, FLOOR_DZ } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
-import { VOXEL } from './style.js';
 import * as VX from './voxel.js';
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
@@ -118,163 +117,15 @@ export class GameScene {
     this.camera.updateProjectionMatrix();
   }
 
-  buildWorld() {
-    if (VOXEL) return VX.buildWorld(this);
-    const s = this.scene;
-    // lunar ground
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(170, 90), mat(0x3a3358));
-    ground.rotation.x = -Math.PI / 2; ground.position.x = -10; ground.receiveShadow = true; s.add(ground);
-    for (let i = 0; i < 26; i++) { // craters
-      const r = 0.6 + Math.random() * 1.8;
-      const c = new THREE.Mesh(new THREE.RingGeometry(r * 0.6, r, 20), new THREE.MeshBasicMaterial({ color: 0x2c2645 }));
-      c.rotation.x = -Math.PI / 2;
-      let x, z;
-      do { x = -70 + Math.random() * 110; z = -40 + Math.random() * 80; } while (x > -46 && x < 26 && z > -17 && z < 17);
-      c.position.set(x, 0.01, z); s.add(c);
-    }
-    // stars
-    const starGeo = new THREE.BufferGeometry();
-    const pts = [];
-    for (let i = 0; i < 900; i++) pts.push((Math.random() - 0.5) * 200, 30 + Math.random() * 60, (Math.random() - 0.5) * 200);
-    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    s.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.4 })));
-    // planet in the sky
-    const planet = new THREE.Mesh(new THREE.SphereGeometry(8, 32, 24), mat(0xff8a3d, { emissive: 0x662200, emissiveIntensity: 0.4 }));
-    planet.position.set(-30, 25, -60); s.add(planet);
-
-    this.buildTruck();
-  }
+  buildWorld() { return VX.buildWorld(this); }
 
   /** (Re)build the house for a level. Every round can be a different, generated house. */
   buildHouse(level) {
-    if (this.house) { this.scene.remove(this.house); this.house.traverse(o => { o.geometry?.dispose(); if (o.material?.map && !VOXEL) o.material.map.dispose(); else if (o.material?.map && o.material.transparent) o.material.map.dispose(); }); }
-    if (VOXEL) return VX.buildHouse(this, level);
-    const s = new THREE.Group();
-    this.house = s;
-    this.level = level;
-    const fd = level.frontDoor;
-    // walkway from the front door to the driveway, and the driveway to the ramp
-    const walkLen = Math.max(0.1, 9.4 - fd.x);
-    const walk = new THREE.Mesh(new THREE.PlaneGeometry(walkLen, 3), mat(0x57507a));
-    walk.rotation.x = -Math.PI / 2; walk.position.set(fd.x + walkLen / 2, 0.015, fd.z); walk.receiveShadow = true; s.add(walk);
-    const dz = Math.abs(fd.z) + 2.6;
-    const drive = new THREE.Mesh(new THREE.PlaneGeometry(4, dz * 2), mat(0x57507a));
-    drive.rotation.x = -Math.PI / 2; drive.position.set(7.4, 0.014, 0); drive.receiveShadow = true; s.add(drive);
-    // room floors + labels
-    for (const r of level.rooms) {
-      if (!r.storey) { // upstairs floors are slabs (with the stairwell cut out), added below
-        const f = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), mat(r.floor));
-        f.rotation.x = -Math.PI / 2; f.position.set((r.x0 + r.x1) / 2, 0.02, (r.z0 + r.z1) / 2); f.receiveShadow = true; s.add(f);
-      }
-      const l = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.15), new THREE.MeshBasicMaterial({ map: labelTexture(r.name.toUpperCase(), { fg: 'rgba(255,255,255,.35)', font: 'bold 44px system-ui', w: 512, h: 128 }), transparent: true }));
-      l.rotation.x = -Math.PI / 2; l.position.set((r.x0 + r.x1) / 2, 0.03, r.z0 + 1.3); s.add(l);
-    }
-    // walls
-    const wallMat = mat(0xe9e4ff), trimMat = mat(0xd6c4aa);
-    for (const w of level.houseWalls) {
-      if (w.rail) continue; // banisters come with the stairs
-      const h = 2.4; // tall enough to hide what's in the next room (movers show through as silhouettes)
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0, h, w.z1 - w.z0), wallMat);
-      m.position.set((w.x0 + w.x1) / 2, h / 2, (w.z0 + w.z1) / 2); m.castShadow = m.receiveShadow = true; s.add(m);
-      const t = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0 + 0.02, 0.08, w.z1 - w.z0 + 0.02), trimMat);
-      t.position.set(m.position.x, h, m.position.z); s.add(t);
-    }
-    // props
-    for (const p of level.props) {
-      let m;
-      if (p.kind === 'rug') { m = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.d), mat(p.color)); m.rotation.x = -Math.PI / 2; m.position.set(p.x, 0.03, p.z); }
-      else if (p.kind === 'counter') { m = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.9, p.d), mat(p.color)); m.position.set(p.x, 0.45, p.z); }
-      else if (p.kind === 'plant') { m = new THREE.Group(); const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.22, 0.4, 12), mat(0xff8a3d)); pot.position.y = 0.2; m.add(pot); const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 0), mat(0x52d17c, { flatShading: true })); leaf.position.y = 0.7; m.add(leaf); m.position.set(p.x, 0, p.z); }
-      else if (p.kind === 'mailbox') { m = new THREE.Group(); const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1, 0.12), mat(0xcccccc)); post.position.y = 0.5; m.add(post); const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.3), mat(0x2ec4b6)); box.position.y = 1.1; m.add(box); m.position.set(p.x, 0, p.z); }
-      if (m) { m.traverse(o => { o.castShadow = true; o.receiveShadow = true; }); s.add(m); }
-    }
-    // front door mat
-    const dm = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 3.4), mat(0xffd166));
-    dm.rotation.x = -Math.PI / 2; dm.position.set(fd.x + 0.8, 0.03, fd.z); s.add(dm);
-    this.storeys = [s];
-    const n = level.floors || 1;
-    if (n > 1) { // upper floors: each built in its own strip of the map, lifted into place over the ground floor
-      for (let k = 1; k < n; k++) { const sg = new THREE.Group(); sg.position.set(0, k * STOREY_H, -FLOOR_DZ * k); s.add(sg); this.storeys.push(sg); }
-      for (const c of [...s.children]) { if (this.storeys.includes(c)) continue; const k = level.floorOf(c.position.z); if (k > 0) { s.remove(c); this.storeys[k].add(c); } }
-      const slab = (k, x0, z0, x1, z1, color) => { const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 0.3, z1 - z0), mat(color)); m.position.set((x0 + x1) / 2, -0.13, (z0 + z1) / 2); m.receiveShadow = true; this.storeys[k].add(m); };
-      for (const r of level.rooms.filter(r => r.storey > 0)) {
-        const holes = level.stairs.filter(st => st.b === r.storey - 1).map(st => [st.x0, Math.min(st.zl, st.zh) + FLOOR_DZ * r.storey, st.x1, Math.max(st.zl, st.zh) + FLOOR_DZ * r.storey]);
-        for (const [x0, z0, x1, z1] of VX.cutHoles([r.x0, r.z0, r.x1, r.z1], holes)) slab(r.storey, x0, z0, x1, z1, r.floor);
-      }
-      const wood = mat(0xb07a4a), rail = mat(0x5c3a22);
-      for (const st of level.stairs) {
-        const k = st.b, z0 = st.zl + FLOOR_DZ * k, z1 = st.zh + FLOOR_DZ * k, steps = 12, run = (z1 - z0) / steps;
-        for (let i = 0; i < steps; i++) {
-          const top = STOREY_H * (i + 1) / steps, za = st.dir > 0 ? z0 + i * run : z1 - (i + 1) * run;
-          const m = new THREE.Mesh(new THREE.BoxGeometry(st.x1 - st.x0, top, run), wood); m.position.set((st.x0 + st.x1) / 2, top / 2, za + run / 2); m.castShadow = m.receiveShadow = true; this.storeys[k].add(m);
-          for (const x of [st.x0 - 0.04, st.x1 + 0.04]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, run), rail); b.position.set(x, top + 0.45, za + run / 2); this.storeys[k].add(b); }
-        }
-        const zc = (st.dir > 0 ? z0 : z1) + FLOOR_DZ; // stairwell edge upstairs
-        const e = new THREE.Mesh(new THREE.BoxGeometry(st.x1 - st.x0, 0.95, 0.1), rail); e.position.set((st.x0 + st.x1) / 2, 0.47, zc); this.storeys[k + 1].add(e);
-        const sd = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.95, Math.abs(z1 - z0)), rail); sd.position.set(st.x1 + 0.05, 0.47, (z0 + z1) / 2 + FLOOR_DZ); this.storeys[k + 1].add(sd);
-      }
-    }
-    this.scene.add(s);
+    if (this.house) { this.scene.remove(this.house); this.house.traverse(o => { o.geometry?.dispose(); if (o.material?.map && o.material.transparent) o.material.map.dispose(); }); }
+    return VX.buildHouse(this, level);
   }
 
-  buildTruck() {
-    if (VOXEL) return VX.buildTruck(this);
-    const s = this.scene;
-    const g = new THREE.Group();
-    const body = mat(0xf4f1ff), accent = mat(0x6b4dff), dark = mat(0x2a2640);
-    const len = TRUCK.bayX1 - TRUCK.bayX0, wid = TRUCK.z1 - TRUCK.z0;
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(len, 0.2, wid + 0.8), dark);
-    floor.position.set((TRUCK.bayX0 + TRUCK.bayX1) / 2, TRUCK.floorY - 0.1, 0); floor.receiveShadow = true; g.add(floor);
-    // floor grid lines
-    const lines = [];
-    for (let i = 0; i <= GRID.W; i++) { const z = TRUCK.z0 + i * CELL; lines.push(TRUCK.bayX0, TRUCK.floorY + 0.01, z, TRUCK.bayX1, TRUCK.floorY + 0.01, z); }
-    for (let i = 0; i <= GRID.D; i++) { const x = TRUCK.bayX0 + i * CELL; lines.push(x, TRUCK.floorY + 0.01, TRUCK.z0, x, TRUCK.floorY + 0.01, TRUCK.z1); }
-    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-    g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.5 })));
-    // side walls (low so you can see the stack) + height markers
-    for (const sz of [-1, 1]) {
-      const w = new THREE.Mesh(new THREE.BoxGeometry(len, 1.4, 0.2), body);
-      w.position.set((TRUCK.bayX0 + TRUCK.bayX1) / 2, TRUCK.floorY + 0.7, sz * (wid / 2 + 0.2)); w.castShadow = true; g.add(w);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(len, 0.2, 0.22), accent);
-      stripe.position.set(w.position.x, TRUCK.floorY + 1.3, w.position.z); g.add(stripe);
-      for (let y = 1; y <= GRID.H; y++) { // height posts
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.12), mat(0x55ffcc, { emissive: 0x22aa88 }));
-        post.position.set(TRUCK.bayX0 + 0.1, TRUCK.floorY + y * CELL, sz * (wid / 2 + 0.2)); g.add(post);
-      }
-      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.1, GRID.H * CELL, 0.1), mat(0xbbbbcc));
-      pole.position.set(TRUCK.bayX0 + 0.1, TRUCK.floorY + GRID.H * CELL / 2, sz * (wid / 2 + 0.2)); g.add(pole);
-      // wheels
-      for (const wx of [TRUCK.bayX0 + 1, TRUCK.cabX1 - 1.2]) {
-        const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.35, 18), mat(0x1a1a24));
-        wh.rotation.x = Math.PI / 2; wh.position.set(wx, 0.5, sz * (wid / 2 + 0.45)); g.add(wh);
-      }
-    }
-    // front bulkhead + cab
-    const bulk = new THREE.Mesh(new THREE.BoxGeometry(0.2, GRID.H * CELL + 0.3, wid + 0.6), body);
-    bulk.position.set(TRUCK.bayX1 + 0.1, TRUCK.floorY + (GRID.H * CELL) / 2, 0); bulk.castShadow = true; g.add(bulk);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(TRUCK.cabX1 - TRUCK.bayX1 - 0.2, 2.6, wid + 0.6), accent);
-    cab.position.set((TRUCK.bayX1 + TRUCK.cabX1) / 2 + 0.1, 1.6, 0); cab.castShadow = true; g.add(cab);
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1, wid), mat(0x9ad7ff, { metalness: 0.8, roughness: 0.1 }));
-    glass.position.set(TRUCK.cabX1 + 0.01, 2.2, 0); g.add(glass);
-    const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), new THREE.MeshBasicMaterial({ map: labelTexture('★ STARSIDE MOVERS', { fg: '#fff', font: 'bold 34px system-ui', w: 420, h: 100 }), transparent: true }));
-    logo.rotation.x = -Math.PI / 2; logo.rotation.z = Math.PI / 2; logo.position.set((TRUCK.bayX1 + TRUCK.cabX1) / 2 + 0.1, 2.92, 0); g.add(logo);
-    // ramp
-    const r = TRUCK.ramp;
-    const ramp = new THREE.Mesh(new THREE.BoxGeometry(r.x1 - r.x0, 0.12, r.z1 - r.z0 - 0.6), mat(0x8a86a6, { metalness: 0.5 }));
-    ramp.position.set((r.x0 + r.x1) / 2, TRUCK.floorY / 2, 0); ramp.rotation.z = Math.atan2(TRUCK.floorY, r.x1 - r.x0); ramp.receiveShadow = true; g.add(ramp);
-    const zone = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.12 }));
-    zone.rotation.x = -Math.PI / 2; zone.position.set((r.x0 + r.x1) / 2, 0.04, 0); g.add(zone);
-    this.rampZone = zone;
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.8), new THREE.MeshBasicMaterial({ map: labelTexture('LOAD ZONE ▶', { fg: '#55ffcc', font: 'bold 40px system-ui', w: 400, h: 96 }), transparent: true }));
-    sign.rotation.x = -Math.PI / 2; sign.position.set((r.x0 + r.x1) / 2 - 0.3, 0.06, r.z1 + 0.7); g.add(sign);
-    // roll-down shutter for the drive-off
-    const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.12, GRID.H * CELL + 0.3, wid + 0.6), mat(0xd9d4f2, { metalness: 0.4 }));
-    shutter.position.set(TRUCK.bayX0 - 0.05, TRUCK.floorY + (GRID.H * CELL + 0.3) / 2, 0);
-    shutter.scale.y = 0.001; shutter.visible = false; g.add(shutter);
-    this.shutter = shutter;
-    this.truckGroup = g;
-    s.add(g);
-  }
+  buildTruck() { return VX.buildTruck(this); }
 
   /** The truck rolls its shutter down and drives off; damaged pieces burst on the way. */
   startDriveOff(damagedIds) {
@@ -413,7 +264,6 @@ export class GameScene {
     for (const [cx, cy, cz] of cells) {
       const m = new THREE.Mesh(this.cellGeo, this.ghostMat);
       m.position.set(-cz * CELL, cy * CELL + CELL / 2, cx * CELL);
-      if (!VOXEL) m.add(new THREE.LineSegments(this.cellEdges, this.ghostLine)); // voxel look: no cell outlines
       this.ghost.add(m);
     }
   }
@@ -477,7 +327,7 @@ export class GameScene {
   }
   /** one soft billowing puff */
   puff(x, y, z, scale, color, life = 1.1, rise = 0.6) {
-    const m = VOXEL ? VX.puffMesh(color) : new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, color, transparent: true, depthWrite: false, opacity: 0.9 }));
+    const m = VX.puffMesh(color);
     m.position.set(x + (Math.random() - 0.5) * scale * 1.4, y + Math.random() * 0.3 * scale, z + (Math.random() - 0.5) * scale * 1.4);
     const s0 = (0.4 + Math.random() * 0.4) * scale;
     m.scale.setScalar(s0);
@@ -757,7 +607,7 @@ export class GameScene {
     }
 
     // column heights in load mode
-    const showCols = !VOXEL && !!me?.loadMode; // voxel look: no floating numbers (the see-through preview shows where it lands)
+    const showCols = false; // no floating column numbers (the see-through preview shows where it lands)
     const hts = showCols ? this.heights() : null;
     for (const sp of this.colLabels) {
       sp.visible = showCols;

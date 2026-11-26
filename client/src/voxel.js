@@ -1,4 +1,4 @@
-// Voxel look (trial at /voxel). Same game, same rules; only the models change.
+// The game's look: voxel models, the house, the truck and the world.
 // Performance rules: every model is ONE merged mesh (greedy-meshed: neighbouring faces of the same colour
 // become one quad), colours live in the vertices, and everything shares one material, so a whole house
 // or truck is a single draw call. A faint grid texture draws the block lines without extra triangles.

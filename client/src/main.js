@@ -8,8 +8,7 @@ import { ITEM_TYPES, TIPS, footprint, orientations, ORIENT_LABEL, SUITS, suitUnl
 import { inRamp } from '../../shared/world.js';
 import { sfx, setMuted, isMuted, setMusic, isMusicOn, musicMood } from './audio.js';
 import { drawMinimap } from './minimap.js';
-import { VOXEL } from './style.js';
-if (VOXEL) { // voxel trial: small tag so testers know which look they're on
+{ // the voxel crew's rendered portraits for the four classic movers
   document.body.classList.add('voxel');
   try { for (const [id, url] of Object.entries(renderClassicPortraits())) setPortrait(id, url); } catch (e) { console.warn('portraits', e); }
 }
@@ -316,11 +315,7 @@ function renderLobby(s, me) {
   const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready, p.setup]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
-  if (VOXEL) renderCrewCarousel(s); else $('chars').innerHTML = Object.entries(CHARACTERS).map(([k, c]) => {
-    const who = s.players.find(p => p.char === k);
-    const cls = who?.id === myId ? 'mine' : who ? 'taken' : '';
-    return `<button class="char ${cls}" data-char="${k}" ${who?.bot ? 'disabled' : ''}>${who ? `<div class="who">${esc(who.name)}</div>` : ''}${who?.bot ? '<span class="bot" title="AI mover">🤖</span>' : ''}${portrait(k)}<div class="n">${c.name}</div><div class="k">${c.kind}</div></button>`;
-  }).join('');
+  renderCrewCarousel(s);
   for (const b of $('modes').children) { b.classList.toggle('on', b.dataset.mode === s.mode); b.disabled = !host; }
   for (const b of $('games').children) { b.classList.toggle('on', b.dataset.game === s.game); b.disabled = !host; }
   // house setup: everyone picks (your pick is highlighted); the crew chief's pick is the house shown; one pick is drawn at start
