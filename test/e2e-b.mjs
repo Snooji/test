@@ -8,7 +8,7 @@ async function player(name, email, opts = { viewport: { width: 1280, height: 800
   const page = await (await browser.newContext(opts)).newPage();
   page.on('pageerror', e => errors.push(name + ': ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) errors.push(name + ' console: ' + m.text()); });
-  await page.goto(base); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-form button');
+  await page.goto(base); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-submit');
   await page.waitForSelector('#home:not(.hidden)');
   return page;
 }

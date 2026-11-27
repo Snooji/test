@@ -1,6 +1,6 @@
 import { Room, ServerError } from '@colyseus/core';
 import { debugHooksOn, limiter, isProd } from './security.js';
-import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality, gridGaps } from '../shared/logic.js';
+import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality, gridGaps, bestSpot } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
 import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
 import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel, houseCode, seedFromCode } from '../shared/level.js';
@@ -542,7 +542,11 @@ export class MoveRoom extends Room {
     this.event({ kind: 'start' });
   }
 
-  canCallOut() { return this.movers().length > 2; }
+  /** a meeting needs 3+ movers, at least 30 s of play since the last one, and (classic) a crunch nobody has talked about yet */
+  canCallOut() {
+    if (this.movers().length <= 2 || (this.elapsed || 0) < (this.meetingCdUntil || 0)) return false;
+    return this.game === 'sabotage' || this.breaks.some(b => !b.resolved && !b.discussed);
+  }
 
   isActive(p) { return p && !p.out && !p.spectator; }
   activePlayers() { return [...this.players.values()].filter(p => this.isActive(p)); }
@@ -725,7 +729,7 @@ export class MoveRoom extends Room {
       const piece = this.items.get(fd2.piece);
       fd2.piece = null; fd2.state = 'parked';
       piece.state = 'carried'; piece.carriers = [p.id]; piece.flatId = null; piece.x = p.x; piece.z = p.z;
-      p.carry = piece.id; p.loadMode = true; p.flatFeeding = fd2.id; p.cursor = { gx: 1, gz: 0, rot: 0 }; p.cursorCd = 0.35;
+      p.carry = piece.id; p.loadMode = true; p.flatFeeding = fd2.id; p.cursor = bestSpot(this.grid, piece.type); p.cursorCd = 0.35;
       this.takeRampSlot(p);
       this.tell(p, `Furniture dolly: place the ${ITEM_TYPES[piece.type].label.toLowerCase()} yourself. Aim · ACTION drop · BACK puts it back on the dolly.`);
       return;
@@ -761,7 +765,7 @@ export class MoveRoom extends Room {
     // carrying into the ramp → load mode (leader only for team carries)
     if (item && item.carriers[0] === p.id && inRamp(item.x, item.z) && !p.rampLock) {
       p.loadMode = true;
-      p.cursor = { gx: 1, gz: 0, rot: 0 };
+      p.cursor = bestSpot(this.grid, item.type); // start on a spot that follows the packing rules (new movers follow the outline)
       this.takeRampSlot(p);
       p.cursorCd = 0.35; // grace so held movement doesn't jerk the cursor on entry
       this.tell(p, 'In the truck: aim, then place it. Turn the piece if it doesn’t fit. Back leaves the truck.');
@@ -1069,7 +1073,7 @@ export class MoveRoom extends Room {
     const box = this.items.get(id);
     box.state = 'carried'; box.carriers = [p.id]; box.dollyId = null; box.flatId = null; box.x = p.x; box.z = p.z;
     p.carry = id; p.loadMode = true; p.feeding = true;
-    p.cursor = { gx: p.cursor?.gx ?? 1, gz: p.cursor?.gz ?? 0, rot: 0 };
+    p.cursor = bestSpot(this.grid, box.type);
     return true;
   }
 
@@ -1471,12 +1475,13 @@ export class MoveRoom extends Room {
   callMeeting(callerId) {
     const p = this.players.get(callerId);
     if (this.phase !== 'playing' || this.meeting || !this.isActive(p)) return;
-    if (!this.canCallOut()) return; // 1v1: nobody else to accuse
+    if (this.movers().length <= 2) return; // 1v1: nobody else to accuse
+    if ((this.elapsed || 0) < (this.meetingCdUntil || 0)) return this.tell(p, `Back to work first: the next meeting can be called in ${Math.ceil(this.meetingCdUntil - this.elapsed)} s.`);
     if (this.game === 'sabotage') {
       const now = Date.now();
       if (now - (p.lastMeeting || 0) < 20000) return this.tell(p, 'You called a meeting recently. Wait a bit.');
       p.lastMeeting = now;
-    } else if (!this.breaks.some(b => !b.resolved)) return this.tell(p, 'Nothing is broken… yet. Call out when you hear a CRUNCH!');
+    } else if (!this.breaks.some(b => !b.resolved && !b.discussed)) return this.tell(p, this.breaks.some(b => !b.resolved) ? 'The crew already talked about that crunch. Call out at the next one!' : 'Nothing is broken… yet. Call out when you hear a CRUNCH!');
     this.phase = 'meeting';
     this.meeting = { callerId, timeLeft: RULES.MEETING_SECONDS, votes: {}, botAt: {} };
     for (const id of this.bots.keys()) if (this.isActive(this.players.get(id))) this.meeting.botAt[id] = 3 + Math.random() * 9;
@@ -1550,13 +1555,19 @@ export class MoveRoom extends Room {
       }
     }
     this.event({ kind: 'verdict', text, target, guilty, penalizedId: penalized?.id, votes: m.votes });
+    this.endMeeting();
+  }
+
+  /** back to work: every crunch so far has had its meeting, and nobody can call another for 30 s of play */
+  endMeeting() {
     this.meeting = null;
     this.phase = 'playing';
+    for (const b of this.breaks) b.discussed = true;
+    this.meetingCdUntil = (this.elapsed || 0) + 30;
   }
 
   resolveSabotageVote(target, votes) {
-    this.meeting = null;
-    this.phase = 'playing';
+    this.endMeeting();
     const t = target !== 'skip' ? this.players.get(target) : null;
     if (!t) { this.event({ kind: 'verdict', text: '🤷 No one was voted off. Back to work!', votes }); return; }
     if (t.saboteur) {

@@ -7,7 +7,7 @@ const errors = []; const wait = (ms) => new Promise(r => setTimeout(r, ms));
 async function play(name, email, ctx) {
   const page = await (await browser.newContext(ctx)).newPage();
   page.on('pageerror', e => errors.push(name + ': ' + e.message));
-  await page.goto(base); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-form button');
+  await page.goto(base); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-submit');
   await page.click('#btn-solo');
   await page.waitForFunction(() => window.__sm.snap?.players?.filter(p => p.bot).length === 3);
   await page.click('#btn-start');

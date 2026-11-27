@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ITEM_TYPES, GRID, footprint, shapeCells, SUITS } from '../../shared/logic.js';
+import { ITEM_TYPES, GRID, footprint, shapeCells, SUITS, spotCheck } from '../../shared/logic.js';
 import { TRUCK, CELL, gridToWorld } from '../../shared/world.js';
 import { levelFromSnapshot, STOREY_H, FLOOR_DZ } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
@@ -694,10 +694,14 @@ export class GameScene {
         for (const [cx, cy, cz] of cells) { top = Math.max(top, cy); const k = cx + ',' + cz; if (!low.has(k) || low.get(k)[2] > cy) low.set(k, [cx, cz, cy]); }
         for (const [cx, cz, lo] of low.values()) y = Math.max(y, (h[me.cursor.gx + cx]?.[me.cursor.gz + cz] ?? 9) - lo);
         const ok = y + top < GRID.H;
+        // fits, but breaks a packing rule? amber (or red if it would crush something), with the reason in the prompt
+        const occ = this.occupancy(), types = new Map((snap.items || []).map(i => [i.id, { type: i.type }]));
+        const chk = ok ? spotCheck({ cells: occ, items: types }, it.type, me.cursor.gx, me.cursor.gz, me.cursor.rot || 0) : null;
+        this.ghostIssue = chk?.issue || null;
         this.setGhostCells(cells);
         const wp = gridToWorld(me.cursor.gx, me.cursor.gz, Math.min(y, GRID.H - 1 - top));
         this.ghost.position.set(wp.x, wp.y + (ok ? 0 : 0.4), wp.z);
-        this.ghostMat.color.set(ok ? 0x55ffcc : 0xff4466);
+        this.ghostMat.color.set(!ok ? 0xff4466 : this.ghostIssue ? (this.ghostIssue.bad ? 0xff4466 : 0xffb340) : 0x55ffcc);
         this.ghostMat.opacity = 0.3 + Math.sin(t * 6) * 0.1;
         this.ghost.visible = true;
         this.ghostOk = ok;

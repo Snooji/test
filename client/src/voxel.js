@@ -556,6 +556,11 @@ function houseDetail(b, gb, level, k, rng) {
   const doors = (level.doors || []).filter(d => onK(d.vertical ? d.c : d.at));
   for (const d of doors) {
     const a0 = d.c - d.w / 2, a1 = d.c + d.w / 2, j = 0.07;
+    // a glowing threshold on the floor through the doorway: from the high camera the wall nearest you can hide its own door,
+    // so the way through is marked where you can always see it
+    const t0 = a0 + 0.1, t1 = a1 - 0.1, out = 0.28;
+    if (d.vertical) gb.box(d.at - out, 0.036, t0, d.at + out, 0.045, t1, 0x9fd9c4, 0.3);
+    else gb.box(t0, 0.036, d.at - out, t1, 0.045, d.at + out, 0x9fd9c4, 0.3);
     if (d.vertical) {
       b.box(d.at - HT - 0.01, 2.1, a0, d.at + HT + 0.01, WALL_H, a1, TRIM, 0.42);
       b.box(d.at - HT - 0.03, 2.02, a0, d.at + HT + 0.03, 2.1, a1, WOOD, 0.42);

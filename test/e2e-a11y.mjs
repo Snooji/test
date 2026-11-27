@@ -15,7 +15,7 @@ for (const [dev, ctx] of [['desk', { viewport: { width: 1280, height: 800 } }], 
   const p = await (await browser.newContext(ctx)).newPage();
   await p.goto('http://localhost:2567'); await wait(1200);
   await scan(p, dev + ' gate', '#gate');
-  await p.fill('#gate-name', 'Axe'); await p.fill('#gate-email', `qa-axe-${dev}-${Date.now()}@example.com`); await p.click('#gate-form button'); await wait(1200);
+  await p.fill('#gate-name', 'Axe'); await p.fill('#gate-email', `qa-axe-${dev}-${Date.now()}@example.com`); await p.click('#gate-submit'); await wait(1200);
   await scan(p, dev + ' home', '#home');
   await p.click('#btn-solo'); await p.waitForFunction(() => window.__sm.snap?.players?.filter(x => x.bot).length === 3); await wait(800);
   await scan(p, dev + ' lobby', '#lobby');

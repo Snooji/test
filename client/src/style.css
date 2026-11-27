@@ -339,9 +339,8 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
   .menu-shell { padding-top: 26vh; }
 }
 @media (prefers-reduced-motion: reduce) { .mi::before, .mi .txt, .mi .chev { transition: none; } }
-@media (min-width: 1000px) {
-  .res-promo .promo { position: fixed; right: max(20px, var(--sar)); bottom: 24px; margin: 0; width: 320px; }
-}
+/* results: the promo sits under the buttons (pinned to the corner it covered "Main menu") */
+#results .res-promo .promo { position: relative; right: auto; bottom: auto; margin: 0 auto 8px; width: min(360px, 100%); }
 @media (pointer: coarse) {
   .pill.icon { padding: 4px 7px; }
   #coach { left: 10px; transform: none; top: 108px; width: calc(100vw - 180px); padding: 8px 10px; }
@@ -711,3 +710,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 #netbox:not(.waiting) .spin { display: none; }
 .linkish { background: none; border: 0; padding: 0; color: var(--accent2, #55ffcc); text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; }
 #gate-code { letter-spacing: 6px; font-size: 20px; text-align: center; }
+/* hold-to-wrap / take apart: a ring fills round the action button */
+#btn-action { position: relative; }
+#btn-action.holding::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(#6f95ff var(--hold), rgba(255,255,255,.18) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px)); }
+.gm-howto { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; font-size: 13.5px; line-height: 1.35; }
+.gm-howto b { display: block; font-size: 13px; }
+.gm-howto .ok { color: #55ffcc; font-weight: 700; } .gm-howto .warn { color: #ffb340; font-weight: 700; } .gm-howto .bad { color: #ff4466; font-weight: 700; }

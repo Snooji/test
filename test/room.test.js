@@ -70,7 +70,15 @@ test('wrong accusation penalizes caller; two strikes = off the truck', () => {
   load(room, a, firstOf(room, 'fragile'), 1, 1);
   load(room, b, firstOf(room, 'heavy'), 1, 1); // B is culprit
   for (let i = 0; i < 2; i++) {
+    if (i) { // a meeting per crunch, and 30 s of work in between
+      send('C', 'callout');
+      assert.equal(room.phase, 'playing', 'no second meeting about the same crunch, right away');
+      room.elapsed += 31;
+      load(room, a, firstOf(room, 'fragile'), 2, 2);
+      load(room, b, firstOf(room, 'heavy'), 2, 2); // a new crunch
+    }
     send('C', 'callout');
+    assert.equal(room.phase, 'meeting');
     for (const id of ['A', 'B', 'C']) send(id, 'vote', { target: 'A' }); // A is innocent
     room.tick(0.05);
   }

@@ -7,7 +7,7 @@ for (const [dev, ctx] of [['desktop', { viewport: { width: 1280, height: 800 } }
   const page = await (await browser.newContext(ctx)).newPage();
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error' && !/favicon|onMessage/.test(m.text())) errs.push(m.text()); });
   await page.goto('http://localhost:2567' + path);
-  await page.fill('#gate-name', 'Perf'); await page.fill('#gate-email', `qa-perf-${dev}@example.com`); await page.click('#gate-form button');
+  await page.fill('#gate-name', 'Perf'); await page.fill('#gate-email', `qa-perf-${dev}@example.com`); await page.click('#gate-submit');
   const stats = async (label) => page.evaluate(async (label) => {
     const sc = window.__sm.scene, r = sc.renderer;
     const dts = []; let last = performance.now();

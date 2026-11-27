@@ -11,7 +11,7 @@ await ctx.addInitScript(() => {
 });
 const p = await ctx.newPage();
 p.on('pageerror', e => errors.push(e.message));
-await p.goto(base); await p.fill('#gate-name', 'Keys'); await p.fill('#gate-email', 'qa-keys@example.com'); await p.click('#gate-form button');
+await p.goto(base); await p.fill('#gate-name', 'Keys'); await p.fill('#gate-email', 'qa-keys@example.com'); await p.click('#gate-submit');
 await p.click('#btn-solo');
 await p.waitForFunction(() => window.__sm.snap?.players?.filter(x => x.bot).length === 3);
 // house code

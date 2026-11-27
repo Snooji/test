@@ -618,7 +618,7 @@ function renderPrompt(s, me) {
     const it = s.items.find(i => i.id === me.carry);
     const f = it ? footprint(it.type, me.cursor?.rot || 0) : null;
     const turn = it && orientations(it.type).length > 1 ? ` · ${isTouch ? 'Rotate / Flip' : input.pad.connected ? 'X rotate · RB flip' : `${keyName(input.binds.rotate)} rotate · ${keyName(input.binds.flip)} flip`} (${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h})` : '';
-    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : isTouch ? `D-pad or drag to aim · Place${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
+    text = scene.ghostOk === false ? '⛔ Doesn’t fit there, aim somewhere else' : scene.ghostIssue ? `⚠️ ${scene.ghostIssue.text}. Aim somewhere else${scene.ghostIssue.bad ? '!' : ' (or turn it)'}` : isTouch ? `D-pad or drag to aim · Place${f && orientations(it.type).length > 1 ? ` · ${ORIENT_LABEL(f)} ${f.w}×${f.d}×${f.h}` : ''}` : (input.pad.connected ? '🎯 Stick to aim · A drop · B back' : `🎯 Move or point to aim · ${keyName(input.binds.action)} or right click drop · ${keyName(input.binds.dash)} back`) + turn;
     action = 'DROP';
   } else if (!me.carry && !me.dolly && !s.level?.tutorial && s.loadedCount > 0 && Math.abs(me.z) < 2.4 && me.x > 9.4 && me.x < 13) {
     text = `🧩 Hold ${actKey()} to unload pieces from the truck and repack`;
@@ -655,7 +655,10 @@ function renderPrompt(s, me) {
       else if (it.state === 'carried') { text = `💪 TAP to grab the other end of the ${t.label.toLowerCase()}`; action = 'LIFT'; }
       else if (t.needsWrap && !it.wrapped) { text = `🧣 HOLD to pad-wrap the ${t.label.toLowerCase()} · TAP to grab as-is`; action = 'WRAP/GRAB'; }
       else { text = `TAP to pick up ${t.label}${t.teamCarry ? ' (2-mover lift)' : ''}`; action = 'GRAB'; }
-      if (me.task) text = me.task.kind === 'wrap' ? '🧣 Wrapping… keep holding!' : '🔧 Disassembling… keep holding!';
+      if (me.task) {
+        const pct = Math.round(100 * (s.items.find(i => i.id === me.task.id)?.task?.p || 0));
+        text = `${me.task.kind === 'wrap' ? '🧣 Wrapping' : '🔧 Taking it apart'}… keep holding! ${pct}% ${'▰'.repeat(Math.round(pct / 10))}${'▱'.repeat(10 - Math.round(pct / 10))}`;
+      }
     }
   }
   if (myDuel) { text = ''; action = 'TAP'; } // tap battle: the panel explains; the big button mashes
@@ -667,7 +670,10 @@ function renderPrompt(s, me) {
     'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'HOLD 🔧': ['Take apart', 'hold'] };
   const [w, sub] = WORD[action] || [action, ''];
   if ($('action-label').textContent !== w) setText('action-label', w);
-  setText('action-sub', me.task ? 'keep holding' : sub);
+  const taskP = me.task ? (s.items.find(i => i.id === me.task.id)?.task?.p || 0) : 0;
+  setText('action-sub', me.task ? `keep holding · ${Math.round(taskP * 100)}%` : sub);
+  $('btn-action').style.setProperty('--hold', me.task ? `${Math.round(taskP * 360)}deg` : '0deg'); // a ring fills round the button
+  $('btn-action').classList.toggle('holding', !!me.task);
 }
 
 // ---------- events ----------

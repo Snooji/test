@@ -298,3 +298,20 @@ test('placement quality: solid = 100%, heavy on a lighter box, fragile buried, o
   const dq = placementQuality(g, 'd');
   assert.ok(dq.q < 1 && dq.notes.length, JSON.stringify(dq));
 });
+
+import { spotCheck, bestSpot } from '../shared/logic.js';
+test('aiming advice: warns on crushing, heavy on light and stacking on fragile; the starting aim follows the rules', () => {
+  const g = createGrid();
+  placeItem(g, { id: 's', type: 'standard' }, 0, 0);
+  placeItem(g, { id: 'f', type: 'fragile' }, 1, 0);
+  assert.equal(spotCheck(g, 'heavy', 0, 0).issue.kind, 'heavyOnLight');
+  assert.equal(spotCheck(g, 'heavy', 1, 0).issue.kind, 'crush');
+  assert.equal(spotCheck(g, 'heavy', 1, 0).issue.bad, true);
+  assert.equal(spotCheck(g, 'lamp', 1, 0).issue?.kind, 'crush', 'furniture (the lamp too) crushes fragile boxes');
+  assert.equal(spotCheck(g, 'standard', 1, 0).issue?.kind, 'onFragile');
+  assert.equal(spotCheck(g, 'standard', 2, 0).issue, null);
+  const h = bestSpot(g, 'heavy');
+  assert.equal(spotCheck(g, 'heavy', h.gx, h.gz, h.rot).issue, null, 'heavy starts on the floor, not on the light box');
+  const l = bestSpot(g, 'lamp');
+  assert.equal(spotCheck(g, 'lamp', l.gx, l.gz, l.rot).issue, null, 'the lamp is not aimed at the fragile box');
+});

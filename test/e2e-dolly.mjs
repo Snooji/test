@@ -5,7 +5,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const errors = []; const wait = (ms) => new Promise(r => setTimeout(r, ms)); const log = (...a) => console.log(...a);
 const p = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
 p.on('pageerror', e => errors.push(e.message));
-await p.goto(base); await p.fill('#gate-name', 'Dolly'); await p.fill('#gate-email', `qa-dolly-${Date.now()}@example.com`); await p.click('#gate-form button');
+await p.goto(base); await p.fill('#gate-name', 'Dolly'); await p.fill('#gate-email', `qa-dolly-${Date.now()}@example.com`); await p.click('#gate-submit');
 await p.waitForSelector('#home:not(.hidden)');
 const snap = () => p.evaluate(() => window.__sm.snap);
 const me = async () => { const s = await snap(); return s.players.find(x => x.id === s.__me) || s.players.find(async () => false); };

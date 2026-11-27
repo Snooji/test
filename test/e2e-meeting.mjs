@@ -6,7 +6,7 @@ const errors = []; const wait = (ms) => new Promise(r => setTimeout(r, ms));
 async function player(name, email, url) {
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 760 } })).newPage();
   page.on('pageerror', e => errors.push(name + ': ' + e.message));
-  await page.goto(url); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-form button');
+  await page.goto(url); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-submit');
   return page;
 }
 const a = await player('Ada', 'ada@example.com', base);

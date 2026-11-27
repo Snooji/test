@@ -8,7 +8,7 @@ async function player(name, email, ctxOpts) {
   const page = await (await browser.newContext(ctxOpts)).newPage();
   page.on('pageerror', e => errors.push(name + ': ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errors.push(name + ' console: ' + m.text()); });
-  await page.goto(base); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-form button');
+  await page.goto(base); await page.fill('#gate-name', name); await page.fill('#gate-email', email); await page.click('#gate-submit');
   return page;
 }
 const snap = (p) => p.evaluate(() => window.__sm.snap);
@@ -110,6 +110,7 @@ for (const [fx, fy] of [[0.55, 0.45], [0.7, 0.55], [0.45, 0.6]]) {
   await b.locator('#app canvas').dispatchEvent('pointerdown', { clientX: box.w * fx, clientY: box.h * fy, pointerType: 'touch', buttons: 1, pressure: 0.5 });
   // wait for the server's update rather than a fixed pause (slow software rendering can lag a few frames)
   const changed = await b.waitForFunction((before) => JSON.stringify(window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.cursor) !== before, before, { timeout: 3000 }).then(() => true).catch(() => false);
+  await b.locator('#app canvas').dispatchEvent('pointerup', { clientX: box.w * fx, clientY: box.h * fy, pointerType: 'touch' }); // lift the finger, or the next touch reads as a two-finger camera turn
   if (changed) moved = true;
 }
 log('drag moved aim:', moved);
@@ -136,7 +137,7 @@ await b.locator('#btn-action').dispatchEvent('pointerdown'); await wait(60); awa
 await b.waitForFunction(() => !window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.carry, null, { timeout: 4000 }).catch(() => {});
 const me = await meOf(b);
 log('after drop: carry', me.carry, 'score', me.score);
-if (me.carry) errors.push('drop with ACTION failed');
+if (me.carry) { errors.push('drop with ACTION failed'); log('fits', fits, 'cursor', JSON.stringify(me.cursor), 'loadMode', me.loadMode, 'toasts:', await b.evaluate(() => [...document.querySelectorAll('#toasts .toast')].map(t => t.textContent).join(' / '))); }
 await b.screenshot({ path: `${out}/s09-phone-dropped.png` });
 
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'SOLO E2E PASS');

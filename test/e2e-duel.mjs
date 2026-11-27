@@ -7,7 +7,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const errors = []; const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const page = await (await browser.newContext({ ...devices['iPhone 13'] })).newPage();
 page.on('pageerror', e => errors.push(e.message));
-await page.goto(base); await page.fill('#gate-name', 'Dee'); await page.fill('#gate-email', 'qa-dee@example.com'); await page.click('#gate-form button');
+await page.goto(base); await page.fill('#gate-name', 'Dee'); await page.fill('#gate-email', 'qa-dee@example.com'); await page.click('#gate-submit');
 await page.click('#home-diff button[data-level="hard"]');
 await page.click('#btn-solo');
 await page.waitForFunction(() => window.__sm.snap?.players?.filter(p => p.bot).length === 3);

@@ -338,6 +338,45 @@ export function driveOffCheck(grid) {
 }
 
 /**
+ * Will this spot break a packing rule? For the aiming preview and the starting aim. grid.items only needs { type }.
+ * Returns { y, issue } where issue is null or { kind, text, bad } (bad = something breaks, not just a packing penalty).
+ */
+export function spotCheck(grid, type, x, z, rot = 0) {
+  const { cells } = pickOrient(type, rot), t = ITEM_TYPES[type];
+  const y = shapeDrop(grid, cells, x, z);
+  if (y < 0) return { y, issue: null };
+  const typeOf = (id) => ITEM_TYPES[grid.items.get(id)?.type] || {};
+  const cols = columnsOf(cells);
+  const below = [];
+  let sup = 0;
+  for (const [cx, cz, low] of cols) {
+    const yy = y + low;
+    if (yy === 0) { sup++; continue; }
+    const b = grid.cells[x + cx][z + cz][yy - 1];
+    if (b) { sup++; below.push(typeOf(b)); }
+  }
+  const crushes = (t.heavy || t.furniture) && below.some(b => b.fragile);
+  if (crushes) return { y, issue: { kind: 'crush', text: 'That would crush the fragile box under it', bad: true } };
+  if (below.some(b => b.fragile)) return { y, issue: { kind: 'onFragile', text: 'Nothing goes on top of a fragile box', bad: false } };
+  if (t.heavy && below.some(b => !b.heavy)) return { y, issue: { kind: 'heavyOnLight', text: 'Heavy goes on the bottom, not on a lighter box', bad: false } };
+  if (sup < cols.length) return { y, issue: { kind: 'air', text: 'Part of it would rest on air', bad: false } };
+  return { y, issue: null };
+}
+
+/** A good place to start aiming: no rule broken if possible, as low as it goes, then nearest the cab. */
+export function bestSpot(grid, type) {
+  let best = null;
+  const rots = orientations(type).length;
+  for (let rot = 0; rot < rots; rot++) for (let gz = 0; gz < GRID.D; gz++) for (let gx = 0; gx < GRID.W; gx++) {
+    const { y, issue } = spotCheck(grid, type, gx, gz, rot);
+    if (y < 0) continue;
+    const score = (issue ? (issue.bad ? 1000 : 100) : 0) + y * 10 + gz + rot * 0.1;
+    if (!best || score < best.score) best = { gx, gz, rot, score };
+  }
+  return best ? { gx: best.gx, gz: best.gz, rot: best.rot } : { gx: 1, gz: 0, rot: 0 };
+}
+
+/**
  * How well a piece is packed, for the end-of-round tally: 1 = perfect.
  * Partly resting on air ×0.75 · heavy sitting on a lighter box ×0.85 · fragile box with something on top ×0.8
  */

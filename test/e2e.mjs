@@ -20,7 +20,7 @@ await a.goto(base);
 await a.fill('#gate-name', 'Ada');
 await a.fill('#gate-email', 'ada@example.com');
 await a.screenshot({ path: `${out}/01-gate.png` });
-await a.click('#gate-form button');
+await a.click('#gate-submit');
 await a.click('#btn-create');
 await a.waitForFunction(() => window.__sm.snap?.phase === 'lobby');
 const link = await a.inputValue('#share-link');
@@ -30,7 +30,7 @@ const b = await newPlayer('B', { ...(await import('playwright')).devices['iPhone
 await b.goto(link);
 await b.fill('#gate-name', 'Bo');
 await b.fill('#gate-email', 'bo@example.com');
-await b.click('#gate-form button');
+await b.click('#gate-submit');
 await b.waitForFunction(() => window.__sm.snap?.players?.length === 2);
 await b.click('.char[data-char="zibble"]');
 await wait(400);

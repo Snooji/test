@@ -7,7 +7,7 @@ const srv = spawn('node', ['server/index.js'], { env: { ...process.env, PORT: St
 await wait(2500);
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const p = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
-await p.goto(base); await p.fill('#gate-name', 'Restart'); await p.fill('#gate-email', `qa-rs-${Date.now()}@example.com`); await p.click('#gate-form button');
+await p.goto(base); await p.fill('#gate-name', 'Restart'); await p.fill('#gate-email', `qa-rs-${Date.now()}@example.com`); await p.click('#gate-submit');
 await p.waitForSelector('#home:not(.hidden)');
 await p.click('#btn-solo'); await p.waitForFunction(() => window.__sm.snap?.players?.length >= 2);
 await p.click('#btn-start'); await p.waitForFunction(() => window.__sm.snap?.phase === 'playing', null, { timeout: 8000 });
