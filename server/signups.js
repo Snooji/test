@@ -204,14 +204,18 @@ export function signupRoutes(app, express, store) {
     res.json({ marketing: !!(row?.marketing && !row?.unsubscribed) });
   });
 
+  // analytics + error reports: only from this site's own pages (Origin/Referer), each event counted a few times an hour per
+  // visitor at most, and error reports capped and de-duplicated, so the dashboard numbers can't be inflated by a script
+  const seenErrors = limiter(1, 3600_000);
   app.post('/api/event', json, (req, res) => {
     const name = String(req.body?.name || '');
-    if (EVENTS.has(name) && !limited('event', req, 300)) store.event(name).catch(() => {});
+    if (EVENTS.has(name) && sameOrigin(req) && !limited('event:' + name, req, name === 'visit' ? 3 : 10) && !limited('event', req, 120)) store.event(name).catch(() => {});
     res.status(204).end();
   });
 
   app.post('/api/error', json, (req, res) => {
-    if (!limited('error', req, 30)) store.logError({ where: 'client', message: String(req.body?.message || '').slice(0, 500), stack: String(req.body?.stack || '').slice(0, 2000), ua: req.get('user-agent') }).catch(() => {});
+    const key = String(req.body?.message || '').slice(0, 120);
+    if (sameOrigin(req) && !limited('error', req, 20) && seenErrors.hit(key)) store.logError({ where: 'client', message: String(req.body?.message || '').slice(0, 500), stack: String(req.body?.stack || '').slice(0, 2000), ua: req.get('user-agent') }).catch(() => {});
     res.status(204).end();
   });
 

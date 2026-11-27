@@ -465,17 +465,19 @@ export class Bot {
     const room = this.room, p = this.p;
     const others = room.activePlayers().filter(o => o.id !== p.id);
     if (!others.length) return 'skip';
+    // only someone who could have done it: they've loaded something, or this mover saw them at the truck. Never someone
+    // who hasn't been near the load (a player standing still in the house is no suspect).
+    const plausible = others.filter(o => (o.loaded || 0) > 0 || this.seenAtTruck[o.id] !== undefined || (this.sus[o.id] || 0) > 0);
+    const ranked = Object.entries(this.sus).filter(([id]) => plausible.some(o => o.id === id)).sort((a, b) => b[1] - a[1]);
     if (room.game === 'sabotage') {
-      if (p.saboteur) return pick(others, this.rng).id;
-      const ranked = Object.entries(this.sus).filter(([id]) => others.some(o => o.id === id)).sort((a, b) => b[1] - a[1]);
-      if (ranked.length && this.rng() < this.cfg.accuracy) return ranked[0][0];
-      return this.rng() < 0.5 ? 'skip' : pick(others, this.rng).id;
+      if (p.saboteur) return plausible.length ? pick(plausible, this.rng).id : 'skip'; // a bluff has to sound believable
+      if (ranked.length && ranked[0][1] >= 1 && this.rng() < this.cfg.accuracy) return ranked[0][0];
+      return 'skip';
     }
     const guilty = room.breaks.some(b => !b.resolved && b.culpritIds.includes(p.id)); // it knows what it did itself
-    if (guilty) return pick(others, this.rng).id;                         // bluff
-    const ranked = Object.entries(this.sus).filter(([id]) => others.some(o => o.id === id)).sort((a, b) => b[1] - a[1]);
+    if (guilty) return plausible.length && this.rng() < 0.6 ? pick(plausible, this.rng).id : 'skip'; // bluff, but only believably
     if (ranked.length && ranked[0][1] >= 1 && this.rng() < this.cfg.accuracy) return ranked[0][0];
-    return this.rng() < 0.4 ? 'skip' : pick(others, this.rng).id;
+    return 'skip'; // no evidence: no accusation
   }
 
   meetingLine(target) {

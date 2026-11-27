@@ -264,3 +264,17 @@ test('AI never follows the level\'s known-perfect packing plan, even in Full loa
   assert.ok(room.level.solution, 'setup: a Full load house has a perfect plan');
   assert.equal(bot.plan(), null);
 });
+
+test('meetings: AI never accuses a mover who has not been near the load (no evidence, no accusation)', () => {
+  const { room, join } = makeRoom({ level: 'classic' });
+  join('A', 'Ada'); room.addBot(); room.addBot();
+  room.startRound();
+  const a = room.players.get('A'); // Ada never moved: nothing loaded, never at the truck
+  const bots = [...room.bots.values()];
+  const box = [...room.items.values()].find(i => i.type === 'fragile');
+  room.recordBreak(box, [bots[1].p.id], 'got crushed'); // the second AI did it
+  for (const [k, bot] of bots.entries()) {
+    bot.rng = mulberryFor(5 + k);
+    for (let i = 0; i < 300; i++) assert.notEqual(bot.meetingVote(), a.id, `AI ${k} accused an idle player`);
+  }
+});

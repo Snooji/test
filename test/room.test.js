@@ -998,3 +998,18 @@ test('crew size 6: six humans all move, a 7th and 8th watch, a 9th is turned awa
   for (const p of room.movers()) { p.x = 11; p.z = 0; room.takeRampSlot(p); p.loadMode = true; slots.push(p.rampSlot); }
   assert.deepEqual(slots.sort(), [0, 1, 2, 3, 4, 5], 'six spots on the ramp');
 });
+
+test('AFK rounds do not count toward unlocks: only movers who actually did something get the round recorded', () => {
+  const recorded = [];
+  const old = MoveRoom.store;
+  MoveRoom.store = { event: async () => {}, recordGame: async (email) => { recorded.push(email); }, addScore: async () => {}, logError: async () => {}, getProfile: async (email) => ({ email, games: 0, wins: 0 }) };
+  try {
+    const { room, join, send } = makeRoom();
+    const a = join('A', 'Ada'), b = join('B', 'Bo');
+    send('A', 'start');
+    load(room, a, firstOf(room, 'standard'), 0, 0); // Ada loads a box; Bo stands still all round
+    room.endRound('test'); driveAway(room);
+    assert.deepEqual(recorded, ['Ada@x.io']);
+    assert.equal(b.loaded || 0, 0);
+  } finally { MoveRoom.store = old; }
+});

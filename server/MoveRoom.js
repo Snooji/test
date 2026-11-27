@@ -1488,6 +1488,7 @@ export class MoveRoom extends Room {
     if (!this.meeting || !p || !this.isActive(p) || this.meeting.votes[p.id]) return;
     if (t !== 'skip' && !this.players.has(t)) return;
     this.meeting.votes[p.id] = t;
+    p.votes = (p.votes || 0) + 1;
   }
 
   flooding(c) {
@@ -1500,7 +1501,7 @@ export class MoveRoom extends Room {
   }
 
   say(p, raw) {
-    const text = String(raw || '').replace(/[<>]/g, '').trim().slice(0, 120);
+    const text = String(raw || '').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e]/g, '').trim().slice(0, 120); // shown as plain text everywhere, so <b> stays <b>; control/direction characters go
     if (!p || !text) return;
     const now = Date.now();
     if (!p.bot && now - (p.lastChat || 0) < 600) return;
@@ -1689,6 +1690,9 @@ export class MoveRoom extends Room {
     if (this.quick) { if (this.listing) Promise.resolve().then(() => this.unlock()).catch(() => {}); this.autoStartAt = 30; }
   }
 
+  /** did this mover actually play? loaded or helped lift something, wrapped, repacked, or (sabotage) voted in a meeting */
+  tookPart(p) { return (p.loaded || 0) + (p.helps || 0) + (p.wraps || 0) + (p.unloads || 0) + (p.votes || 0) > 0; }
+
   /** Save stats + leaderboard entries for human players (never blocks the game). */
   recordResults() {
     const store = MoveRoom.store, r = this.results;
@@ -1696,6 +1700,7 @@ export class MoveRoom extends Room {
     store.event('round_end').catch(() => {});
     for (const p of this.players.values()) {
       if (p.bot || p.spectator || !p.email) continue;
+      if (!this.tookPart(p)) continue; // AFK: standing around all round doesn't count as a move (unlocks are earned)
       const won = r.teams ? !!r.winTeam && p.team === r.winTeam : r.game === 'sabotage' ? (r.winners === 'saboteur' ? p.id === r.saboteurId : p.id !== r.saboteurId && r.winners === 'crew') : r.winnerId === p.id;
       store.recordGame(p.email, { won, loaded: p.loaded }).catch(() => {});
       if (this.level?.daily) store.addScore({ day: this.level.daily, email: p.email, name: p.name, score: p.score, detail: `${this.level.name} · ${this.mode === 'load' ? 'Full load' : this.mode}` }).catch(() => {});

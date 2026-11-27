@@ -92,12 +92,29 @@ test('admin: a login form posted from another site is refused', async () => {
   s.close();
 });
 
-test('events: only known names are counted', async () => {
+test('events: only known names, only from our own pages, and a script hammering them barely moves the numbers', async () => {
   const s = await serve();
-  await s.post('/api/event', { name: 'visit' });
-  await s.post('/api/event', { name: 'drop table' });
-  const f = await s.store.funnel(1);
-  assert.deepEqual(f.map(r => r.name), ['visit']);
+  const ev = (name, ip, origin = s.base) => fetch(s.base + '/api/event', { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': ip, ...(origin ? { origin } : {}) }, body: JSON.stringify({ name }) });
+  await ev('visit', '10.9.0.1');
+  await ev('drop table', '10.9.0.1');
+  await ev('visit', '10.9.0.2', null);                    // no Origin: a script, not our page
+  await ev('visit', '10.9.0.3', 'https://evil.example');  // another site
+  for (let i = 0; i < 50; i++) await ev('solo_click', '10.9.0.4');
+  const f = await s.store.funnel(1), n = (k) => f.filter(r => r.name === k).reduce((a, r) => a + r.n, 0);
+  assert.equal(n('visit'), 1);
+  assert.ok(!f.some(r => r.name === 'drop table'));
+  assert.ok(n('solo_click') <= 10, `${n('solo_click')} of 50 hammered clicks counted`);
+  s.close();
+});
+
+test('error reports: from our pages only, capped, and repeats of one error are logged once', async () => {
+  const s = await serve();
+  const er = (message, origin = s.base) => fetch(s.base + '/api/error', { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '10.7.0.' + Math.floor(Math.random() * 200), ...(origin ? { origin } : {}) }, body: JSON.stringify({ message }) });
+  await er('boom'); await er('boom'); await er('boom');
+  await er('spam', null);
+  const errs = await s.store.recentErrors(50);
+  assert.equal(errs.filter(e => e.message === 'boom').length, 1);
+  assert.ok(!errs.some(e => e.message === 'spam'));
   s.close();
 });
 
