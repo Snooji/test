@@ -731,13 +731,18 @@ export function buildTruck(scene) {
   const body = 0xf4ead8, accent = 0xff8a3d, dark = 0x2b241e; // Starside white + orange
   const len = TRUCK.bayX1 - TRUCK.bayX0, wid = TRUCK.z1 - TRUCK.z0, x0 = TRUCK.bayX0, x1 = TRUCK.bayX1, fy = TRUCK.floorY;
   b.box(x0, fy - 0.2, -(wid / 2 + 0.4), x1, fy, wid / 2 + 0.4, dark, CELL);                             // floor, one block per cell
+  const truck = new THREE.Mesh(b.geometry(), voxMat); truck.castShadow = truck.receiveShadow = true; g.add(truck);
+  // the walls are separate pieces so the one between the camera and the load can step aside when the view is turned
+  const part = (fn) => { const pb = new Batch(); fn(pb); const m = new THREE.Mesh(pb.geometry(), voxMat); m.castShadow = m.receiveShadow = true; g.add(m); return m; };
+  const sides = {};
   for (const sz of [-1, 1]) {
     const zc = sz * (wid / 2 + 0.2);
-    b.box(x0, fy, zc - 0.1, x1, fy + 1.2, zc + 0.1, body, 0.4);                                         // side wall
-    b.box(x0, fy + 1.2, zc - 0.11, x1, fy + 1.4, zc + 0.11, accent, 0.4);                               // stripe
+    sides[sz] = part(pb => {
+      pb.box(x0, fy, zc - 0.1, x1, fy + 1.2, zc + 0.1, body, 0.4);                                      // side wall
+      pb.box(x0, fy + 1.2, zc - 0.11, x1, fy + 1.4, zc + 0.11, accent, 0.4);                            // stripe
+    });
   }
-  b.box(x1, fy, -(wid / 2 + 0.3), x1 + 0.2, fy + GRID.H * CELL + 0.3, wid / 2 + 0.3, body, 0.4);        // bulkhead
-  const truck = new THREE.Mesh(b.geometry(), voxMat); truck.castShadow = truck.receiveShadow = true; g.add(truck);
+  const bulkhead = part(pb => pb.box(x1, fy, -(wid / 2 + 0.3), x1 + 0.2, fy + GRID.H * CELL + 0.3, wid / 2 + 0.3, body, 0.4));
   // the cab is a hover-truck model (see /credits.html), tinted Starside purple; it hovers, so glowing pads instead of tyres
   const cab = new THREE.Group(); cab.position.set((x1 + 0.2 + TRUCK.cabX1) / 2, 0.25, 0);
   attachModel(cab, '/models/env/cab.glb', { tint: 0xf2e6d4, rot: 1, fit: [TRUCK.cabX1 - x1 - 0.2, wid + 0.6, 2.75] });
@@ -747,6 +752,7 @@ export function buildTruck(scene) {
   g.add(new THREE.Mesh(pads.geometry(), glowMat));
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), new THREE.MeshBasicMaterial({ map: labelTexture('★ STARSIDE MOVERS', { fg: '#fff', font: 'bold 34px system-ui', w: 420, h: 100 }), transparent: true }));
   logo.rotation.x = -Math.PI / 2; logo.rotation.z = Math.PI / 2; logo.position.set((x1 + TRUCK.cabX1) / 2 + 0.1, 2.92, 0); g.add(logo);
+  scene.truckParts = { sides, front: [bulkhead, cab, logo] };
   // a U-Haul style ramp: narrow, thin, ribbed aluminium with side lips, hinged at the truck so it can slide away under the floor
   const r = TRUCK.ramp, run = r.x1 - r.x0, RL = Math.hypot(run, fy), RW = 1.5, rb = new Batch(), AL = 0xb9bcc0, RIB = 0xd8dadc, LIP = 0x8e9196;
   rb.box(-RL, -0.05, -RW / 2, 0, 0, RW / 2, AL, 0.3);                                                  // the deck, 5 cm thick

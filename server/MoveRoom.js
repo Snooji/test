@@ -1,6 +1,6 @@
 import { Room, ServerError } from '@colyseus/core';
 import { debugHooksOn, limiter, isProd } from './security.js';
-import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality } from '../shared/logic.js';
+import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality, gridGaps } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
 import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
 import { generateLevel, classicLevel, newSeed, freeSpot, tutorialLevel, houseCode, seedFromCode } from '../shared/level.js';
@@ -1498,7 +1498,10 @@ export class MoveRoom extends Room {
     }
     let doneReason = null;
     if (this.isExact()) {
+      const gaps = gridGaps(this.grid);
       if (filled === GRID.W * GRID.D * GRID.H) doneReason = 'Perfect load! The truck is packed to the roof.';
+      else if (!remaining.length) doneReason = 'Full load! Everything is in the truck.';
+      else if (gaps.empty <= 2 && gaps.open === 0) doneReason = `Full load! Only ${gaps.empty === 1 ? 'one gap' : 'two gaps'} left, buried in the load.`; // holes under the load can't be reached; holes at the top still can
       else if (remaining.length && !this.fitCache.fits && !this.stuckHinted) {
         this.stuckHinted = true;
         this.event({ kind: 'toast', text: '🧩 Nothing else fits! Hold ACTION on the ramp to pull pieces back out and repack.' });

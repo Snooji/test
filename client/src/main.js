@@ -966,9 +966,9 @@ const touchEnd = (e) => {
   void me; void dt; void dist; // (turning a piece is the Rotate / Flip buttons now)
 };
 cv.addEventListener('pointerup', touchEnd); cv.addEventListener('pointercancel', touchEnd);
-/** Turn the camera: all the way round while walking; in the truck, up to about 50° either side so the walls don't hide the load. */
+/** Turn the camera all the way round, walking about or loading the truck. */
 function turnCam(d) {
-  if (meNow()?.loadMode) scene.truckYaw = Math.max(-0.9, Math.min(0.9, (scene.truckYaw || 0) + d));
+  if (meNow()?.loadMode) scene.truckYaw = ((scene.truckYaw || 0) + d) % (Math.PI * 2); // all the way round: the wall nearest the camera steps aside
   else scene.camYaw = ((scene.camYaw || 0) + d) % (Math.PI * 2);
 }
 // hold the wheel (middle button) and move the mouse to turn the camera; double-click the wheel to put it back

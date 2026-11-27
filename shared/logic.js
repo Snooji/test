@@ -91,6 +91,17 @@ export function shapeCells(type, rot = 0) { return pickOrient(type, rot).cells; 
 
 export const ORIENT_LABEL = (f) => f.h >= 3 ? 'standing up' : f.h === 2 ? 'on its side' : 'lying flat';
 
+/** Empty truck cells: how many, and how many are open from above (nothing stacked over them, so still fillable from the top). */
+export function gridGaps(grid) {
+  let empty = 0, open = 0;
+  for (let x = 0; x < GRID.W; x++) for (let z = 0; z < GRID.D; z++) {
+    const col = grid.cells[x][z];
+    let top = -1; for (let y = GRID.H - 1; y >= 0; y--) if (col[y]) { top = y; break; }
+    for (let y = 0; y < GRID.H; y++) if (!col[y]) { empty++; if (y > top) open++; }
+  }
+  return { empty, open };
+}
+
 export function createGrid() {
   const cells = [];
   for (let x = 0; x < GRID.W; x++) {

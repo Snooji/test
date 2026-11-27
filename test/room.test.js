@@ -373,6 +373,29 @@ test('Full load mode: round ends only when all 64 cells are packed', () => {
   assert.match(room.results.reason, /Perfect load/);
 });
 
+test('Full load mode: done with one or two gaps buried under the load, but not while a gap is open at the top', () => {
+  const fill = (room, skip) => // boxes drop to the lowest free spot, so skipping a cell leaves the top of that column open
+    { for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) for (let y = 0; y < 4; y++) if (!skip(x, z, y)) gridPlace(room.grid, { id: `f${x}${z}${y}`, type: 'standard' }, x, z, 0); };
+  // two holes in the middle and at the bottom, with boxes over them: finished
+  let r = makeRoom({}); r.join('A', 'Ada'); r.send('A', 'mode', { mode: 'load' }); r.send('A', 'start');
+  fill(r.room, () => false);
+  r.room.grid.cells[1][1][1] = null; r.room.grid.cells[2][3][0] = null; // holes under the stacks
+  r.room.tick(0.05); driveAway(r.room);
+  assert.equal(r.room.phase, 'results');
+  assert.match(r.room.results.reason, /Full load! Only two gaps left/);
+  // one hole in the top layer: still open from above, so keep loading
+  r = makeRoom({}); r.join('A', 'Ada'); r.send('A', 'mode', { mode: 'load' }); r.send('A', 'start');
+  fill(r.room, (x, z, y) => x === 0 && z === 0 && y === 3);
+  r.room.tick(0.05);
+  assert.equal(r.room.phase, 'playing', 'a gap at the top can still be filled');
+  // three buried holes: not close enough
+  r = makeRoom({}); r.join('A', 'Ada'); r.send('A', 'mode', { mode: 'load' }); r.send('A', 'start');
+  fill(r.room, () => false);
+  for (const [x, z] of [[0, 0], [1, 2], [3, 3]]) r.room.grid.cells[x][z][0] = null;
+  r.room.tick(0.05);
+  assert.equal(r.room.phase, 'playing', 'three gaps is not a full load');
+});
+
 test('Full load mode: hold ACTION on the ramp to unload; pulling an item takes back its points', () => {
   const { room, join, send } = makeRoom({});
   const a = join('A', 'Ada');

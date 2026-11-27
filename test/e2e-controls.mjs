@@ -75,7 +75,7 @@ await p.screenshot({ path: `${out}/controls-truck.png` });
 // the camera turns in the truck too (wheel drag), up to ~50° so the walls don't hide the load
 await p.mouse.move(640, 400); await p.mouse.down({ button: 'middle' }); await p.mouse.move(1000, 400, { steps: 8 }); await p.mouse.up({ button: 'middle' });
 const ty = await p.evaluate(() => window.__sm.scene.truckYaw);
-if (!(Math.abs(ty) > 0.5 && Math.abs(ty) <= 0.9 + 1e-9)) errors.push('wheel drag did not turn the truck camera: ' + ty);
+if (!(Math.abs(ty) > 0.5 && Math.abs(ty) < Math.PI * 2)) errors.push('wheel drag did not turn the truck camera: ' + ty); // all the way round now
 await wait(1200);
 await p.screenshot({ path: `${out}/controls-truck-turned.png` });
 // with the view turned, D still moves the cursor to the right on screen

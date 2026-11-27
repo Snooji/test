@@ -405,7 +405,19 @@ export class GameScene {
     this.raycaster.setFromCamera(v, this.camera);
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(TRUCK.floorY + CELL));
     const hit = new THREE.Vector3();
-    if (!this.raycaster.ray.intersectPlane(plane, hit)) return null;
+    // march along the ray and stop at the first stack (or bare floor) it actually touches, so a low gap between tall
+    // stacks picks the gap you can see, not whatever the ray crosses at a fixed height
+    const ray = this.raycaster.ray, hs = this.heights(), p = new THREE.Vector3();
+    const top = TRUCK.floorY + GRID.H * CELL + 0.5;
+    const t0 = ray.direction.y < 0 ? Math.max(0, (top - ray.origin.y) / ray.direction.y) : 0;
+    for (let t = t0, end = t0 + 60; t < end; t += 0.05) {
+      ray.at(t, p);
+      if (p.y < TRUCK.floorY - 0.2) break;
+      const cx = Math.floor((p.z - TRUCK.z0) / CELL), cz = Math.floor((TRUCK.bayX1 - p.x) / CELL);
+      if (cx < 0 || cz < 0 || cx >= GRID.W || cz >= GRID.D) continue;
+      if (p.y <= TRUCK.floorY + hs[cx][cz] * CELL + 0.02) return { gx: cx, gz: cz };
+    }
+    if (!ray.intersectPlane(plane, hit)) return null;
     const gx = Math.floor((hit.z - TRUCK.z0) / CELL), gz = Math.floor((TRUCK.bayX1 - hit.x) / CELL);
     if (gx < -1 || gz < -1 || gx > GRID.W || gz > GRID.D) return null;
     return { gx: Math.max(0, Math.min(GRID.W - 1, gx)), gz: Math.max(0, Math.min(GRID.D - 1, gz)) };
@@ -767,6 +779,12 @@ export class GameScene {
     this.lookAt = this.lookAt || this.camTarget.clone();
     this.lookAt.lerp(this.camTarget, 1 - Math.exp(-k * dt));
     this.camera.lookAt(this.lookAt);
+    // in the truck with the view turned: the wall between the camera and the load steps aside
+    if (this.truckParts) {
+      const tp = this.truckParts, look = !!me?.loadMode && !this.drive, c = this.camera.position, w = (TRUCK.z1 - TRUCK.z0) / 2;
+      for (const sz of [-1, 1]) tp.sides[sz].visible = !(look && c.z * sz > w + 0.2);
+      for (const m of tp.front) m.visible = !(look && c.x > TRUCK.bayX1 - 0.5);
+    }
     if (this.shakeT > 0) {
       this.shakeT -= dt;
       this.camera.position.x += (Math.random() - 0.5) * 0.5;
