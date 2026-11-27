@@ -153,3 +153,30 @@ test('clients rebuild the same multi-floor house from the snapshot', () => {
   const C = levelFromSnapshot({ seed: 777, mansion: true, floors: 3 });
   assert.deepEqual(JSON.parse(JSON.stringify(C)), JSON.parse(JSON.stringify(L)));
 });
+
+test('nothing spawns outside: every item starts inside a room of the house (all setups, Full loads included), and respawns stay in too', async () => {
+  const { freeSpot } = await import('../shared/level.js');
+  for (const opts of [{}, { exact: true }, { mansion: true }, { floors: 2 }, { floors: 4, exact: true }]) for (const s of SEEDS.slice(0, 15)) {
+    const L = generateLevel(s, opts);
+    for (const [t, x, z] of L.items) assert.ok(L.rooms.some(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1), `seed ${s} ${JSON.stringify(opts)}: ${t} at ${x},${z} is outside`);
+    // a packed house: respawn spots are still inside
+    const taken = L.items.map(([, x, z]) => ({ x, z }));
+    for (let k = 0; k < 5; k++) { const p = freeSpot(L, taken, () => 0.999); assert.ok(L.rooms.some(r => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1), `seed ${s}: respawn ${p.x},${p.z} outside`); taken.push(p); }
+  }
+});
+
+test('multi-floor houses: fewer boxes (9-12), spread one per room across every floor before any room gets a second', () => {
+  for (const n of [2, 3, 4]) for (const s of SEEDS) {
+    const L = generateLevel(s, { floors: n }), tag = `seed ${s} floors ${n}`;
+    const boxes = L.items.filter(([t]) => ['standard', 'heavy', 'fragile'].includes(t));
+    assert.ok(boxes.length >= 9 && boxes.length <= 12, `${tag}: ${boxes.length} boxes`);
+    const roomOf = (x, z) => L.rooms.find(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+    for (let k = 0; k < n; k++) {
+      const here = boxes.filter(([, x, z]) => L.floorOf(z) === k);
+      assert.ok(here.length >= 2, `${tag}: only ${here.length} boxes on floor ${k}`);
+      const per = new Map(); for (const [, x, z] of here) { const r = roomOf(x, z); per.set(r, (per.get(r) || 0) + 1); }
+      const rooms = L.rooms.filter(r => r.storey === k && r.role !== 'hall' && r.role !== 'stairs');
+      if ([...per.values()].some(c => c > 1)) assert.ok(rooms.every(r => per.has(r)), `${tag}: a room on floor ${k} got two boxes while another has none`);
+    }
+  }
+});

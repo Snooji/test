@@ -251,18 +251,24 @@ export function generateLevel(seed, opts = {}) {
     for (const o of byRole('office').slice(0, multi ? 1 : Infinity)) entries.push(['desk', o]); // one desk per house when there are bedrooms on every floor
     // boxes: at least one in every room, the rest by floor area; fragile favours kitchen/dining, heavy the office/laundry
     const furnCells = entries.reduce((a, [t]) => a + cellsOf(t), 0);
-    const yardN = RI(1, 2);
-    const nBoxes = multi ? Math.min(RI(14, 20), 56 - furnCells - yardN) : Math.max(rooms.length + 1, Math.min(RI(14, 20), 56 - furnCells - yardN));
+    // multi-floor houses: fewer boxes, spread thin over every floor, so a crew has to split up and look around
+    const nBoxes = multi ? Math.min(RI(9, 12), 56 - furnCells) : Math.max(rooms.length + 1, Math.min(RI(14, 20), 56 - furnCells));
     const MIX = { garage: [0.35, 0.55, 0.1], kitchen: [0.4, 0.15, 0.45], dining: [0.45, 0.1, 0.45], office: [0.4, 0.5, 0.1], laundry: [0.5, 0.4, 0.1], bathroom: [0.6, 0.2, 0.2], bedroom: [0.6, 0.2, 0.2], living: [0.5, 0.25, 0.25] };
     const boxFor = (i) => { const m = MIX[role[i]] || MIX.living, u = rng(); return u < m[0] ? 'standard' : u < m[0] + m[1] ? 'heavy' : 'fragile'; };
     const totalArea = rooms.reduce((a, r) => a + area(r), 0);
     const clearRole = (k) => k === 'hall' || k === 'stairs';
     const boxes = [];
-    if (multi) { // spread evenly over the floors, then by floor area within each floor
-      for (let j = 0; boxes.length < nBoxes && j < nBoxes * 4; j++) {
-        const f = j % nFloors, ids = rooms.map((_, i) => i).filter(i => rooms[i].storey === f && !clearRole(role[i]));
-        let t = rng() * ids.reduce((a, i) => a + area(rooms[i]), 0), pickI = ids[ids.length - 1];
-        for (const i of ids) { t -= area(rooms[i]); if (t <= 0) { pickI = i; break; } }
+    if (multi) { // floors take turns; within a floor, a different room each time (shuffled) until every room has one
+      const queue = Array.from({ length: nFloors }, (_, f) => {
+        const ids = rooms.map((_, i) => i).filter(i => rooms[i].storey === f && !clearRole(role[i]));
+        for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+        return ids;
+      });
+      const start = Math.floor(rng() * nFloors);
+      for (let j = 0; boxes.length < nBoxes && j < nBoxes * 8; j++) {
+        const q = queue[(start + j) % nFloors];
+        if (!q.length) continue;
+        const pickI = q[Math.floor(j / nFloors) % q.length];
         boxes.push([boxFor(pickI), pickI]);
       }
     } else {
@@ -272,8 +278,7 @@ export function generateLevel(seed, opts = {}) {
     // the full mix is always there
     if (!boxes.some(([t]) => t === 'heavy')) boxes[0][0] = 'heavy';
     if (!boxes.some(([t]) => t === 'fragile')) boxes[boxes.length > 1 ? 1 : 0][0] = 'fragile';
-    entries.push(...boxes);
-    for (let i = yardN; i--;) entries.push(['standard', -2]); // a couple of boxes already out on the lawn
+    entries.push(...boxes); // (nothing starts out on the lawn: everything is inside the house)
   }
 
   // ---- place everything: clear of walls, doors and each other, furniture in its own room ----
@@ -310,15 +315,14 @@ export function generateLevel(seed, opts = {}) {
     };
     for (let tries = 0; tries < (exact ? 200 : 220); tries++) {
       let x, z;
-      const overflow = exact && tries >= 160 && !t.furniture; // a full house spills a few boxes onto the lawn
-      if (inYard || overflow) { x = R(x1 + 2, 8); z = R(-12, 12); if (Math.abs(z) < 4 && x > 5) continue; }
+      if (inYard) continue; // (no longer used: nothing spawns outside)
       else if (type === 'coffeetable' && tries < 12 && placed.some(([pt]) => pt === 'couch')) { // in front of the couch, like a real living room
         const [, cx, cz] = placed.find(([pt]) => pt === 'couch');
         [x, z] = [[cx, cz + 1.6], [cx, cz - 1.6], [cx + 0.6, cz + 1.7], [cx - 0.6, cz - 1.7], [cx + 2.6, cz], [cx - 2.6, cz]][tries % 6];
       }
       else { const r = own && (t.furniture || tries < 150) ? own : multi && !t.furniture ? roomOnFloor(placed.length % nFloors) : roomByArea(); x = R(r.x0 + halfX, r.x1 - halfX); z = R(r.z0 + halfZ, r.z1 - halfZ); }
       x = Math.round(x * 10) / 10; z = Math.round(z * 10) / 10;
-      if (!fits(x, z, false, inYard || overflow)) continue;
+      if (!fits(x, z, false, false)) continue;
       placed.push([type, x, z]);
       return;
     }
@@ -328,13 +332,10 @@ export function generateLevel(seed, opts = {}) {
         if (fits(px, pz, tight, false)) { placed.push([type, px, pz]); return; }
       }
     }
-    if (exact) { // never drop a piece of a Full load: scan the yard for any free spot
-      for (let x = x1 + 2; x < 8.6; x += 1.2) for (let z = -13; z <= 13; z += 1.2) {
-        if (Math.abs(z) < 3.4 && x > 5.4) continue;
-        if (level.hitsWall(x, z, 0.7) || placed.some(([, px, pz]) => Math.hypot(px - x, pz - z) < 1.3)) continue;
-        placed.push([type, +x.toFixed(1), +z.toFixed(1)]);
-        return;
-      }
+    // never drop a piece (a Full load needs every one): any room of the house, scanned finely and packed a little tighter
+    for (const tight of [false, true]) for (const r of open) for (let x = r.x0 + halfX; x <= r.x1 - halfX + 1e-6; x += 0.3) for (let z = r.z0 + halfZ; z <= r.z1 - halfZ + 1e-6; z += 0.3) {
+      const px = Math.round(x * 10) / 10, pz = Math.round(z * 10) / 10;
+      if (fits(px, pz, tight, false)) { placed.push([type, px, pz]); return; }
     }
   });
   level.items = placed;
@@ -393,7 +394,11 @@ export function freeSpot(level, taken, rng = Math.random, floor = null) {
     if (level.hitsWall(x, z, 0.7) || taken.some(p => Math.hypot(p.x - x, p.z - z) < 1.2)) continue;
     return { x: +x.toFixed(1), z: +z.toFixed(1) };
   }
-  return { x: level.frontDoor.x + 2.5, z: level.frontDoor.z };
+  // a crowded house: scan the rooms finely for any free spot (never outside on the lawn)
+  for (const r of rooms) for (let x = r.x0 + 0.9; x <= r.x1 - 0.9; x += 0.4) for (let z = r.z0 + 0.9; z <= r.z1 - 0.9; z += 0.4) {
+    if (!level.hitsWall(x, z, 0.6) && !taken.some(p => Math.hypot(p.x - x, p.z - z) < 1)) return { x: +x.toFixed(1), z: +z.toFixed(1) };
+  }
+  const r = rooms[0]; return { x: +((r.x0 + r.x1) / 2).toFixed(1), z: +((r.z0 + r.z1) / 2).toFixed(1) };
 }
 
 /** Rebuild the server's house from the small description sent in every snapshot. */

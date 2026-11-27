@@ -360,7 +360,7 @@ export class MoveRoom extends Room {
     for (const b of this.bots.values()) b.hear?.(item); // everyone hears a 🆘
     // the nearest free AI mover drops what it's walking to and comes to help
     const free = [...this.bots.values()].filter(b => b.p !== p && this.isActive(b.p) && !b.p.carry && !b.p.loadMode && !b.p.dolly && !b.p.flatDolly && !b.p.task && !b.p.duel)
-      .sort((a, b) => dist(a.p, item) - dist(b.p, item));
+      .sort((a, b) => a.travel(a.p, item) - b.travel(b.p, item)); // walking distance: a floor away is via the stairs, not 40 m
     const helper = free.find(b => Math.random() < ({ easy: 0.7, normal: 0.95, hard: 1 }[b.difficulty] ?? 0.9));
     if (helper) {
       helper.answerHelp(item);
@@ -450,7 +450,7 @@ export class MoveRoom extends Room {
       this.placeAtSpawn(p, i++);
     }
     this.timeLeft = this.tutorialMode ? 3600 : RULES.MODES[this.mode] + (this.twist === 'mansion' && this.mode !== 'load' ? 60 : 0)
-      + (this.mode !== 'load' ? 30 * ((this.level.floors || 1) - 1) : 0); // more stairs, more time
+      + (this.mode !== 'load' ? 45 * ((this.level.floors || 1) - 1) : 0); // more stairs, more time: 45 s for each floor above the ground
     this.tutorial = this.tutorialMode ? { step: -1 } : null;
     this.autoStartAt = 0; this.zeroG = false; this.zeroT = 0;
     if (this.quick && this.listing) Promise.resolve().then(() => this.lock()).catch(() => {}); // stop Quick Play matching into a live round

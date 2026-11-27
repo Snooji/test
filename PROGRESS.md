@@ -331,3 +331,15 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
   retry loop. Page-reload rejoin via the saved token kept. Startup banner off (greet: false)
 - Tests: e2e-reconnect.mjs (server cuts the socket like lost signal → same mover back, round continues, can move), unit test for
   onDrop/onReconnect/onLeave. Load test: 10 rooms × 4 players, 20 snaps/s, p99 gap 51 ms (unchanged)
+
+## Multi-floor balance (2026-11-27)
+- Measured with tools/aidiag.mjs (where AI time goes, what's left, by floor; real round timers, 12 rounds, normal):
+  before 1 floor 94% loaded · 2 floors 75% · 3 floors 70% · 4 floors 71%, first trip upstairs 55-125 s into the round
+  after  1 floor 94% · 2 floors 92% · 3 floors 85% · 4 floors 84%, first trip upstairs ~10 s. Easy < normal < hard kept
+  (3 floors: 71 / 85 / 90%)
+- Cause: each floor is its own 40 m strip of the map, so straight-line distance made everything upstairs look 40 m further.
+  AI now measures walking distance via the stairwell (bot.travel) when exploring, choosing items and picking who answers a 🆘
+- AI crews split up: each AI sweeps its own floor first ("you take upstairs") and avoids rooms another AI is heading for
+- Houses: multi-floor houses have fewer boxes (9-12, was 14-20) spread one per room, floors taking turns, so exploring pays.
+  Nothing spawns outside any more: no lawn boxes, Full-load overflow goes to a tighter scan of the rooms, respawns stay inside
+- Round time: +45 s per floor above the ground (was +30) for timed modes

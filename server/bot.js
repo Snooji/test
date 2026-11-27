@@ -111,15 +111,36 @@ export class Bot {
   }
   /** where this bot believes an item is: live if in view, else where it last saw it */
   seenAt(it) { return this.canSee(it) ? it : this.known.get(it.id) || null; }
+  /** walking distance, roughly: on another floor it's via the stairwell (each floor is its own 40 m strip of the map,
+   *  so a straight line to something upstairs would read as 40 m too far, and AI movers left upstairs for last) */
+  travel(a, b) {
+    const L = this.room.level;
+    if (!(L.floors > 1)) return Math.hypot(a.x - b.x, a.z - b.z);
+    const fa = L.floorOf(a.z), fb = L.floorOf(b.z), az = a.z - 40 * fa, bz = b.z - 40 * fb;
+    if (fa === fb) return Math.hypot(a.x - b.x, az - bz);
+    const w = this.well ||= (() => { const r = L.rooms.find(q => q.role === 'stairs' && !q.storey); return r ? { x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2 } : { x: a.x, z: az }; })();
+    return Math.hypot(a.x - w.x, az - w.z) + Math.abs(fa - fb) * 7 + Math.hypot(w.x - b.x, bz - w.z);
+  }
+  /** multi-floor houses: like a real crew, AI movers split up ("you take upstairs") — each sweeps its own floor first */
+  homeFloor() {
+    const L = this.room.level;
+    if (!(L.floors > 1)) return 0;
+    if (this.home === undefined) { const i = [...this.room.bots.values()].filter(b => !b.coach).indexOf(this); this.home = Math.max(0, i) % L.floors; }
+    return this.home;
+  }
   explore(dt) {
     const rooms = this.room.level.rooms || [];
     if (!rooms.length) return this.wander(dt);
     if (!this.exploreTo) {
       const p = this.p;
       let best = null, bs = Infinity;
+      const home = this.homeFloor(), homeLeft = rooms.some(r => (r.storey || 0) === home && this.visited[r.name] === undefined && r.role !== 'hall');
+      const others = new Set([...this.room.bots.values()].filter(b => b !== this && b.exploreTo).map(b => b.exploreTo.name));
       for (const r of rooms) {
         const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
-        const s = (this.visited[r.name] ?? -60) * 2 + Math.hypot(cx - p.x, cz - p.z) + this.rng() * 3;
+        let s = (this.visited[r.name] ?? -60) * 2 + this.travel(p, { x: cx, z: cz }) + this.rng() * 3;
+        if (homeLeft && (r.storey || 0) !== home) s += 25; // my floor first
+        if (others.has(r.name)) s += 20;                   // someone's already heading there
         if (s < bs && this.room.level.roomAt(p.x, p.z) !== r.name) { bs = s; best = { name: r.name, x: cx, z: cz }; }
       }
       this.exploreTo = best;
@@ -329,14 +350,18 @@ export class Bot {
     }
     const someoneWaiting = knownItems.some(it => it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1);
     const loaded = room.grid.items.size; // anyone can see the truck
+    // multi-floor: until my floor has been looked over, that's where I go (whatever I spotted on the way stays for the others)
+    const L = room.level, home = this.homeFloor();
+    const homeUnseen = L.floors > 1 && home > 0 && L.rooms.some(r => (r.storey || 0) === home && r.role !== 'hall' && r.role !== 'stairs' && this.visited[r.name] === undefined);
     let best = null, bestScore = -Infinity;
     for (const it of knownItems) {
       const seen = this.seenAt(it);
+      if (homeUnseen && seen && L.floorOf(seen.z) !== home) continue;
       if (!seen || (this.canSee(it) && it.state !== 'floor') || ITEM_TYPES[it.type].tool || this.skipping(it.id) || this.claimed(it)) continue;
       const t = ITEM_TYPES[it.type];
       const box = BOX_TYPES.includes(it.type); // a closed box: what's inside is a surprise until you lift it
       if (t.teamCarry && !alone && someoneWaiting) continue;
-      let score = -Math.hypot(seen.x - p.x, seen.z - p.z) - Math.hypot(seen.x - RAMP_TARGET.x, seen.z - RAMP_TARGET.z) * 0.4;
+      let score = -this.travel(p, seen) - this.travel(seen, RAMP_TARGET) * 0.4;
       if (this.difficulty === 'hard') {
         if (t.furniture) score += loaded < 12 ? 14 : 4;   // big pieces first: they build the floor
         score += box ? 2 : t.pts * 0.15;                  // a box is worth "a box" until you know what it is
