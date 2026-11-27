@@ -733,6 +733,7 @@ export class MoveRoom extends Room {
     const target = wantOk ? want : this.nearestItem(p);
     if (!target) return;
     const t = ITEM_TYPES[target.type];
+    if (this.holderOf(target)) return this.startDuel(p, target); // someone else has it: fight for it
     if (target.type === 'flatdolly') {
       target.state = 'pushed'; target.pusher = p.id; p.flatDolly = target.id;
       this.event({ kind: 'emote', id: p.id, e: '🛞' });
@@ -767,8 +768,9 @@ export class MoveRoom extends Room {
   nearestItem(p) {
     let best = null, bd = REACH;
     for (const it of this.items.values()) {
-      if ((it.type === 'dolly' || it.type === 'flatdolly') && (p.bot || it.state !== 'floor')) continue; // AI movers leave the dollies alone
-      const stealable = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 2 && !p.carry && !it.carriers.includes(p.id);
+      const grab = !p.bot && this.holderOf(it) && this.holderOf(it) !== p && !p.carry; // a box someone carries / a dolly someone pushes
+      if ((it.type === 'dolly' || it.type === 'flatdolly') && (p.bot || it.state !== 'floor') && !grab) continue; // AI movers leave the dollies alone
+      const stealable = grab || (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 2 && !p.carry && !it.carriers.includes(p.id));
       if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1) && !stealable) continue;
       const t = ITEM_TYPES[it.type], len = Math.max(t.w, t.d);
       const d = dist(p, it) - (len > 1 ? len * 0.35 : 0);
@@ -777,12 +779,28 @@ export class MoveRoom extends Room {
     return best;
   }
 
-  // ---------- steal a two-mover lift: 5 s tap battle between the challenger and the nearest carrier ----------
+  /** who you'd have to beat to take this: the one mover carrying a box (or one-mover piece), or whoever pushes a dolly.
+   *  (A two-mover lift is fought over end by end: see startDuel.) */
+  holderOf(it) {
+    if ((it.type === 'dolly' || it.type === 'flatdolly') && it.state === 'pushed') return this.players.get(it.pusher) || null;
+    if (it.state === 'carried' && it.carriers.length === 1 && !ITEM_TYPES[it.type].teamCarry) return this.players.get(it.carriers[0]) || null;
+    return null;
+  }
+  /** does this mover still have it (carrying it, or pushing the dolly)? */
+  stillHolds(it, who) {
+    if (!it || !who) return false;
+    if (it.type === 'dolly' || it.type === 'flatdolly') return it.state === 'pushed' && it.pusher === who.id;
+    return it.state === 'carried' && it.carriers.includes(who.id);
+  }
+
+  // ---------- tap battles: steal an end of a two-mover lift, a box someone carries, or a dolly someone pushes ----------
   startDuel(p, item) {
     this.duels ||= new Map();
-    if (this.duels.has(item.id) || p.duel || p.carry || !this.isActive(p)) return;
-    const holders = item.carriers.map(id => this.players.get(id)).filter(Boolean);
-    if (holders.some(h => h.loadMode || h.duel)) return;
+    if (this.duels.has(item.id) || p.duel || p.carry || p.dolly || p.flatDolly || !this.isActive(p)) return;
+    const one = this.holderOf(item);
+    const holders = one ? [one] : item.carriers.map(id => this.players.get(id)).filter(Boolean);
+    if (holders.some(h => h.loadMode || h.duel || h === p)) return; // already at the truck, or busy
+    if (one && one.carry && one.carry !== item.id) return; // pushing a dolly but also holding a box (unloading it)
     const victim = holders.sort((a, b) => dist(p, a) - dist(p, b))[0];
     if (!victim) return;
     const d = { item: item.id, a: p.id, b: victim.id, t: DUEL_SECONDS, ca: 0, cb: 0, tok: { [p.id]: DUEL_TAP_BURST, [victim.id]: DUEL_TAP_BURST } };
@@ -790,7 +808,8 @@ export class MoveRoom extends Room {
     p.duel = item.id; victim.duel = item.id;
     const label = ITEM_TYPES[item.type].label.toLowerCase();
     this.event({ kind: 'duel', item: item.id, a: p.id, b: victim.id });
-    this.event({ kind: 'toast', text: `⚔️ ${p.name} is trying to steal ${victim.name}'s end of the ${label}! TAP TAP TAP!`, cls: 'help' });
+    const what = item.type === 'dolly' || item.type === 'flatdolly' ? `${victim.name}'s ${label}` : one ? `the ${label} ${victim.name} is carrying` : `${victim.name}'s end of the ${label}`;
+    this.event({ kind: 'toast', text: `⚔️ ${p.name} is trying to steal ${what}! TAP TAP TAP!`, cls: 'help' });
   }
   duelTap(p) {
     if (!p?.duel) return;
@@ -821,20 +840,28 @@ export class MoveRoom extends Room {
         while (bot.duelAcc >= 1) { bot.duelAcc -= 1; this.duelPoint(d, who); }
       }
       d.t -= dt;
-      const over = d.t <= 0 || !a || !this.isActive(a) || !item || item.state !== 'carried' || !item.carriers.includes(d.b);
+      const held = this.stillHolds(item, b);
+      const over = d.t <= 0 || !a || !this.isActive(a) || !item || !held;
       if (!over) continue;
       this.duels.delete(id);
       if (a) a.duel = null; if (b) b.duel = null;
-      if (!a || !item || item.state !== 'carried') continue;
-      const label = ITEM_TYPES[item.type].label.toLowerCase();
-      const holderGone = !b || !item.carriers.includes(d.b) || !this.isActive(b);
-      if ((d.ca > d.cb || holderGone) && !a.carry && this.isActive(a)) {
-        if (item.carriers.includes(d.b)) item.carriers[item.carriers.indexOf(d.b)] = a.id;
-        else if (item.carriers.length < 2) item.carriers.push(a.id);
-        if (b && b.carry === id) b.carry = null;
-        a.carry = id;
-        this.event({ kind: 'emote', id: a.id, e: '💪' });
-        this.event({ kind: 'toast', text: `⚔️ ${a.name} wins ${Math.round(d.ca)}–${Math.round(d.cb)} and takes ${b?.name || 'their'}'s end of the ${label}!` });
+      const label = item ? ITEM_TYPES[item.type].label.toLowerCase() : '';
+      if (!a || !item || !held) { this.event({ kind: 'duelEnd', item: id, a: d.a, b: d.b, ca: d.ca, cb: d.cb }); continue; } // it got dropped or loaded mid-fight: nothing to win
+      const free = !a.carry && !a.dolly && !a.flatDolly && this.isActive(a);
+      if ((d.ca > d.cb || !this.isActive(b)) && free) {
+        const dollyKind = item.type === 'dolly' ? 'dolly' : item.type === 'flatdolly' ? 'flatDolly' : null;
+        if (dollyKind) { // the dolly and everything on it change hands
+          item.pusher = a.id; b[dollyKind] = null; a[dollyKind] = id;
+          if (item.type === 'flatdolly') item.wobble = 0;
+          this.event({ kind: 'emote', id: a.id, e: item.type === 'dolly' ? '🛒' : '🛞' });
+          this.event({ kind: 'toast', text: `⚔️ ${a.name} wins ${Math.round(d.ca)}–${Math.round(d.cb)} and takes ${b.name}'s ${label}${item.stack?.length || item.piece ? ', load and all' : ''}!` });
+        } else {
+          item.carriers[item.carriers.indexOf(d.b)] = a.id;
+          if (b.carry === id) b.carry = null;
+          a.carry = id;
+          this.event({ kind: 'emote', id: a.id, e: '💪' });
+          this.event({ kind: 'toast', text: `⚔️ ${a.name} wins ${Math.round(d.ca)}–${Math.round(d.cb)} and takes ${ITEM_TYPES[item.type].teamCarry ? `${b.name}'s end of the ${label}` : `the ${label} from ${b.name}`}!` });
+        }
       } else {
         this.event({ kind: 'toast', text: `🛡️ ${b?.name || 'The carrier'} holds on ${Math.round(d.cb)}–${Math.round(d.ca)}! The ${label} stays put.` });
       }

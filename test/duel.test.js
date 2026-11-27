@@ -127,3 +127,57 @@ test('steal: a person tapping at an ordinary 6–7 taps a second beats a hard AI
   }
   assert.ok(wins >= 7, `an ordinary human pace should usually beat a hard AI (won ${wins}/10)`);
 });
+
+test('steal: tap someone carrying a box to fight for it; the winner walks off with it', () => {
+  const { room, P, couch, send } = setup();
+  couch.state = 'floor'; couch.carriers = []; P.A.carry = null; P.B.carry = null;
+  const box = [...room.items.values()].find(i => i.type === 'standard' && i.state === 'floor');
+  box.state = 'carried'; box.carriers = ['A']; P.A.carry = box.id;
+  P.A.x = 3; P.A.z = 3; box.x = 3; box.z = 3; P.C.x = 3.6; P.C.z = 3;
+  tap(room, P.C);
+  const d = room.duels.get(box.id);
+  assert.ok(d && d.a === 'C' && d.b === 'A', 'battle for the box');
+  mash(room, send, 'C', 40);
+  for (let t = 0; t < 6; t += DT) room.tick(DT);
+  assert.equal(P.C.carry, box.id); assert.equal(P.A.carry, null);
+  assert.deepEqual(box.carriers, ['C']);
+});
+
+test('steal: the box holder who taps harder keeps it', () => {
+  const { room, P, couch, send } = setup();
+  couch.state = 'floor'; couch.carriers = []; P.A.carry = null; P.B.carry = null;
+  const box = [...room.items.values()].find(i => i.type === 'standard' && i.state === 'floor');
+  box.state = 'carried'; box.carriers = ['A']; P.A.carry = box.id;
+  P.A.x = 3; P.A.z = 3; box.x = 3; box.z = 3; P.C.x = 3.6; P.C.z = 3;
+  tap(room, P.C);
+  mash(room, send, 'A', 40);
+  for (let t = 0; t < 6; t += DT) room.tick(DT);
+  assert.equal(P.A.carry, box.id); assert.equal(P.C.carry, null);
+});
+
+test('steal: fight for a dolly someone is pushing; the winner gets the dolly and its boxes', () => {
+  const room = new MoveRoom(), handlers = {};
+  room.onMessage = (t, fn) => { handlers[t] = fn; }; room.setSimulationInterval = () => {}; room.clients = []; room.broadcast = () => {};
+  room.onCreate({ level: 'classic' }); // with the dollies
+  for (const id of ['A', 'C']) { room.clients.push({ sessionId: id, send: () => {} }); room.onJoin({ sessionId: id }, {}, { name: id, email: id + '@x.io' }); }
+  room.startRound(); while (room.phase !== 'playing') room.tick(DT);
+  const A = room.players.get('A'), C = room.players.get('C'), send = (id, t, m) => handlers[t]({ sessionId: id }, m);
+  for (const kind of ['dolly', 'flatdolly']) {
+    const dl = room.items.get(kind), key = kind === 'dolly' ? 'dolly' : 'flatDolly';
+    A.x = dl.x; A.z = dl.z; tap(room, A);
+    assert.equal(A[key], kind, `A pushes the ${kind}`);
+    const box = [...room.items.values()].find(i => i.type === 'standard' && i.state === 'floor');
+    box.x = A.x + 0.3; box.z = A.z; tap(room, A);
+    assert.equal(dl.stack.length, 1, 'a box on it');
+    for (const it of room.items.values()) if (it.state === 'floor' && Math.hypot(it.x - dl.x, it.z - dl.z) < 2.5) { it.x += 6; } // nothing else within reach
+    C.x = dl.x + 0.4; C.z = dl.z + 0.3;
+    tap(room, C);
+    assert.ok(room.duels.get(kind), `battle for the ${kind}`);
+    mash(room, send, 'C', 40);
+    for (let t = 0; t < 6; t += DT) room.tick(DT);
+    assert.equal(C[key], kind, `C took the ${kind}`); assert.equal(A[key], null);
+    assert.equal(dl.pusher, 'C'); assert.equal(dl.stack.length, 1, 'load and all');
+    tap(room, C); // set it down for the next one
+    for (const p of [A, C]) { p.energy = 1; p.injuredT = 0; }
+  }
+});

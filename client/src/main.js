@@ -517,7 +517,8 @@ function renderHud(s, me) {
 function nearest(s, me) {
   let best = null, bd = 1.7;
   for (const it of s.items) {
-    const stealable = it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 2 && !me.carry;
+    const grab = !me.carry && ((it.state === 'carried' && !ITEM_TYPES[it.type].teamCarry && it.n === 1) || (it.state === 'pushed' && it.pusher && it.pusher !== myId)); // someone else's box or dolly
+    const stealable = grab || (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 2 && !me.carry);
     if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.n === 1) && !stealable) continue;
     if ((it.fl || 0) !== (me.fl || 0)) continue; // right above or below you is not within reach
     const d = Math.hypot(it.x - me.x, it.z - me.z) - (ITEM_TYPES[it.type].w > 1 ? 0.6 : 0);
@@ -572,6 +573,8 @@ function renderPrompt(s, me) {
     if (it) {
       const t = ITEM_TYPES[it.type];
       if (it.assembled) { text = `🔧 HOLD to disassemble the ${t.label.toLowerCase()}`; action = 'HOLD 🔧'; }
+      else if (it.state === 'pushed') { text = `⚔️ TAP to fight for the ${t.label.toLowerCase()}${it.stack?.length || it.piece ? ' and its load' : ''}: a 5-second tap battle!`; action = 'STEAL'; }
+      else if (it.state === 'carried' && !t.teamCarry) { text = `⚔️ TAP to fight for that ${t.label.toLowerCase()}: a 5-second tap battle!`; action = 'STEAL'; }
       else if (it.state === 'carried' && it.n === 2) { text = `⚔️ TAP to steal an end of the ${t.label.toLowerCase()}: a 5-second tap battle!`; action = 'STEAL'; }
       else if (it.state === 'carried') { text = `💪 TAP to grab the other end of the ${t.label.toLowerCase()}`; action = 'LIFT'; }
       else if (t.needsWrap && !it.wrapped) { text = `🧣 HOLD to pad-wrap the ${t.label.toLowerCase()} · TAP to grab as-is`; action = 'WRAP/GRAB'; }
