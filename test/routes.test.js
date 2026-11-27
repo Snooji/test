@@ -5,10 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import { FileStore } from '../server/store.js';
-import { signupRoutes, unsubToken, confirmToken } from '../server/signups.js';
+import { signupRoutes, unsubToken, confirmToken, accountToken } from '../server/signups.js';
+
+const KEY = 'test-admin-key-0123456789'; // admin keys under 16 characters switch the admin pages off
 
 async function serve() {
-  process.env.ADMIN_KEY = 'k3y';
+  process.env.ADMIN_KEY = KEY;
   process.env.EMAIL_MX_CHECK = 'off'; // test addresses use made-up domains
   const store = new FileStore(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-r-')));
   const app = express(); app.set('trust proxy', true);
@@ -16,7 +18,12 @@ async function serve() {
   const srv = app.listen(0);
   const base = `http://127.0.0.1:${srv.address().port}`;
   const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.' + Math.floor(Math.random() * 250) }, body: JSON.stringify(body) });
-  return { store, base, post, close: () => srv.close() };
+  /** sign in to the admin pages; returns the session cookie */
+  const login = async () => {
+    const r = await fetch(base + '/admin/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: base }, body: 'key=' + KEY, redirect: 'manual' });
+    return r.headers.get('set-cookie')?.split(';')[0];
+  };
+  return { store, base, post, login, close: () => srv.close() };
 }
 
 test('signup: requires valid email, dedupes, records explicit marketing consent', async () => {
@@ -44,14 +51,44 @@ test('unsubscribe link works only with the signed token', async () => {
   s.close();
 });
 
-test('CSV + admin need the admin key; CSV shows who is OK to email', async () => {
+test('admin: sign in once (no key in the URL afterwards), a signed session cookie; CSV only for admins', async () => {
   const s = await serve();
   await s.post('/api/signup', { name: 'Cy', email: 'cy@x.io', marketing: false });
   assert.equal((await fetch(`${s.base}/api/signups.csv`)).status, 404);
-  assert.equal((await fetch(`${s.base}/admin?key=wrong`)).status, 404);
-  const csv = await (await fetch(`${s.base}/api/signups.csv?key=k3y`)).text();
+  assert.equal((await fetch(`${s.base}/api/signups.csv?key=${KEY}`)).status, 404, 'a key in the URL is not accepted for data');
+  const page = await fetch(`${s.base}/admin`);
+  assert.equal(page.status, 200); assert.match(await page.text(), /Admin sign-in/);
+  assert.equal(page.headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(`${s.base}/admin?key=wrong`)).status, 401);
+  // an old bookmark with ?key= signs you in and redirects to a clean URL
+  const old = await fetch(`${s.base}/admin?key=${KEY}`, { redirect: 'manual' });
+  assert.equal(old.status, 303); assert.equal(old.headers.get('location'), '/admin');
+  assert.match(old.headers.get('set-cookie'), /HttpOnly/); assert.match(old.headers.get('set-cookie'), /SameSite=Strict/);
+  const cookie = await s.login();
+  const dash = await fetch(`${s.base}/admin`, { headers: { cookie } });
+  assert.match(await dash.text(), /Let’s Move It admin/);
+  assert.ok(!(await (await fetch(`${s.base}/admin`, { headers: { cookie } })).text()).includes(KEY), 'the key never appears in the page');
+  const csv = await (await fetch(`${s.base}/api/signups.csv`, { headers: { cookie } })).text();
   assert.match(csv, /"Cy","cy@x.io","yes"/, 'playing = agreeing to the newsletter');
-  assert.equal((await fetch(`${s.base}/admin?key=k3y`)).status, 200);
+  assert.equal((await fetch(`${s.base}/api/signups.csv`, { headers: { 'x-admin-key': KEY } })).status, 200, 'scripts can send the key in a header');
+  // a forged or expired cookie is refused
+  const [n, v] = cookie.split('='), [exp] = v.split('.');
+  assert.match(await (await fetch(`${s.base}/admin`, { headers: { cookie: `${n}=${Number(exp) + 99999}.${'0'.repeat(64)}` } })).text(), /Admin sign-in/);
+  s.close();
+});
+
+test('admin: wrong keys are locked out after 10 tries in 15 minutes, even with the right key', async () => {
+  const s = await serve();
+  const tryKey = (k) => fetch(`${s.base}/admin/login`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: s.base, 'x-forwarded-for': '10.9.9.9' }, body: 'key=' + k, redirect: 'manual' });
+  for (let i = 0; i < 10; i++) assert.equal((await tryKey('guess' + i)).status, 401);
+  assert.equal((await tryKey(KEY)).status, 429);
+  s.close();
+});
+
+test('admin: a login form posted from another site is refused', async () => {
+  const s = await serve();
+  const r = await fetch(`${s.base}/admin/login`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://evil.example', 'x-forwarded-for': '10.8.8.8' }, body: 'key=' + KEY, redirect: 'manual' });
+  assert.equal(r.status, 401);
   s.close();
 });
 
@@ -74,13 +111,13 @@ test('leaderboard never exposes emails', async () => {
 });
 
 test('conversion webhook needs the key, records quote/booking and counts it in the funnel', async () => {
-  process.env.CONVERSION_KEY = 'conv';
+  process.env.CONVERSION_KEY = 'conv-key-0123456789abc';
   const s = await serve();
   const hook = (body, key) => fetch(`${s.base}/api/conversion`, { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { 'x-conversion-key': key } : {}) }, body: JSON.stringify(body) });
   assert.equal((await hook({ type: 'booking', email: 'a@x.io' })).status, 401);
-  assert.equal((await hook({ type: 'nonsense' }, 'conv')).status, 400);
-  assert.equal((await hook({ type: 'booking', email: 'a@x.io', value: 950 }, 'conv')).status, 200);
-  const px = await fetch(`${s.base}/api/px?t=quote&k=conv`);
+  assert.equal((await hook({ type: 'nonsense' }, 'conv-key-0123456789abc')).status, 400);
+  assert.equal((await hook({ type: 'booking', email: 'a@x.io', value: 950 }, 'conv-key-0123456789abc')).status, 200);
+  const px = await fetch(`${s.base}/api/px?t=quote&k=conv-key-0123456789abc`);
   assert.equal(px.headers.get('content-type'), 'image/gif');
   const rows = await s.store.listConversions(10);
   assert.deepEqual(rows.map(r => r.type).sort(), ['booking', 'quote']);
@@ -101,7 +138,10 @@ test('opting in to emails is counted as an opt-in event', async () => {
 
 test('admin can log a booking by hand (customer mentioned the game)', async () => {
   const s = await serve();
-  const r = await fetch(`${s.base}/admin/conversion?key=k3y`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'type=booking&name=Phone+Lead&email=&value=800&note=mentioned+game', redirect: 'manual' });
+  const cookie = await s.login();
+  const forged = await fetch(`${s.base}/admin/conversion`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie, origin: 'https://evil.example' }, body: 'type=booking&value=1', redirect: 'manual' });
+  assert.equal(forged.status, 404, 'cross-site form posts are refused');
+  const r = await fetch(`${s.base}/admin/conversion`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie, origin: s.base }, body: 'type=booking&name=Phone+Lead&email=&value=800&note=mentioned+game', redirect: 'manual' });
   assert.ok([302, 303].includes(r.status));
   const rows = await s.store.listConversions(5);
   assert.equal(rows[0].value, 800);
@@ -115,12 +155,38 @@ test('sign-up: everyone agrees to the newsletter by playing; throwaway inboxes a
   const j = await (await s.post('/api/signup', { name: 'Kay', email: 'kay@x.io' })).json();
   let [row] = (await s.store.listSignups()).filter(r => r.email === 'kay@x.io');
   assert.equal(row.marketing, true, 'agreed by playing');
-  const bad = await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'kay@x.io', token: 'nope', marketing: false }) });
-  assert.equal(bad.status, 401);
-  const ok = await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'kay@x.io', token: j.token, marketing: false }) });
+  const prefs = (body, h) => fetch(`${s.base}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sm-email': 'kay@x.io', ...h }, body: JSON.stringify(body) });
+  assert.equal((await prefs({ marketing: false }, { 'x-sm-token': 'nope' })).status, 401);
+  const ok = await prefs({ marketing: false }, { 'x-sm-token': j.token });
   assert.equal(ok.status, 200);
   [row] = (await s.store.listSignups()).filter(r => r.email === 'kay@x.io');
   assert.equal(row.marketing, false);
   assert.equal(row.unsubscribed, true);
+  s.close();
+});
+
+test('accounts: only the first person to sign up with an email can turn its newsletter back on or read the setting', async () => {
+  const s = await serve();
+  const first = await (await s.post('/api/signup', { name: 'Lu', email: 'lu@x.io' })).json();
+  assert.equal(first.account, accountToken('lu@x.io'), 'a new sign-up gets the account token');
+  const again = await (await s.post('/api/signup', { name: 'Imposter', email: 'lu@x.io' })).json();
+  assert.ok(again.token && !again.account, 'typing someone else\'s email lets you play, nothing more');
+  const h = (t, a) => ({ 'content-type': 'application/json', 'x-sm-email': 'lu@x.io', 'x-sm-token': t, ...(a ? { 'x-sm-account': a } : {}) });
+  assert.equal((await (await fetch(`${s.base}/api/prefs`, { headers: h(again.token) })).json()).marketing, null, 'their setting stays private');
+  assert.equal((await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: h(again.token), body: '{"marketing":true}' })).status, 403, 'no opting someone in (mail is off here; with mail on, a confirm link goes to the inbox)');
+  assert.equal((await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: h(first.token, first.account), body: '{"marketing":false}' })).status, 200);
+  assert.equal((await fetch(`${s.base}/api/prefs`, { method: 'POST', headers: h(first.token, first.account), body: '{"marketing":true}' })).status, 200, 'the owner can opt back in');
+  assert.equal((await (await fetch(`${s.base}/api/prefs`, { headers: h(first.token, first.account) })).json()).marketing, true);
+  assert.equal((await fetch(`${s.base}/api/profile?email=lu@x.io&token=${first.token}`)).status, 401, 'credentials are not read from the URL');
+  assert.equal((await fetch(`${s.base}/api/profile`, { headers: h(first.token) })).status, 200);
+  s.close();
+});
+
+test('the booking pixel and webhook never accept the admin key (it would sit on a public page)', async () => {
+  delete process.env.CONVERSION_KEY;
+  const s = await serve();
+  assert.equal((await fetch(`${s.base}/api/conversion`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-conversion-key': KEY }, body: '{"type":"booking"}' })).status, 401);
+  await fetch(`${s.base}/api/px?t=booking&k=${KEY}`);
+  assert.equal((await s.store.listConversions(5)).length, 0);
   s.close();
 });

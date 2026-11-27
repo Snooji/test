@@ -10,7 +10,7 @@ const MAX_ERRORS = 200;
 export class FileStore {
   constructor(dir) {
     this.dir = dir;
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.file = path.join(dir, 'store.json');
     this.d = { signups: {}, events: {}, scores: {}, profiles: {}, errors: [], conversions: [] };
     if (fs.existsSync(this.file)) {
@@ -29,7 +29,7 @@ export class FileStore {
   async init() {}
   save(now_ = false) {
     clearTimeout(this.timer);
-    const write = () => { const tmp = this.file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this.d)); fs.renameSync(tmp, this.file); };
+    const write = () => { const tmp = this.file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this.d), { mode: 0o600 }); fs.renameSync(tmp, this.file); }; // owner-only file: emails live here
     if (now_) write(); else this.timer = setTimeout(write, 400);
   }
   async flush() { this.save(true); }
@@ -145,7 +145,12 @@ export class PgStore {
 export async function openStore() {
   if (process.env.DATABASE_URL) {
     const { default: pg } = await import('pg');
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false } });
+    // SSL: local → off; a private network host with no dots (Render's internal URL) → encrypted, its certificate names the
+    // public host so it isn't checked; any public host → encrypted AND the certificate verified (stops a man in the middle).
+    let host = ''; try { host = new URL(process.env.DATABASE_URL).hostname; } catch {}
+    const ssl = /^(localhost|127\.0\.0\.1|::1)$/.test(host) ? false
+      : !host.includes('.') || process.env.DB_SSL_NO_VERIFY === '1' ? { rejectUnauthorized: false } : { rejectUnauthorized: true };
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl, max: 10, idleTimeoutMillis: 30_000 });
     const s = new PgStore(pool);
     await s.init();
     console.log('📦 store: Postgres');

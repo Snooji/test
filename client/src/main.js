@@ -38,6 +38,8 @@ let autoStartSent = false;
 const todayUTC = () => new Date().toISOString().slice(0, 10);
 
 // ---- funnel + error reporting (anonymous counters; no personal data) ----
+/** who you are, sent in headers (never in the URL, which lands in server logs) */
+const authHeaders = () => (gate ? { 'x-sm-email': gate.email, 'x-sm-token': gate.token, ...(gate.account ? { 'x-sm-account': gate.account } : {}) } : {});
 const track = (name) => { try { navigator.sendBeacon?.(httpBase + '/api/event', new Blob([JSON.stringify({ name })], { type: 'application/json' })) || fetch(httpBase + '/api/event', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }), keepalive: true }); } catch {} };
 let errorsSent = 0;
 const reportError = (message, stack) => {
@@ -91,7 +93,7 @@ $('btn-daily').onclick = () => connect(null, { daily: todayUTC(), difficulty: 'n
 async function loadHome() {
   $('daily-label').textContent = `${todayUTC()} · same house for everyone`;
   try {
-    const r = await fetch(`${httpBase}/api/profile?email=${encodeURIComponent(gate.email)}&token=${gate.token}`);
+    const r = await fetch(`${httpBase}/api/profile`, { headers: authHeaders() });
     if (r.ok) myProfile = await r.json();
   } catch {}
   const next = SUITS.find(x => !suitUnlocked(x.id, myProfile));
@@ -773,13 +775,18 @@ $('btn-ready-lobby').onclick = () => { room?.send('ready'); sfx('blip'); };
 $('btn-settings').onclick = async () => {
   const el = $('settings'); show(el, el.classList.contains('hidden'));
   if (el.classList.contains('hidden') || !gate?.token) return;
-  try { const j = await (await fetch(`${httpBase}/api/prefs?email=${encodeURIComponent(gate.email)}&token=${gate.token}`)).json(); $('set-news').checked = !!j.marketing; } catch {}
-  $('set-note').textContent = 'Turning this off stops all Starside Movers emails. You can still play.';
+  let known = true;
+  try { const j = await (await fetch(`${httpBase}/api/prefs`, { headers: authHeaders() })).json(); known = j.marketing !== null; $('set-news').checked = !!j.marketing; } catch {}
+  $('set-note').textContent = known ? 'Turning this off stops all Starside Movers emails. You can still play.'
+    : 'Signed in on a new device: you can turn emails off here; turning them on sends a confirm link to your inbox.';
 };
 $('set-news').onchange = async () => {
   const on = $('set-news').checked;
   try {
-    const r = await fetch(`${httpBase}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: gate.email, token: gate.token, marketing: on }) });
+    const r = await fetch(`${httpBase}/api/prefs`, { method: 'POST', headers: { 'content-type': 'application/json', ...authHeaders() }, body: JSON.stringify({ marketing: on }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 202) { $('set-news').checked = false; $('set-note').textContent = '📬 Check your inbox: tap the confirm link to turn emails back on.'; return; }
+    if (!r.ok && j.error) { $('set-news').checked = !on; $('set-note').textContent = j.error; return; }
     $('set-note').textContent = r.ok ? (on ? '✅ You’ll get newsletters and offers.' : '✅ Unsubscribed. No more emails.') : 'Could not save. Try again.';
   } catch { $('set-note').textContent = 'Could not save. Try again.'; }
 };

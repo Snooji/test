@@ -295,3 +295,30 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
       astronauts facing the camera with cardboard boxes (glass + anvil marks), two movers carrying the couch, the house with
       hedge and lit windows, the truck with boxes, warm night sky
 
+
+## Security pass (2026-11-27)
+- Headers on every response (server/security.js): CSP (own scripts only, WebAssembly allowed for the model decoder, no JS eval or
+  inline scripts; Google Fonts; same-host WebSocket), HSTS, nosniff, X-Frame-Options DENY / frame-ancestors none, Referrer-Policy,
+  Permissions-Policy, COOP. X-Powered-By off. Admin/confirm/unsubscribe pages: no-store, noindex, no-referrer
+- Authentication: play token (anyone at the gate) vs account token (only the first sign-up for an email). Opting back in to emails
+  needs the account token or a confirm link sent to the inbox; reading the setting needs the account token. Tokens go in headers,
+  never in URLs (they'd land in logs). Admin: sign in once → signed HttpOnly SameSite=Strict cookie (12 h, rotating ADMIN_KEY logs
+  everyone out); old ?key= bookmarks sign in and redirect to a clean URL; 10 wrong keys per 15 min per IP → locked out; cross-site
+  form posts refused; keys under 16 characters switch admin off
+- Rate limits: every /api route 300/min per visitor plus per-route limits (sign-up, prefs, events, errors, pixel, bad keys);
+  admin/confirm/unsubscribe 60/min; game rooms: 40 joins/min per visitor, per-client message budget (80/s, burst 200; floods dropped,
+  persistent floods disconnected). Visitor IP from Cloudflare's CF-Connecting-IP in production (X-Forwarded-For can be forged).
+  Limiter memory is swept (the old one grew forever)
+- Debug: DEBUG_HOOKS can't switch on in production (NODE_ENV=production or Render); NODE_ENV=production + PUBLIC_URL in render.yaml;
+  errors return a plain message (no stack, no framework); unknown routes a plain 404; /health no longer shows memory/uptime
+- Keys: the booking pixel/webhook take CONVERSION_KEY only (it used to fall back to the admin key, which would sit on a public page)
+- Database: Postgres certificates verified for public hosts (Render internal hosts encrypted as before; DB_SSL_NO_VERIFY=1 escape
+  hatch); data folder 0700, data/secret files 0600
+- Config check at start-up: missing/short secrets, debug flags, PUBLIC_URL; never prints values
+- Dependencies: `colyseus` umbrella replaced by @colyseus/core (drops unused OAuth/Redis/uWS packages and 4 of 5 advisory chains);
+  vite 8.4. Left: nanoid 2 inside Colyseus 0.16 (advisories need size ≤ 0 or overflow; Colyseus always passes a fixed length, and
+  ids come from crypto randomness), fixed only by the breaking Colyseus 0.18 upgrade
+- XSS reviewed: every player string escaped before innerHTML; server strips < > from names and chat; character ids whitelisted
+- Passwords: none exist (email gate + signed tokens); admin key compared in constant time
+- Exposed files: only dist/ is served (dotfiles ignored); og/icon render pages, source, data, .env, package.json all 404; no source maps
+- Tests: test/security.test.js, routes.test.js updated (sessions, lockout, CSRF, account tokens, header credentials)

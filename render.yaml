@@ -10,6 +10,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: NODE_ENV           # production: no debug hooks, no stack traces, secure cookies (the build still installs dev tools)
+        value: production
+      - key: PUBLIC_URL         # links in emails always point here, whatever Host header a request sends
+        value: https://starside-movers-game.onrender.com
       - key: DATA_DIR
         value: /data
       - key: GATE_SECRET

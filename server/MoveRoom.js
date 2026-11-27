@@ -1,4 +1,5 @@
-import { Room, ServerError } from 'colyseus';
+import { Room, ServerError } from '@colyseus/core';
+import { debugHooksOn, limiter, isProd } from './security.js';
 import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
 import { PLAYER_SPAWNS, inRamp, TRUCK } from '../shared/world.js';
@@ -7,6 +8,7 @@ import { createNav } from './nav.js';
 import { verifyToken, cleanName, cleanEmail } from './signups.js';
 
 import { CLASSIC_IDS, ALL_CHAR_IDS, charUnlocked, rosterEntry, unlockText } from '../shared/roster.js';
+const joinLimit = limiter(40, 60_000); // room joins per visitor per minute (see onAuth)
 const CHARS = CLASSIC_IDS; // defaults + AI movers
 const SPEED = 5;
 const R = 0.45;           // player radius
@@ -33,13 +35,20 @@ export class MoveRoom extends Room {
   static store = null; // set by server/index.js; null in unit tests
   maxClients = 6; // 4 movers + 2 spectators
 
-  onAuth(client, options) {
+  onAuth(client, options, context) {
+    // joins (and room creation) per visitor: 40 a minute is plenty for a real player, stops scripted floods
+    const ip = (isProd() && context?.headers?.['cf-connecting-ip']) || context?.ip || 'unknown';
+    if (!joinLimit.hit(String(ip))) throw new ServerError(429, 'Too many joins. Wait a minute and try again.');
     const email = cleanEmail(options?.email);
     if (!verifyToken(email, options?.token)) throw new ServerError(401, 'Sign in at the gate first.');
     return { email, name: cleanName(options?.name) || 'Mover' };
   }
 
   onCreate(options = {}) {
+    // flood guard: each client's messages draw on a budget (refills 80/s, holds 200). Over it, messages are dropped;
+    // a client that keeps hammering far past it is disconnected.
+    const on = this.onMessage.bind(this);
+    this.onMessage = (type, fn) => on(type, (c, m) => (this.flooding(c) ? undefined : fn(c, m)));
     this.phase = 'lobby';
     this.mode = '3min';
     this.game = options.game === 'sabotage' ? 'sabotage' : 'classic';
@@ -127,7 +136,7 @@ export class MoveRoom extends Room {
     this.onMessage('reroll', (c) => {
       if (c.sessionId === this.hostId && this.phase === 'lobby' && !this.classic) { this.newLevel(); this.resetWorld(); }
     });
-    if (process.env.DEBUG_HOOKS === '1') {
+    if (debugHooksOn()) { // automated tests only: never in production (server/security.js)
       this.onMessage('debug_end', () => { if (this.phase === 'playing') this.timeLeft = 0.01; });
       this.onMessage('debug_tp', (c, m) => { const p = this.players.get(c.sessionId); if (p) { p.x = Number(m.x); p.z = Number(m.z); } });
       this.onMessage('debug_tutorial_done', () => { if (this.tutorial && this.phase === 'playing') this.endRound('Training complete! You’re ready for a real move.'); });
@@ -293,6 +302,7 @@ export class MoveRoom extends Room {
   }
 
   async onLeave(client, consented) {
+    this.msgBudget?.delete(client.sessionId);
     const p = this.players.get(client.sessionId);
     if (!p) return;
     if (!consented && this.inRound() && typeof this.allowReconnection === 'function') {
@@ -1310,6 +1320,15 @@ export class MoveRoom extends Room {
     if (!this.meeting || !p || !this.isActive(p) || this.meeting.votes[p.id]) return;
     if (t !== 'skip' && !this.players.has(t)) return;
     this.meeting.votes[p.id] = t;
+  }
+
+  flooding(c) {
+    const t = Date.now(), b = (this.msgBudget ||= new Map()).get(c.sessionId) || { tok: 200, at: t, over: 0 };
+    b.tok = Math.min(200, b.tok + (t - b.at) * 0.08); b.at = t;
+    this.msgBudget.set(c.sessionId, b);
+    if (b.tok >= 1) { b.tok -= 1; b.over = Math.max(0, b.over - 0.01); return false; }
+    if (++b.over > 400) { try { c.leave?.(4008, 'Too many messages'); } catch {} }
+    return true;
   }
 
   say(p, raw) {
