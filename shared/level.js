@@ -219,6 +219,7 @@ export function generateLevel(seed, opts = {}) {
     frontDoor: { x: x1, z: fd }, floors: nFloors, stairs,
     variant: { mirrored, openPlan: plan.openPlan, garage: plan.garage, layout: plan.layout },
     doors: doors.map(d => ({ vertical: d.vertical, at: d.at, c: d.c, w: d.w || DOOR })), // inner doorways (for frames, lintels, decor)
+    openings: opens.map(o => ({ vertical: o.vertical, at: o.at, c: o.c, w: o.w })),          // where halls join with no door at all
   });
   level.doorsBetween = (a, b) => (links[rooms.indexOf(a)]?.has(rooms.indexOf(b)) ? 1 : 0); // a door or an opening
   level.hopsFromFront = (r) => hops[rooms.indexOf(r)];

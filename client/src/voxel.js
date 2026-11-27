@@ -576,16 +576,20 @@ function houseDetail(b, gb, level, k, rng) {
       B(mid - 0.03, mid + 0.03, y0, y1, p, q, TRIM); B(mid - w / 2, mid + w / 2, (y0 + y1) / 2 - 0.03, (y0 + y1) / 2 + 0.03, p, q, TRIM); // mullions
     }
   };
-  for (const r of level.rooms.filter(r => (r.storey || 0) === k)) {
-    const lenZ = r.z1 - r.z0, lenX = r.x1 - r.x0, wz = Math.min(2.2, lenZ * 0.32), wx = Math.min(2.2, lenX * 0.32);
-    if (Math.abs(r.x0 - X0) < 0.01 && lenZ >= 3.2 && r.role !== 'stairs') win(false, X0, (r.z0 + r.z1) / 2, wz);
-    if (Math.abs(r.x1 - X1) < 0.01 && lenZ >= 3.2) {
-      const mid = (r.z0 + r.z1) / 2;
-      if (!(k === 0 && Math.abs(mid - fd.z) < wz / 2 + 2.4)) win(false, X1, mid, wz);
-      else if (k === 0) { const alt = fd.z + (fd.z - r.z0 > r.z1 - fd.z ? -1 : 1) * (wz / 2 + 2.6); if (alt - wz / 2 > r.z0 + 0.5 && alt + wz / 2 < r.z1 - 0.5) win(false, X1, alt, wz); }
+  // windows on every outside wall: a room edge with no room beyond it (houses come in L / T / notched shapes, so that's
+  // not just the edges of the bounding box). Checked across the window's whole width.
+  const onFloor = level.rooms.filter(r => (r.storey || 0) === k);
+  const outside = (x, z) => !onFloor.some(q => x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1);
+  const outsideAlong = (vertical, line, mid, w, dir) => [-w / 2, 0, w / 2].every(o => vertical ? outside(line + dir * 0.4, mid + o) : outside(mid + o, line + dir * 0.4));
+  for (const r of onFloor) {
+    const lenZ = r.z1 - r.z0, lenX = r.x1 - r.x0, wz = Math.min(2.2, lenZ * 0.32), wx = Math.min(2.2, lenX * 0.32), mz = (r.z0 + r.z1) / 2, mx = (r.x0 + r.x1) / 2;
+    if (lenZ >= 3.2 && r.role !== 'stairs' && outsideAlong(true, r.x0, mz, wz, -1)) win(false, r.x0, mz, wz);
+    if (lenZ >= 3.2 && outsideAlong(true, r.x1, mz, wz, 1)) {
+      if (!(k === 0 && Math.abs(r.x1 - fd.x) < 0.01 && Math.abs(mz - fd.z) < wz / 2 + 2.4)) win(false, r.x1, mz, wz);
+      else if (k === 0) { const alt = fd.z + (fd.z - r.z0 > r.z1 - fd.z ? -1 : 1) * (wz / 2 + 2.6); if (alt - wz / 2 > r.z0 + 0.5 && alt + wz / 2 < r.z1 - 0.5) win(false, r.x1, alt, wz); }
     }
-    if (Math.abs(r.z0 - Z0) < 0.01 && lenX >= 3.2 && r.role !== 'hall') win(true, Z0, (r.x0 + r.x1) / 2, wx);
-    if (Math.abs(r.z1 - Z1) < 0.01 && lenX >= 3.2 && r.role !== 'hall') win(true, Z1, (r.x0 + r.x1) / 2, wx);
+    if (lenX >= 3.2 && r.role !== 'hall' && outsideAlong(false, r.z0, mx, wx, -1)) win(true, r.z0, mx, wx);
+    if (lenX >= 3.2 && r.role !== 'hall' && outsideAlong(false, r.z1, mx, wx, 1)) win(true, r.z1, mx, wx);
   }
   if (k === 0) { // porch: lamps either side of the front door, hedges along the front of the house (not across the path)
     for (const s of [-1, 1]) { b.box(X1 + HT, 1.7, fd.z + s * 1.95 - 0.12, X1 + HT + 0.14, 2.15, fd.z + s * 1.95 + 0.12, 0x3a2f26, 0.42); gb.box(X1 + HT + 0.02, 1.78, fd.z + s * 1.95 - 0.08, X1 + HT + 0.12, 2.05, fd.z + s * 1.95 + 0.08, 0xffd08a, 0.42); }
@@ -603,7 +607,7 @@ function houseDetail(b, gb, level, k, rng) {
   for (const r of level.rooms.filter(r => (r.storey || 0) === k)) {
     const list = DECOR[r.kind] || DECOR[r.role]; if (!list) continue;
     const fz = r.z0 + HT, blocked = (x, half) => doors.some(d => !d.vertical && Math.abs(d.at - r.z0) < 0.05 && x + half > d.c - d.w / 2 - 0.3 && x - half < d.c + d.w / 2 + 0.3)
-      || (Math.abs(r.z0 - Z0) < 0.01 && Math.abs(x - (r.x0 + r.x1) / 2) < Math.min(2.2, (r.x1 - r.x0) * 0.32) / 2 + half + 0.3);
+      || (outside((r.x0 + r.x1) / 2, r.z0 - 0.4) && Math.abs(x - (r.x0 + r.x1) / 2) < Math.min(2.2, (r.x1 - r.x0) * 0.32) / 2 + half + 0.3); // keep clear of that wall's window
     const spots = [0.27, 0.73].map(f => r.x0 + (r.x1 - r.x0) * f);
     list.forEach((kind, i) => {
       const x = spots[i % 2]; if (!x || blocked(x, 0.9)) return;
@@ -649,6 +653,13 @@ export function buildHouse(scene, level) {
         b.box(x0, k ? -SLAB : 0, z0, x1, 0.035, z1, k ? 0x6b5a48 : 0x3a2f26, 1);                      // upstairs: a real slab under the floor
         floorPattern(fb, { ...r, x0, z0, x1, z1 }, rng);
       }
+    }
+    // a smaller upper floor: a flat roof over each room of the floor below that has nothing on top of it (seen when you're up here)
+    if (k) for (const r of level.rooms.filter(q => (q.storey || 0) === k - 1)) {
+      const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2 + DZ;
+      if (level.rooms.some(q => q.storey === k && cx > q.x0 && cx < q.x1 && cz > q.z0 && cz < q.z1)) continue;
+      b.box(r.x0 - 0.2, -0.44, r.z0 + DZ - 0.2, r.x1 + 0.2, -0.36, r.z1 + DZ + 0.2, 0x6e4a3a, 0.5);   // roof deck, resting on the walls
+      b.box(r.x0 - 0.15, -0.36, r.z0 + DZ - 0.15, r.x1 + 0.15, -0.3, r.z1 + DZ + 0.15, 0x8a5a44, 0.5); // membrane
     }
     // walls: split down their thickness so each side shows the colour + skirting of the room it faces (warm siding outside)
     for (const w of level.houseWalls.filter(w => onK((w.z0 + w.z1) / 2))) {

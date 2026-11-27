@@ -352,3 +352,13 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
   wall pictures skip the wall behind a tall one
 - New cargo: Armchair (1 cell, wrap), TV (1 cell, fragile, wrap), Bookshelf (1x1x2, heavy) in roomy living rooms / dens /
   offices; the truck budget (≤ 56 cells) still holds. AI: 1 floor 96%, 2 floors 87% loaded (unchanged within noise)
+
+## Irregular house outlines (2026-11-27)
+- Strips no longer all match: the spine's private wing can be shorter (flush with one end or centred) or longer than the shared
+  rooms, the rooms either side of a cross/T hall each run back their own length, and a side-wing's private strip can stop short
+  of the front wall or the back, or run deeper. Hallways span what they serve. Outline corners over 200 houses: ~37% rectangles,
+  ~53% L-shapes/notches, ~10% T/stepped (test/houseplan.test.js). Outside walls are sealed everywhere but the front door (tested)
+- Smaller upper floors: ~half of multi-floor houses leave the front block single-storey (flat roof drawn over it from upstairs);
+  every floor stays reachable from its stairwell and no floor overhangs the one below (tested)
+- Windows go on every outside wall (not just the bounding box), including the walls facing into notches
+- AI unchanged within noise: 1 floor 95%, 2 floors 92%, 3 floors 84% loaded

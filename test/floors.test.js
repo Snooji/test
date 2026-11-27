@@ -180,3 +180,18 @@ test('multi-floor houses: fewer boxes (9-12), spread one per room across every f
     }
   }
 });
+
+test('smaller upper floors: about half of multi-floor houses step back upstairs, and no floor ever overhangs the one below', () => {
+  let smaller = 0, n = 0;
+  for (const fl of [2, 3, 4]) for (const s of SEEDS) {
+    const L = generateLevel(s, { floors: fl }); n++;
+    if (L.rooms.filter(r => r.storey === fl - 1).length < L.rooms.filter(r => !r.storey).length) smaller++;
+    for (let k = 1; k < fl; k++) for (const r of L.rooms.filter(q => q.storey === k)) {
+      for (const [fx, fz] of [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9], [0.5, 0.5]]) {
+        const x = r.x0 + (r.x1 - r.x0) * fx, z = r.z0 + (r.z1 - r.z0) * fz - 40;
+        assert.ok(L.rooms.some(q => q.storey === k - 1 && x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1), `seed ${s}: ${r.name} on floor ${k} hangs over nothing`);
+      }
+    }
+  }
+  assert.ok(smaller > n * 0.3 && smaller < n * 0.7, `${smaller} of ${n} houses are smaller upstairs`);
+});

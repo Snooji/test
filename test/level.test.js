@@ -222,7 +222,7 @@ test('every inner doorway is listed for the renderer, and sits in a gap in the w
   const { generateLevel } = await import('../shared/level.js');
   for (const s of [11, 222, 3333, 40404, 5150]) for (const opts of [{}, { floors: 3 }, { mansion: true }]) {
     const L = generateLevel(s, opts);
-    assert.ok(L.doors.length >= L.rooms.length - L.floors - 2, `seed ${s}: ${L.doors.length} doorways for ${L.rooms.length} rooms`);
+    assert.ok(L.doors.length + L.openings.length >= L.rooms.length - L.floors - 2, `seed ${s}: ${L.doors.length} doorways + ${L.openings.length} openings for ${L.rooms.length} rooms`);
     for (const d of L.doors) {
       const x = d.vertical ? d.at : d.c, z = d.vertical ? d.c : d.at;
       assert.ok(!L.hitsWall(x, z, 0.3), `seed ${s}: doorway at ${x},${z} is blocked by a wall`);

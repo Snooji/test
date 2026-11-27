@@ -79,3 +79,40 @@ test('one-floor homes: each private room opens straight onto a hallway, wherever
     }
   }
 });
+
+/** corners of the ground floor's outline (4 = a rectangle, 6 = an L or a notch, 8+ = a T or stepped) */
+function outlineCorners(L) {
+  const rs = L.rooms.filter(r => !r.storey), S = 0.25, H = L.house;
+  const nx = Math.round((H.x1 - H.x0) / S) + 2, nz = Math.round((H.z1 - H.z0) / S) + 2;
+  const inside = (i, k) => { const x = H.x0 + (i - 0.5) * S, z = H.z0 + (k - 0.5) * S; return rs.some(r => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1); };
+  const g = []; for (let i = 0; i <= nx; i++) { g.push([]); for (let k = 0; k <= nz; k++) g[i].push(inside(i, k)); }
+  let c = 0;
+  for (let i = 1; i <= nx; i++) for (let k = 1; k <= nz; k++) { const n = [g[i - 1][k - 1], g[i][k - 1], g[i - 1][k], g[i][k]].filter(Boolean).length; if (n === 1 || n === 3) c++; }
+  return c;
+}
+
+test('house outlines vary: rectangles, L-shapes and notches, and T / stepped shapes', () => {
+  const hist = {};
+  for (let i = 0; i < 200; i++) { const c = outlineCorners(generateLevel(11 + i * 7919)); hist[c] = (hist[c] || 0) + 1; }
+  const n = (k) => hist[k] || 0, more = Object.entries(hist).filter(([k]) => Number(k) >= 8).reduce((a, [, v]) => a + v, 0);
+  assert.ok(n(4) >= 30 && n(4) <= 100, `rectangles: ${n(4)} of 200 (${JSON.stringify(hist)})`);
+  assert.ok(n(6) >= 60, `L-shapes / notches: ${n(6)} of 200`);
+  assert.ok(more >= 10, `T / stepped: ${more} of 200`);
+});
+
+test('irregular outlines stay sealed: outside walls everywhere except the front door, upstairs too', () => {
+  for (const opts of [{}, { mansion: true }, { floors: 3 }]) for (const s of SEEDS.slice(0, 50)) {
+    const L = generateLevel(s, opts), fd = L.frontDoor;
+    for (const r of L.rooms) {
+      const same = L.rooms.filter(q => q.storey === r.storey);
+      const outside = (x, z) => !same.some(q => x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1);
+      const edges = [[r.x0, r.z0, r.x0, r.z1, -1, 0], [r.x1, r.z0, r.x1, r.z1, 1, 0], [r.x0, r.z0, r.x1, r.z0, 0, -1], [r.x0, r.z1, r.x1, r.z1, 0, 1]];
+      for (const [ax, az, bx, bz, nx, nz] of edges) for (let t = 0.05; t < 0.96; t += 0.03) {
+        const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        if (!outside(x + nx * 0.4, z + nz * 0.4)) continue; // an inside wall (or none, where halls join)
+        const frontDoor = !r.storey && Math.abs(x - fd.x) < 0.01 && Math.abs(z - fd.z) < 2.1;
+        assert.ok(frontDoor || L.hitsWall(x, z, 0.05), `seed ${s} ${JSON.stringify(opts)}: a hole in the outside wall of the ${r.name} at ${x.toFixed(1)},${z.toFixed(1)}`);
+      }
+    }
+  }
+});

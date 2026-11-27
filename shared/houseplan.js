@@ -100,6 +100,17 @@ function planGround(rng, { exact, mansion, multi, layout }) {
   const pickStep = (lo, hi) => lo + 0.5 * Math.floor(rng() * (Math.round((hi - lo) / 0.5) + 1));
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const randLen = (kinds, depth) => kinds.reduce((a, k) => { const r = widthRange(k, depth); return a + (r ? pickStep(r[0], r[1]) : 0); }, 0);
+  /** How a strip sits next to the one it's built against (length L): the same length (a plain rectangle), shorter and
+   *  flush with one end or centred (an L, or a T with the stem out back), or longer, sticking out past one or both ends.
+   *  Returns where it starts (relative to the other strip's start) and how long it is. */
+  const lineUp = (L, maxTotal = 26) => {
+    const u = rng(), cut = pickStep(5, 9);
+    if (u < 0.3 || L - cut < 6.5) return { a: 0, len: L };
+    if (u < 0.68) { const len = L - cut, k = Math.floor(rng() * 3); return { a: k === 0 ? 0 : k === 1 ? L - len : Math.round(L - len) / 2, len }; } // flush with one end, or centred
+    const len = Math.min(maxTotal, L + cut); if (len <= L + E) return { a: 0, len: L };
+    const extra = len - L, where = Math.floor(rng() * 3);
+    return { a: where === 0 ? 0 : where === 1 ? -extra : -Math.round(extra) / 2, len };
+  };
   const tiny = layout === 'cottage';
   // shared rooms: orders where dining touches the living room and the kitchen touches one of them
   const pubOrders = tiny ? [['living', 'kitchen'], ['kitchen', 'living']]
@@ -113,7 +124,7 @@ function planGround(rng, { exact, mansion, multi, layout }) {
   const beds = Array.from({ length: nBeds }, (_, i) => (i === 0 ? 'main' : i === 2 ? 'kids' : 'bedroom'));
   // private rooms: bedrooms (upstairs in a multi-floor house, where the ground floor keeps the stairwell instead)
   let priv = multi ? ['stairs', ...shuffle(['office', 'bathroom', 'laundry'])] : shuffle([...beds, 'bathroom', 'office', 'laundry']);
-  if (!multi) { const b = priv.findIndex(k => ROOM_SIZES[k] && roleOf(k) === 'bedroom'); if (b > 1) priv.unshift(...priv.splice(b, 1)); }
+  if (!multi) { const b = priv.findIndex(k => ROOM_SIZES[k] && roleOf(k) === 'bedroom'); if (b > 0) priv.unshift(...priv.splice(b, 1)); } // first, and kept, however short the wing
   if (layout === 'cross' || layout === 'tee') { // rooms either side of a short hall: the stairwell and bedrooms first, at most four (seven in a mansion)
     const rank = (k) => (k === 'stairs' ? 0 : roleOf(k) === 'bedroom' ? 1 : 2);
     priv = priv.map((k, i) => [k, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([k]) => k).slice(0, mansion ? 7 : 4);
@@ -179,39 +190,46 @@ function planGround(rng, { exact, mansion, multi, layout }) {
       const cover = F.find(r => r.z0 <= hz0 - 0.3 + E && r.z1 >= hz1 + 0.3 - E);
       if (!cover || !isPublic(cover.kind) || cover.kind === 'garage') return null;
       const half = Math.ceil(priv.length / 2), pa = priv.slice(0, half), pb = priv.slice(half);
-      const Lx = Math.round(randLen(pa, dN) * 2) / 2;
-      const na = fitStrip(rng, pa, Lx, dN, { keep: keepPriv, fillers: FILL }), nb = na && fitStrip(rng, pb.length ? pb : ['office'], Lx, dS, { fillers: FILL });
+      // each side of the hall runs back as far as its own rooms need: different lengths leave a notch at a back corner
+      const Lx = Math.round(randLen(pa, dN) * 2) / 2, LxS = Math.round(randLen(pb.length ? pb : ['office'], dS) * 2) / 2;
+      const na = fitStrip(rng, pa, Lx, dN, { keep: keepPriv, fillers: FILL }), nb = na && fitStrip(rng, pb.length ? pb : ['office'], LxS, dS, { fillers: FILL });
       if (!na || !nb || na.kinds.length + nb.kinds.length > (mansion ? 8 : 5)) return null;
-      const hall = hallOf(-wF - Lx, -wF, hz0, hz1);
+      const LxMax = Math.max(Lx, LxS);
+      const hall = hallOf(-wF - LxMax, -wF, hz0, hz1);
       const N = stack({ x0: -wF - Lx, x1: -wF, z0: 0, z1: hz0 }, 'x', na.kinds, na.lens, 'north');
-      const S = stack({ x0: -wF - Lx, x1: -wF, z0: hz1, z1: L }, 'x', nb.kinds, nb.lens, 'south');
+      const S = stack({ x0: -wF - LxS, x1: -wF, z0: hz1, z1: L }, 'x', nb.kinds, nb.lens, 'south');
       rooms.push(...N, ...S);
       open(cover, hall);
       for (const r of [...N, ...S]) { if (!canDoor(r, hall)) return null; door(r, hall); }
       ensuite(N); ensuite(S);
-      return { rooms, conns, W: wF + Lx, D: L, layout, openPlan, garage: fs.kinds.includes('garage') };
+      return { rooms, conns, W: wF + LxMax, D: L, layout, openPlan, garage: fs.kinds.includes('garage') };
     }
-    // ---- a hallway along the back of the shared rooms ----
-    const hall = hallOf(-wF - HALL_W, -wF, 0, L);
+    // ---- a hallway along the back of the shared rooms (spine: it also runs the length of the private wing behind,
+    //      which can be shorter, longer or offset: L- and T-shaped houses) ----
+    const wingSpan = layout === 'spine' ? lineUp(L) : { a: 0, len: L };
+    const h0 = Math.min(0, wingSpan.a), h1 = Math.max(L, wingSpan.a + wingSpan.len);
+    if (h1 - h0 > 26 + E) return null;
+    const hall = hallOf(-wF - HALL_W, -wF, h0, h1);
     toHall(F, hall);
     const hx0 = -wF - HALL_W;
     if (layout === 'tee') { // ... with a second hall off it, straight to the back wall, private rooms either side
       const hz0 = dN, hz1 = dN + HALL_W;
       const half = Math.ceil(priv.length / 2), pa = priv.slice(0, half), pb = priv.slice(half);
-      const Lx = Math.round(randLen(pa, dN) * 2) / 2;
-      const na = fitStrip(rng, pa, Lx, dN, { keep: keepPriv, fillers: FILL }), nb = na && fitStrip(rng, pb.length ? pb : ['office'], Lx, dS, { fillers: FILL });
+      const Lx = Math.round(randLen(pa, dN) * 2) / 2, LxS = Math.round(randLen(pb.length ? pb : ['office'], dS) * 2) / 2; // (see cross)
+      const na = fitStrip(rng, pa, Lx, dN, { keep: keepPriv, fillers: FILL }), nb = na && fitStrip(rng, pb.length ? pb : ['office'], LxS, dS, { fillers: FILL });
       if (!na || !nb || na.kinds.length + nb.kinds.length > (mansion ? 8 : 4)) return null;
-      const xh = hallOf(hx0 - Lx, hx0, hz0, hz1);
+      const LxMax = Math.max(Lx, LxS);
+      const xh = hallOf(hx0 - LxMax, hx0, hz0, hz1);
       open(hall, xh);
       const N = stack({ x0: hx0 - Lx, x1: hx0, z0: 0, z1: hz0 }, 'x', na.kinds, na.lens, 'north');
-      const S = stack({ x0: hx0 - Lx, x1: hx0, z0: hz1, z1: L }, 'x', nb.kinds, nb.lens, 'south');
+      const S = stack({ x0: hx0 - LxS, x1: hx0, z0: hz1, z1: L }, 'x', nb.kinds, nb.lens, 'south');
       rooms.push(...N, ...S);
       for (const r of [...N, ...S]) {
         const viaSpine = canDoor(r, hall) && rng() < 0.35; // the room on the corner may open onto either hall
         if (viaSpine) door(r, hall); else if (canDoor(r, xh)) door(r, xh); else return null;
       }
       ensuite(N); ensuite(S);
-      return { rooms, conns, W: wF + HALL_W + Lx, D: L, layout, openPlan, garage: fs.kinds.includes('garage') };
+      return { rooms, conns, W: wF + HALL_W + LxMax, D: L, layout, openPlan, garage: fs.kinds.includes('garage') };
     }
     // spine: one wing of private rooms behind the hallway (two wings joined by a passage in a Moon Mansion)
     let x = hx0, prevHall = hall;
@@ -222,16 +240,16 @@ function planGround(rng, { exact, mansion, multi, layout }) {
     for (let wi = 0; wi < wings; wi++) {
       const wB = pickStep(6.5, 8);
       const keep = wingLists[wi].filter(k => k === 'stairs' || k === 'passage' || k === wingLists[wi][0]);
-      const ws = fitStrip(rng, wingLists[wi], L, wB, { keep, fillers: FILL });
+      const ws = fitStrip(rng, wingLists[wi], wingSpan.len, wB, { keep, fillers: FILL });
       if (!ws) return null;
-      const B = stack({ x0: x - wB, x1: x, z0: 0, z1: L }, 'z', ws.kinds, ws.lens, 'wing' + wi);
+      const B = stack({ x0: x - wB, x1: x, z0: wingSpan.a, z1: wingSpan.a + wingSpan.len }, 'z', ws.kinds, ws.lens, 'wing' + wi);
       rooms.push(...B);
       for (const r of B) { if (!canDoor(r, prevHall)) return null; door(r, prevHall); }
       ensuite(B);
       x -= wB;
       if (wi < wings - 1) { // the next wing: another hallway, reached through this wing's passage
         const pass = B.find(r => r.kind === 'passage');
-        const h2 = hallOf(x - HALL_W, x, 0, L);
+        const h2 = hallOf(x - HALL_W, x, wingSpan.a, wingSpan.a + wingSpan.len);
         if (!pass || !canDoor(pass, h2)) return null;
         door(pass, h2);
         prevHall = h2; x -= HALL_W;
@@ -261,23 +279,31 @@ function planGround(rng, { exact, mansion, multi, layout }) {
       const [edge, dir, dep] = sides[si];
       const h = dir > 0 ? hallOf(-W, 0, edge, edge + HALL_W) : hallOf(-W, 0, edge - HALL_W, edge);
       toHall(P, h);
-      const qs = fitStrip(rng, lists[si].length ? lists[si] : ['office'], W, dep, { keep: si === 0 ? keepPriv : [], fillers: FILL });
+      // the private wing can stop short of the front wall or the back, or run deeper than the shared rooms
+      const sp = lineUp(W, 34);
+      const qx1 = Math.min(0, -sp.a), qx0 = qx1 - sp.len; // measured back from the front wall, never out past it toward the truck
+      const qs = fitStrip(rng, lists[si].length ? lists[si] : ['office'], sp.len, dep, { keep: si === 0 ? keepPriv : [], fillers: FILL });
       if (!qs || qs.kinds.length > (mansion ? 5 : 4)) return null;
-      const blk = dir > 0 ? { x0: -W, x1: 0, z0: edge + HALL_W, z1: edge + HALL_W + dep } : { x0: -W, x1: 0, z0: edge - HALL_W - dep, z1: edge - HALL_W };
+      if (qx0 < -W - E) { // deeper than the shared rooms: the hallway runs on to reach them
+        const hh = rooms.find(r => r === h); hh.x0 = qx0;
+      }
+      const blk = dir > 0 ? { x0: qx0, x1: qx1, z0: edge + HALL_W, z1: edge + HALL_W + dep } : { x0: qx0, x1: qx1, z0: edge - HALL_W - dep, z1: edge - HALL_W };
       const Q = stack(blk, 'x', qs.kinds, qs.lens, 'wing' + si);
       rooms.push(...Q);
       for (const r of Q) { if (!canDoor(r, h)) return null; door(r, h); }
       ensuite(Q);
     }
-    return { rooms, conns, W, D, layout, openPlan, garage: ps.kinds.includes('garage') };
+    return { rooms, conns, W: -Math.min(...rooms.map(r => r.x0)), D, layout, openPlan, garage: ps.kinds.includes('garage') };
   }
   return null;
 }
 
 /** Upstairs: the same walls (stairwell, hallways, passage), new rooms: this floor's bedrooms, then whatever fits. */
-function planUpper(rng, ground, bedsHere) {
-  const rooms = ground.rooms.map(r => ({ ...r }));
-  const at = new Map(ground.rooms.map((r, i) => [r, rooms[i]]));
+function planUpper(rng, ground, bedsHere, drop = null) {
+  // `drop`: ground rooms this floor leaves out (a smaller upper floor, set back over the private wing; roofed below)
+  const kept = ground.rooms.filter(r => !drop?.has(r));
+  const rooms = kept.map(r => ({ ...r }));
+  const at = new Map(kept.map((r, i) => [r, rooms[i]]));
   const halls = rooms.filter(isHall);
   const touchesHall = (r) => halls.some(h => canDoor(r, h));
   const pool = ['bathroom', 'office', 'laundry', 'den', 'play', 'storage'];
@@ -305,6 +331,7 @@ function planUpper(rng, ground, bedsHere) {
   const conns = [];
   for (const c of ground.conns) {
     const a = at.get(c.a), b = at.get(c.b);
+    if (!a || !b) continue; // one end isn't on this floor
     if (c.type === 'open' || ['stairs', 'passage'].includes(a.kind) || ['stairs', 'passage'].includes(b.kind)) conns.push({ ...c, a, b });
   }
   const linked = new Set(halls);
@@ -321,6 +348,13 @@ function planUpper(rng, ground, bedsHere) {
     }
   }
   if (free.some(r => !linked.has(r))) return null;
+  // everything on this floor must be reachable from its stairwell (a dropped block could cut a hallway off)
+  const wellUp = rooms.find(r => r.kind === 'stairs');
+  if (wellUp) {
+    const seen = new Set([wellUp]);
+    for (let grew = true; grew;) { grew = false; for (const c of conns) for (const [p, q] of [[c.a, c.b], [c.b, c.a]]) if (seen.has(p) && !seen.has(q)) { seen.add(q); grew = true; } }
+    if (rooms.some(r => !seen.has(r))) return null;
+  }
   return { rooms, conns };
 }
 
@@ -386,9 +420,18 @@ export function planHouse(rng, { exact = false, mansion = false, floors = 1 } = 
   /** upstairs floors on this ground plan, or null if they can't be made (or, in a house with stairs, no bedroom fits up there) */
   const uppers = (ground) => {
     const out = [];
+    // some houses are smaller upstairs: from floor `from` up, the front block of shared rooms is single-storey (roofed)
+    const front = ground.rooms.filter(r => r.block === 'front');
+    const smaller = multi && rng() < 0.45 && front.length && !ground.rooms.some(r => r.block === 'front' && r.kind === 'stairs');
+    let from = smaller ? 1 + Math.floor(rng() * (floors - 1)) : floors;
     for (let k = 1; k < floors; k++) {
       const bedsHere = bedKinds.filter((_, i) => i % (floors - 1) === k - 1);
       let up = null;
+      if (k >= from) {
+        for (let attempt = 0; attempt < 6 && !up; attempt++) up = planUpper(rng, ground, bedsHere, new Set(front));
+        if (!up && k > from) return null; // a floor above can never be bigger than the one below it (nothing to stand on)
+        if (!up) from = floors;            // couldn't set this one back: the whole house keeps its full footprint
+      }
       for (let attempt = 0; attempt < 6 && !up; attempt++) up = planUpper(rng, ground, bedsHere);
       if (!up) return null;
       out.push(up);
@@ -400,6 +443,11 @@ export function planHouse(rng, { exact = false, mansion = false, floors = 1 } = 
     const layout = !multi && !mansion && !exact && rng() < 0.15 ? 'cottage' : LAYOUTS[Math.floor(rng() * LAYOUTS.length)];
     const g = planGround(rng, { exact, mansion, multi, layout: mansion && layout === 'cross' ? 'spine' : layout });
     if (!g) continue;
+    // strips of different lengths can start before z = 0: put the house's corner back at (front wall, z = 0)
+    const zMin = Math.min(...g.rooms.map(r => r.z0)), zMax = Math.max(...g.rooms.map(r => r.z1));
+    for (const r of g.rooms) { r.z0 -= zMin; r.z1 -= zMin; }
+    g.D = zMax - zMin; g.W = -Math.min(...g.rooms.map(r => r.x0));
+    if (g.D > 26 + E) continue;
     if (!mansion && !multi && g.rooms.length > 9) continue; // a family home, not a maze
     if (g.W > (mansion ? 36 : 34)) continue;               // the yard and the world edge
     const up = uppers(g);
