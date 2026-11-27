@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import { FileStore } from '../server/store.js';
-import { signupRoutes, unsubToken, confirmToken, accountToken } from '../server/signups.js';
+import { signupRoutes, unsubToken, confirmToken, accountToken, tokenFor, mail } from '../server/signups.js';
 
 const KEY = 'test-admin-key-0123456789'; // admin keys under 16 characters switch the admin pages off
 
@@ -189,4 +189,43 @@ test('the booking pixel and webhook never accept the admin key (it would sit on 
   await fetch(`${s.base}/api/px?t=booking&k=${KEY}`);
   assert.equal((await s.store.listConversions(5)).length, 0);
   s.close();
+});
+
+
+test('verified sign-in: a code is emailed first; typing someone else\'s email gets you nothing', async () => {
+  const s = await serve();
+  const sent = []; const real = { ...mail };
+  mail.enabled = () => true; mail.send = async (m) => { sent.push(m); return true; };
+  try {
+    const r = await (await s.post('/api/signup', { name: 'Ada', email: 'ada@v.io' })).json();
+    assert.equal(r.verify, true); assert.equal(r.token, undefined, 'no play token before the code');
+    assert.equal(sent.length, 1); const code = sent[0].subject.match(/\d{6}/)[0];
+    assert.ok(!(await s.store.listSignups()).some(x => x.email === 'ada@v.io'), 'not on the list until verified');
+    const bad = await s.post('/api/verify', { email: 'ada@v.io', code: code === '000000' ? '111111' : '000000' });
+    assert.equal(bad.status, 400); assert.match((await bad.json()).error, /4 tries left/);
+    const ok = await (await s.post('/api/verify', { email: 'ada@v.io', code })).json();
+    assert.equal(ok.token, tokenFor('ada@v.io')); assert.equal(ok.account, accountToken('ada@v.io'));
+    assert.equal((await s.post('/api/verify', { email: 'ada@v.io', code })).status, 400, 'a code works once');
+    // the same device (account token) skips the code next time
+    const again = await (await s.post('/api/signup', { name: 'Ada', email: 'ada@v.io', account: ok.account })).json();
+    assert.equal(again.token, ok.token); assert.equal(sent.length, 1);
+    // someone else typing Ada's email: only a code goes to Ada's inbox
+    const evil = await (await s.post('/api/signup', { name: 'Eve', email: 'ada@v.io' })).json();
+    assert.equal(evil.verify, true); assert.equal(evil.token, undefined);
+  } finally { Object.assign(mail, real); s.close(); }
+});
+
+test('verified sign-in: wrong codes run out, and an inbox can\'t be flooded with codes', async () => {
+  const s = await serve();
+  const sent = []; const real = { ...mail };
+  mail.enabled = () => true; mail.send = async (m) => { sent.push(m); return true; };
+  try {
+    await s.post('/api/signup', { name: 'Bo', email: 'bo@v.io' });
+    const code = sent[0].subject.match(/\d{6}/)[0], wrong = code === '123456' ? '654321' : '123456';
+    for (let i = 0; i < 5; i++) await s.post('/api/verify', { email: 'bo@v.io', code: wrong });
+    const r = await s.post('/api/verify', { email: 'bo@v.io', code });
+    assert.equal(r.status, 400, 'after 5 wrong tries even the right code needs a new one');
+    for (let i = 0; i < 6; i++) await s.post('/api/signup', { name: 'Bo', email: 'bo@v.io' });
+    assert.ok(sent.length <= 5, `${sent.length} code emails to one address in an hour`);
+  } finally { Object.assign(mail, real); s.close(); }
 });

@@ -17,6 +17,19 @@ export async function sendMail({ to, subject, html, text, unsubscribeUrl }) {
 
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/** the sign-in code: proves the person typing the email can read it */
+export function codeEmail({ name, code, playUrl }) {
+  const subject = `${code} is your Let’s Move It code`;
+  const text = `Hi ${name},\n\nYour Let’s Move It sign-in code is ${code}. It works for 15 minutes.\n\nDidn't try to sign in? Ignore this email; nobody can play as you without the code.\n\n${playUrl}\n`;
+  const html = `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:auto;color:#1b1640">
+  <h1 style="font-size:22px">Let’s <span style="color:#ff8a3d">Move It</span></h1><p style="margin-top:-8px;color:#666">by Starside Movers</p>
+  <p>Hi ${esc(name)}, here's your sign-in code:</p>
+  <p style="font-size:32px;font-weight:800;letter-spacing:6px">${esc(code)}</p>
+  <p>It works for 15 minutes.</p>
+  <p style="font-size:12px;color:#777">Didn't try to sign in? Ignore this email; nobody can play as you without the code.</p></div>`;
+  return { subject, text, html };
+}
+
 export function confirmEmail({ name, confirmUrl, unsubscribeUrl, playUrl }) {
   const subject = 'Confirm your Let’s Move It news from Starside Movers';
   const text = `Hi ${name},\n\nThanks for clocking in at Let’s Move It! Confirm you'd like game news and offers:\n${confirmUrl}\n\nJump back in any time: ${playUrl}\n\nDon't want these emails? Unsubscribe: ${unsubscribeUrl}\n`;

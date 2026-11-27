@@ -4,7 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
-import { sendMail, confirmEmail, mailerEnabled } from './mailer.js';
+import { sendMail, confirmEmail, codeEmail, mailerEnabled } from './mailer.js';
+/** swappable in tests (so no real email goes out) */
+export const mail = { send: sendMail, enabled: mailerEnabled };
+/** Sign-in codes waiting to be typed in: email → { name, hash, exp, tries }. Lost on restart (they just ask for a new one). */
+const pendingCodes = new Map();
+const CODE_TTL = 15 * 60_000, CODE_TRIES = 5;
+const hashCode = (email, code) => crypto.createHmac('sha256', SECRET).update('code:' + email + ':' + code).digest('hex');
+const codesPerEmail = limiter(5, 3600_000); // at most 5 code emails an hour to one address: no inbox flooding
 import { clientIp, limiter, privatePage, adminSession, adminKeyOk, adminEnabled, adminCookie, adminLogoutCookie, sameOrigin, isProd } from './security.js';
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve('data');
@@ -56,8 +63,9 @@ export const cleanEmail = (e) => String(e || '').trim().toLowerCase().slice(0, 2
 const sign = (purpose, email) => crypto.createHmac('sha256', SECRET).update(purpose + ':' + cleanEmail(email)).digest('hex').slice(0, 32);
 const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 
+/** play token. 'v2': tokens from before emails were verified (handed to anyone who typed an address) no longer work. */
 export function tokenFor(email) {
-  return crypto.createHmac('sha256', SECRET).update(cleanEmail(email)).digest('hex').slice(0, 32);
+  return sign('play2', email);
 }
 export function verifyToken(email, token) { return !!email && !!token && same(tokenFor(email), token); }
 /** Account token: given only to whoever first signed up with this email (or proved it from a link in our email). The play
@@ -99,25 +107,58 @@ export function signupRoutes(app, express, store) {
     if (!(await domainTakesMail(domain))) return res.status(400).json({ error: 'That email address can’t receive mail. Check for typos.' });
     if (limited('signup', req, 30)) return res.status(429).json({ error: 'Too many signups, try later.' });
     try {
+      // Verified sign-in: a device that already proved this email (it holds the account token) goes straight in; anyone else
+      // gets a 6-digit code by email first, so typing someone's email doesn't get you their mover, stats or our newsletter.
+      if (mail.enabled() && !verifyAccount(email, req.get('x-sm-account') ?? req.body?.account ?? '')) {
+        if (!codesPerEmail.hit(email) || limited('code', req, 20)) return res.status(429).json({ error: 'Too many codes sent. Check your inbox (and spam), or try again in an hour.' });
+        const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
+        pendingCodes.set(email, { name, hash: hashCode(email, code), exp: Date.now() + CODE_TTL, tries: 0 });
+        for (const [k, v] of pendingCodes) if (v.exp < Date.now()) pendingCodes.delete(k);
+        await mail.send({ to: email, ...codeEmail({ name, code, playUrl: baseUrl(req) }) });
+        store.event('code_sent').catch(() => {});
+        return res.json({ verify: true, email });
+      }
+      return finishSignin(req, res, { name, email, marketing, verified: mail.enabled() });
+    } catch (err) {
+      store.logError({ where: 'signup', message: err.message, stack: err.stack, ua: req.get('user-agent') }).catch(() => {});
+      res.status(500).json({ error: 'Could not send your code. Please try again.' });
+    }
+  });
+
+  app.post('/api/verify', json, async (req, res) => {
+    const email = cleanEmail(req.body?.email), code = String(req.body?.code ?? '').replace(/\D/g, '');
+    if (limited('verify', req, 60)) return res.status(429).json({ error: 'Too many tries. Wait a bit and try again.' });
+    const p = pendingCodes.get(email);
+    if (!p || p.exp < Date.now()) { pendingCodes.delete(email); return res.status(400).json({ error: 'That code expired. Tap “Send a new code”.' }); }
+    if (++p.tries > CODE_TRIES) { pendingCodes.delete(email); return res.status(400).json({ error: 'Too many wrong codes. Tap “Send a new code”.' }); }
+    if (code.length !== 6 || !same(p.hash, hashCode(email, code))) return res.status(400).json({ error: `That code isn’t right. ${CODE_TRIES - p.tries} tr${CODE_TRIES - p.tries === 1 ? 'y' : 'ies'} left.` });
+    pendingCodes.delete(email);
+    try { return await finishSignin(req, res, { name: p.name, email, marketing: true, verified: true }); } catch (err) {
+      store.logError({ where: 'verify', message: err.message, stack: err.stack, ua: req.get('user-agent') }).catch(() => {});
+      res.status(500).json({ error: 'Could not sign you in. Please try again.' });
+    }
+  });
+
+  /** the email is proven (or verification is off): save the sign-up and hand out the play + account tokens */
+  async function finishSignin(req, res, { name, email, marketing, verified }) {
+    {
       const { isNew } = await store.upsertSignup({ name, email, marketing });
+      if (verified) await store.confirm(email); // they read our email: that's the confirmation
       store.event(isNew ? 'signup' : 'signin').catch(() => {});
       if (isNew && marketing) store.event('optin').catch(() => {});
-      if (isNew && marketing && mailerEnabled()) {
+      if (isNew && marketing && mail.enabled() && !verified) {
         const b = baseUrl(req);
-        const mail = confirmEmail({
+        const m = confirmEmail({
           name, playUrl: b,
           confirmUrl: `${b}/confirm?e=${encodeURIComponent(email)}&t=${confirmToken(email)}`,
           unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}`,
         });
-        sendMail({ to: email, ...mail, unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}` })
+        mail.send({ to: email, ...m, unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}` })
           .catch(err => store.logError({ where: 'mail', message: err.message, stack: '', ua: '' }));
       }
-      res.json({ token: tokenFor(email), name, email, ...(isNew ? { account: accountToken(email) } : {}) });
-    } catch (err) {
-      store.logError({ where: 'signup', message: err.message, stack: err.stack, ua: req.get('user-agent') }).catch(() => {});
-      res.status(500).json({ error: 'Could not save your sign-up. Please try again.' });
+      return res.json({ token: tokenFor(email), name, email, ...(isNew || verified ? { account: accountToken(email) } : {}) });
     }
-  });
+  }
 
   app.get('/confirm', privatePage, async (req, res) => {
     const email = cleanEmail(req.query.e);
@@ -145,10 +186,10 @@ export function signupRoutes(app, express, store) {
     if (limited('prefs', req, 30, 3600_000)) return res.status(429).json({ error: 'Too many changes. Try again later.' });
     const on = req.body?.marketing === true;
     if (on && !verifyAccount(email, account)) {
-      if (!mailerEnabled()) return res.status(403).json({ error: 'Use the link in one of our emails to turn newsletters back on.' });
+      if (!mail.enabled()) return res.status(403).json({ error: 'Use the link in one of our emails to turn newsletters back on.' });
       const b = baseUrl(req);
-      const mail = confirmEmail({ name: '', playUrl: b, confirmUrl: `${b}/confirm?e=${encodeURIComponent(email)}&t=${confirmToken(email)}`, unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}` });
-      sendMail({ to: email, ...mail, unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}` }).catch(err => store.logError({ where: 'mail', message: err.message, stack: '', ua: '' }));
+      const m = confirmEmail({ name: '', playUrl: b, confirmUrl: `${b}/confirm?e=${encodeURIComponent(email)}&t=${confirmToken(email)}`, unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}` });
+      mail.send({ to: email, ...m, unsubscribeUrl: `${b}/unsubscribe?e=${encodeURIComponent(email)}&t=${unsubToken(email)}` }).catch(err => store.logError({ where: 'mail', message: err.message, stack: '', ua: '' }));
       return res.status(202).json({ pending: true });
     }
     await store.setMarketing(email, on);

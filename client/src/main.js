@@ -61,21 +61,47 @@ const input = new Input({
 
 // ---------- gate ----------
 $('gate-crew').innerHTML = Object.keys(PORTRAITS).map(k => portrait(k)).join('');
+// emails this device has already proved (so signing back in doesn't need a new code)
+const knownAccounts = () => { try { return JSON.parse(localStorage.getItem('sm_accts') || '{}'); } catch { return {}; } };
+const rememberAccount = (email, account) => { if (!account) return; const a = knownAccounts(); a[email.toLowerCase()] = account; try { localStorage.setItem('sm_accts', JSON.stringify(a)); } catch {} };
+let codeFor = null; // the email a code was sent to
+const codeStep = (email) => {
+  codeFor = email;
+  show('gate-code-row', !!email);
+  $('gate-name').disabled = $('gate-email').disabled = !!email;
+  $('gate-submit').textContent = email ? 'Check code & play' : 'Clock in & play';
+  if (email) { $('gate-code-note').innerHTML = `We emailed a 6-digit code to <b>${esc(email)}</b>. Check spam too.`; $('gate-code').value = ''; $('gate-code').focus(); }
+};
+const signedIn = (j) => { rememberAccount(j.email, j.account); gate = j; try { localStorage.setItem('sm_gate', JSON.stringify(j)); } catch {} codeStep(null); sfx('blip'); route(); };
+async function askCode() {
+  const name = $('gate-name').value.trim(), email = $('gate-email').value.trim();
+  if (!name) { $('gate-err').textContent = 'Pick a mover name first (up to 16 letters).'; $('gate-name').focus(); return; }
+  if (!email) { $('gate-err').textContent = 'Enter your email. We send you a code to sign in.'; $('gate-email').focus(); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { $('gate-err').textContent = 'That email doesn’t look right. Check for typos.'; $('gate-email').focus(); return; }
+  const r = await fetch(httpBase + '/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email, account: knownAccounts()[email.toLowerCase()] }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Could not sign you in. Try again in a minute.');
+  if (j.verify) codeStep(j.email); else signedIn(j);
+}
 $('gate-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('gate-err').textContent = '';
-  const name = $('gate-name').value.trim(), email = $('gate-email').value.trim();
+  const btn = $('gate-submit'); btn.disabled = true;
   try {
-    const marketing = true; // agreed by playing (see the note under the button)
-    const r = await fetch(httpBase + '/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email, marketing }) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || 'Signup failed');
-    gate = j;
-    try { localStorage.setItem('sm_gate', JSON.stringify(j)); } catch {}
-    sfx('blip');
-    route();
-  } catch (err) { $('gate-err').textContent = err.message; }
+    if (!codeFor) await askCode();
+    else {
+      const code = $('gate-code').value.replace(/\D/g, '');
+      if (code.length !== 6) { $('gate-err').textContent = 'Type the 6-digit code from the email.'; return; }
+      const r = await fetch(httpBase + '/api/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: codeFor, code }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'That code didn’t work.');
+      signedIn(j);
+    }
+  } catch (err) { $('gate-err').textContent = /fetch|network/i.test(err.message) ? 'Can’t reach the game right now. Check your signal and try again.' : err.message; }
+  finally { btn.disabled = false; }
 });
+$('gate-resend').addEventListener('click', async () => { $('gate-err').textContent = ''; codeStep(null); try { await askCode(); toast('📧 New code sent'); } catch (err) { $('gate-err').textContent = err.message; } });
+$('gate-back').addEventListener('click', () => { $('gate-err').textContent = ''; codeStep(null); });
 $('btn-signout').onclick = () => { try { localStorage.removeItem('sm_gate'); } catch {} gate = null; route(); };
 
 // ---------- home ----------
@@ -97,6 +123,13 @@ async function loadHome() {
   try {
     const r = await fetch(`${httpBase}/api/profile`, { headers: authHeaders() });
     if (r.ok) myProfile = await r.json();
+    else if (r.status === 401) { // an old sign-in from before emails were checked: clock in again (with a code)
+      try { localStorage.removeItem('sm_gate'); } catch {}
+      const old = gate; gate = null; route();
+      if (old) { $('gate-name').value = old.name || ''; $('gate-email').value = old.email || ''; }
+      $('gate-err').textContent = 'Please clock in again: we now check it’s really your email.';
+      return;
+    }
   } catch {}
   const next = SUITS.find(x => !suitUnlocked(x.id, myProfile));
   $('home-stats').innerHTML = myProfile.games

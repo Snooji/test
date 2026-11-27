@@ -81,7 +81,7 @@ test('config check: flags weak or missing secrets and debug flags, without print
   assert.ok(warn.some(w => /DEBUG_HOOKS=1 is ignored/.test(w)));
   assert.ok(warn.some(w => /https/.test(w)));
   assert.ok(!lines.join().includes('abc') && !lines.join().includes('short '), 'no secret values in the log');
-  const none = withEnv({ RENDER: 'true', GATE_SECRET: 'x'.repeat(40), ADMIN_KEY: 'y'.repeat(24), CONVERSION_KEY: 'z'.repeat(24), DEBUG_HOOKS: undefined, PUBLIC_URL: 'https://a.io' }, () => checkEnv({ warn: () => {} }));
+  const none = withEnv({ RENDER: 'true', GATE_SECRET: 'x'.repeat(40), ADMIN_KEY: 'y'.repeat(24), CONVERSION_KEY: 'z'.repeat(24), DEBUG_HOOKS: undefined, PUBLIC_URL: 'https://a.io', RESEND_API_KEY: 're_test', MAIL_FROM: 'game@a.io' }, () => checkEnv({ warn: () => {} }));
   assert.deepEqual(none, []);
 });
 

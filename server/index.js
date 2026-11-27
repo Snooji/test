@@ -6,9 +6,9 @@ import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { MoveRoom } from './MoveRoom.js';
 import { DemoRoom } from './DemoRoom.js';
-import { signupRoutes } from './signups.js';
+import { signupRoutes, mail } from './signups.js';
 import { openStore } from './store.js';
-import { securityHeaders, rateLimit, checkEnv } from './security.js';
+import { securityHeaders, rateLimit, checkEnv, debugHooksOn } from './security.js';
 
 const PORT = Number(process.env.PORT) || 2567;
 checkEnv();
@@ -28,6 +28,12 @@ app.get('/health', async (_req, res) => {
   const rooms = await matchMaker.query({}).catch(() => []);
   res.set('Cache-Control', 'no-store').json({ ok: true, rooms: rooms.length, players: rooms.reduce((a, r) => a + r.clients, 0) });
 });
+// tests only (never in production): sign-in codes go to an in-memory outbox instead of real email
+if (debugHooksOn() && process.env.FAKE_MAIL === '1') {
+  const outbox = [];
+  mail.enabled = () => true; mail.send = async (m) => { outbox.push({ to: m.to, subject: m.subject }); return true; };
+  app.get('/debug/outbox', (_req, res) => res.json(outbox));
+}
 signupRoutes(app, express, store);
 
 const dist = path.resolve('dist');

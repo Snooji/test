@@ -121,6 +121,7 @@ export function checkEnv(log = console) {
   if (isProd() && !env.PUBLIC_URL) warn.push('PUBLIC_URL is not set: links in emails use the request host. Set it to https://your-domain.');
   if (env.PUBLIC_URL && isProd() && !/^https:\/\//.test(env.PUBLIC_URL)) warn.push('PUBLIC_URL should start with https://');
   if (env.RESEND_API_KEY && !env.MAIL_FROM) warn.push('RESEND_API_KEY is set without MAIL_FROM: emails are off.');
+  if (isProd() && !(env.RESEND_API_KEY && env.MAIL_FROM)) warn.push('Email is off (set RESEND_API_KEY + MAIL_FROM): sign-ins are NOT verified, so anyone who types a player\'s email can play as them.');
   if (env.DATABASE_URL && /sslmode=disable/.test(env.DATABASE_URL) && !/@(localhost|127\.0\.0\.1|[\w-]+)(:\d+)?\//.test(env.DATABASE_URL)) warn.push('DATABASE_URL turns off SSL for a remote database.');
   for (const w of warn) log.warn('⚠️ config: ' + w);
   return warn;

@@ -82,11 +82,14 @@
       <header class="brand"><div class="wordmark">Let’s <span>Move It</span></div><div class="byline">a moving-day party game by <b>Starside Movers</b></div></header>
       <p class="pitch">Stack the truck like a pro. Don’t crush the fragile box. Catch the crewmate who did.</p>
       <div class="crew-row" id="gate-crew"></div>
-      <form id="gate-form">
+      <form id="gate-form" novalidate>
         <label class="field"><span>Mover name</span><input id="gate-name" maxlength="16" placeholder="e.g. Rocket Rita" autocomplete="nickname" required /></label>
         <label class="field"><span>Email</span><input id="gate-email" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
-        <button class="cta-main" type="submit">Clock in &amp; play</button>
-        <p class="fine agree">By playing, you agree to receive newsletters and offers from <b>Starside Movers</b>. You can opt out any time in Settings or from any email. <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
+        <div id="gate-code-row" class="hidden"><p class="fine" id="gate-code-note"></p>
+          <label class="field"><span>6-digit code</span><input id="gate-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" /></label>
+          <button type="button" class="linkish" id="gate-resend">Send a new code</button> · <button type="button" class="linkish" id="gate-back">Use a different email</button></div>
+        <button class="cta-main" type="submit" id="gate-submit">Clock in &amp; play</button>
+        <p class="fine agree">Playing this game signs you up for newsletters and updates from <b>Starside Movers</b>. You can opt out from Settings or unsubscribe through email. <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
         <p class="err" id="gate-err"></p>
       </form>
     </div>
