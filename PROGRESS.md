@@ -343,3 +343,12 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
 - Houses: multi-floor houses have fewer boxes (9-12, was 14-20) spread one per room, floors taking turns, so exploring pays.
   Nothing spawns outside any more: no lawn boxes, Full-load overflow goes to a tighter scan of the rooms, respawns stay inside
 - Round time: +45 s per floor above the ground (was +30) for timed modes
+
+## More assets (2026-11-27)
+- Built-in fixtures by room type (shared/level.js FIXTURES, drawn by drawFixture in client/src/voxel.js): kitchen fridge + stove,
+  bathroom tub + toilet + sink (with mirror), laundry washer + dryer, garage workbench with pegboard, office bookcase, living room /
+  family room fireplace, dining sideboard, bedroom nightstand with lamp, kids/playroom toy chest, storage shelving. Backed onto a
+  wall, clear of doorways and each other, solid (invisible collision boxes) but low enough to see over; cargo never spawns in them;
+  wall pictures skip the wall behind a tall one
+- New cargo: Armchair (1 cell, wrap), TV (1 cell, fragile, wrap), Bookshelf (1x1x2, heavy) in roomy living rooms / dens /
+  offices; the truck budget (≤ 56 cells) still holds. AI: 1 floor 96%, 2 floors 87% loaded (unchanged within noise)

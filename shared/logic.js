@@ -17,6 +17,10 @@ export const ITEM_TYPES = {
   // round 11: a dresser stands 2 cells tall (heavy, scuffs unless wrapped); a coffee table is a light 2x1 piece
   dresser:  { label: 'Dresser',      w: 1, d: 1, h: 2, pts: 35, heavy: true,  fragile: false, furniture: true,  needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0x8b5e3c },
   coffeetable: { label: 'Coffee Table', w: 2, d: 1, h: 1, pts: 25, heavy: false, fragile: false, furniture: true, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0xa9744a },
+  // more things to move: a comfy armchair (wrap it), a TV (fragile: wrap it, don't stack on it), a tall bookshelf (heavy)
+  armchair: { label: 'Armchair',     w: 1, d: 1, h: 1, pts: 25, heavy: false, fragile: false, furniture: true, needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0xc0703f },
+  tv:       { label: 'TV',           w: 1, d: 1, h: 1, pts: 30, heavy: false, fragile: true,  furniture: true, needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0x2b2b33 },
+  bookshelf: { label: 'Bookshelf',   w: 1, d: 1, h: 2, pts: 35, heavy: true,  fragile: false, furniture: true, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0x7a5233 },
   table:    { label: 'Table',        w: 2, d: 1, pts: 40, heavy: true,  fragile: false, furniture: true,  needsWrap: false, needsDisassemble: true,  teamCarry: true,  color: 0xb07d4f },
 };
 

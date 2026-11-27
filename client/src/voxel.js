@@ -416,6 +416,20 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
     v.box(0, 0.12, 0, 1.6, 0.04, 0.6, shade(wood, 0.85)); // lower shelf
     v.box(-0.4, 0.5, 0.05, 0.4, 0.06, 0.3, 0x3a7ca5).box(-0.4, 0.55, 0.05, 0.36, 0.04, 0.26, 0xe63946); // books
     v.box(0.45, 0.53, -0.1, 0.12, 0.14, 0.12, 0xf3efe6); // mug
+  } else if (type === 'armchair') { // a squashy single seat with fat arms
+    const c = t.color;
+    v.box(0, 0.3, 0.05, 0.9, 0.34, 0.8, W(c)).box(0, 0.72, -0.32, 0.9, 0.6, 0.22, W(c));
+    for (const sx of [-1, 1]) v.box(sx * 0.4, 0.52, 0.02, 0.14, 0.38, 0.78, W(shade(c, 0.85)));
+    if (!wrapped) { v.box(0, 0.5, 0.08, 0.62, 0.1, 0.6, 0xe9a46b); for (const sx of [-1, 1]) for (const sz of [-1, 1]) v.box(sx * 0.38, 0.06, sz * 0.32, 0.08, 0.12, 0.08, 0x3a2a1f); }
+  } else if (type === 'tv') { // flat screen on its little stand
+    v.box(0, 0.06, 0, 0.5, 0.06, 0.3, W(0x2b2b33)).box(0, 0.2, 0, 0.1, 0.22, 0.08, W(0x2b2b33)).box(0, 0.62, 0, 0.96, 0.62, 0.08, W(0x1d1b19));
+    if (!wrapped) glow = new Vox().box(0, 0.62, 0.05, 0.86, 0.52, 0.02, 0x3f7fa8);
+  } else if (type === 'bookshelf') { // two-cell tall shelving with rows of coloured books
+    const wood = t.color;
+    v.box(0, 0.8, -0.2, 0.9, 1.6, 0.06, W(wood));
+    for (const sx of [-1, 1]) v.box(sx * 0.42, 0.8, 0, 0.06, 1.6, 0.46, W(wood));
+    for (const y of [0.04, 0.55, 1.07, 1.57]) v.box(0, y, 0, 0.9, 0.06, 0.46, W(shade(wood, 0.85)));
+    if (!wrapped) { const books = [0xe63946, 0x3a7ca5, 0xe9c46a, 0x6b9e8a, 0xb5654a, 0xf4ead8]; [0.3, 0.82, 1.33].forEach((y, r) => { for (let i = 0; i < 6; i++) v.box(-0.32 + i * 0.13, y, 0.02, 0.1, 0.4 - ((i + r) % 3) * 0.06, 0.32, books[(i + r * 2) % books.length]); }); }
   } else { // desk / table, assembled
     const top = type === 'desk' ? [2.0, 0.12, 0.9] : [2.0, 0.1, 1.1];
     v.box(0, 0.82, 0, ...top, t.color);
@@ -425,6 +439,47 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   g.add(v.mesh());
   if (glow) g.add(glow.mesh(glowMat));
   return g;
+}
+
+/**
+ * Built-in fixtures (they stay with the house). Modelled facing out from the wall they back onto: u runs along the wall
+ * (centre 0), v out from the wall (0 = against it, d = front), y up. `side` says which wall, so the model turns to face
+ * into the room.
+ */
+function drawFixture(b, p) {
+  const { side, w, d } = p, U = 0.25;
+  const put = (u, y0, v0, wu, h, dv, hex) => { // a box: centred at u along the wall, from v0 out to v0 + dv, y0 up to y0 + h
+    const uc = u, vc = v0 + dv / 2 - d / 2; // v measured from the fixture centre
+    let cx, cz, sx, sz;
+    if (side === 'z0') { cx = p.x + uc; cz = p.z + vc; sx = wu; sz = dv; }
+    else if (side === 'z1') { cx = p.x - uc; cz = p.z - vc; sx = wu; sz = dv; }
+    else if (side === 'x0') { cx = p.x + vc; cz = p.z - uc; sx = dv; sz = wu; }
+    else { cx = p.x - vc; cz = p.z + uc; sx = dv; sz = wu; }
+    b.cbox(cx, y0 + h / 2, cz, sx, h, sz, hex, U);
+  };
+  const W = 0xf2efe8, STEEL = 0xc9ccd1, DARK = 0x2b2b33, WOOD = 0x8a5a3a, LIGHT = 0xb07d4f;
+  switch (p.type) {
+    case 'fridge': put(0, 0, 0, w, 1.95, d, W); put(0, 1.25, d, w * 0.92, 0.02, 0.02, 0xdedad2); put(w * 0.36, 1.35, d, 0.05, 0.4, 0.04, STEEL); put(w * 0.36, 0.6, d, 0.05, 0.4, 0.04, STEEL); break;
+    case 'stove': put(0, 0, 0, w, 0.9, d, W); put(0, 0.9, 0, w, 0.04, d, DARK); for (const su of [-0.2, 0.2]) for (const sv of [0.2, 0.5]) put(su, 0.94, sv, 0.24, 0.02, 0.2, 0x4a4a52); put(0, 0.25, d, w * 0.8, 0.4, 0.02, 0x3a3a42); put(0, 0.9, 0, w, 0.35, 0.06, W); break;
+    case 'tub': put(0, 0, 0, w, 0.55, d, W); put(0, 0.45, 0.08, w - 0.16, 0.1, d - 0.16, 0x9fd3dc); put(-w / 2 + 0.15, 0.55, 0.05, 0.08, 0.25, 0.08, STEEL); break;
+    case 'toilet': put(0, 0, 0, w * 0.8, 0.75, 0.2, W); put(0, 0, 0.2, w * 0.7, 0.4, d - 0.2, W); put(0, 0.4, 0.18, w * 0.75, 0.05, d - 0.16, 0xe4e0d8); break;
+    case 'sink': put(0, 0, 0.1, 0.2, 0.75, 0.2, W); put(0, 0.75, 0, w, 0.12, d, W); put(0, 0.86, 0.08, w - 0.2, 0.02, d - 0.18, 0x9fd3dc); put(0, 0.87, 0, 0.06, 0.18, 0.08, STEEL); put(0, 1.05, 0, w * 0.8, 0.75, 0.03, 0xbfd7d6); break;
+    case 'washer': case 'dryer': put(0, 0, 0, w, 0.9, d, W); put(0, 0.42, d, 0.44, 0.44, 0.02, p.type === 'washer' ? 0x7fb6c8 : 0x9a9aa4); put(0, 0.8, d - 0.02, w * 0.8, 0.06, 0.03, 0xdcd8cf); break;
+    case 'workbench': put(0, 0.85, 0, w, 0.08, d, LIGHT); for (const su of [-w / 2 + 0.08, w / 2 - 0.08]) put(su, 0, 0.1, 0.08, 0.85, d - 0.2, WOOD); put(0, 0.3, 0.1, w - 0.2, 0.05, d - 0.2, WOOD); put(0, 0.93, 0.1, w * 0.9, 0.9, 0.04, 0xa89070); put(-0.4, 0.93, 0.25, 0.35, 0.14, 0.2, 0xe63946); put(0.45, 0.93, 0.3, 0.08, 0.05, 0.3, STEEL); break;
+    case 'bookcase': case 'shelving': {
+      const h = p.type === 'bookcase' ? 1.85 : 1.7, frame = p.type === 'bookcase' ? WOOD : 0x8f949c;
+      put(0, 0, 0, w, h, 0.05, frame); for (const su of [-w / 2 + 0.03, w / 2 - 0.03]) put(su, 0, 0, 0.06, h, d, frame);
+      for (let i = 0; i < 4; i++) put(0, 0.02 + i * (h - 0.05) / 3, 0, w, 0.04, d, frame);
+      const fill = p.type === 'bookcase' ? [0xe63946, 0x3a7ca5, 0xe9c46a, 0x6b9e8a, 0xb5654a] : [0xc19a6b, 0xa9844f, 0xd2b48c];
+      for (let r = 0; r < 3; r++) for (let i = 0; i < 5; i++) put(-w / 2 + 0.15 + i * (w - 0.3) / 4.4, 0.06 + r * (h - 0.05) / 3, 0.05, 0.16, p.type === 'bookcase' ? 0.38 - (i % 3) * 0.05 : 0.3, d - 0.1, fill[(i + r) % fill.length]);
+      break;
+    }
+    case 'fireplace': put(0, 0, 0, w, 1.15, d, 0xb5654a); put(0, 1.15, 0, w + 0.15, 0.08, d + 0.08, 0x6b4a33); put(0, 0, d - 0.05, w * 0.5, 0.6, 0.06, 0x1d1b19); put(0, 0.05, d - 0.02, w * 0.36, 0.2, 0.05, 0xff8a3d); put(0, 0, d, w + 0.2, 0.06, 0.3, 0x7a6a5a); break;
+    case 'sideboard': put(0, 0.08, 0, w, 0.75, d, WOOD); for (const su of [-w / 3, 0, w / 3]) put(su, 0.3, d, w / 3 - 0.06, 0.4, 0.02, LIGHT); put(-w / 2 + 0.08, 0, 0.05, 0.06, 0.08, 0.06, 0x3a2a1f); put(w / 2 - 0.08, 0, 0.05, 0.06, 0.08, 0.06, 0x3a2a1f); put(0.3, 0.83, 0.15, 0.2, 0.3, 0.2, 0xe9c46a); break;
+    case 'nightstand': put(0, 0, 0, w, 0.55, d, WOOD); put(0, 0.28, d, w * 0.8, 0.14, 0.02, LIGHT); put(0, 0.55, 0.15, 0.16, 0.06, 0.16, 0xd9b26a); put(0, 0.61, 0.17, 0.04, 0.2, 0.04, 0x3a2a1f); put(0, 0.8, 0.12, 0.26, 0.16, 0.26, 0xf4ead8); break;
+    case 'toychest': put(0, 0, 0, w, 0.5, d, 0x3f6f8a); put(0, 0.5, 0, w + 0.04, 0.06, d + 0.04, 0xe9c46a); put(0, 0.2, d, 0.24, 0.16, 0.02, 0xe63946); put(-0.25, 0.56, 0.2, 0.16, 0.16, 0.16, 0xe63946); break;
+    default: put(0, 0, 0, w, 0.8, d, LIGHT);
+  }
 }
 
 export function makeCat() {
@@ -552,6 +607,7 @@ function houseDetail(b, gb, level, k, rng) {
     const spots = [0.27, 0.73].map(f => r.x0 + (r.x1 - r.x0) * f);
     list.forEach((kind, i) => {
       const x = spots[i % 2]; if (!x || blocked(x, 0.9)) return;
+      if ((level.fixtures || []).some(f => Math.abs(f.z0 - fz) < 1.2 && x + 0.9 > f.x0 && x - 0.9 < f.x1)) return; // a fridge / bookcase is against that bit of wall
       if (kind === 'picture') { const [c1, c2] = ART[Math.floor(rng() * ART.length)]; b.box(x - 0.55, 1.25, fz, x + 0.55, 2.05, fz + 0.05, 0x5c3a22, 0.42); b.box(x - 0.47, 1.33, fz + 0.05, x + 0.47, 1.97, fz + 0.07, c1, 0.42); b.box(x - 0.47, 1.33, fz + 0.05, x + 0.05, 1.7, fz + 0.075, c2, 0.42); }
       else if (kind === 'tv') { b.box(x - 0.85, 1.15, fz, x + 0.85, 2.1, fz + 0.06, 0x1d1b19, 0.42); gb.box(x - 0.78, 1.22, fz + 0.06, x + 0.78, 2.03, fz + 0.07, 0x2f4a5a, 0.42); }
       else if (kind === 'mirror') { b.box(x - 0.45, 1.15, fz, x + 0.45, 2.15, fz + 0.05, 0xd9b26a, 0.42); gb.box(x - 0.38, 1.22, fz + 0.05, x + 0.38, 2.08, fz + 0.06, 0xbfd7d6, 0.42); }
@@ -633,6 +689,7 @@ export function buildHouse(scene, level) {
       }
     }
     for (const p of level.props.filter(p => onK(p.z))) {
+      if (p.kind === 'fixture') { drawFixture(b, p); continue; }
       if (p.kind === 'rug') b.box(p.x - p.w / 2, 0.04, p.z - p.d / 2, p.x + p.w / 2, 0.06, p.z + p.d / 2, p.color, 0.3);
       else if (p.kind === 'counter') { b.cbox(p.x, 0.45, p.z, p.w, 0.9, p.d, p.color, 0.3); const along = p.w >= p.d; for (let q = -1; q <= 1; q += 2) foods.push({ x: p.x + (along ? q * p.w * 0.25 : 0), y: 0.9 + k * H, z: p.z - DZ * k + (along ? 0 : q * p.d * 0.25), rot: rng() * 6.28, h: 0.32 }); }
       else if (p.kind === 'plant') pots.push({ ...p, y: k * H, z: p.z - DZ * k, n: Math.floor(rng() * 4) });

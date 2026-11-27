@@ -249,6 +249,12 @@ export function generateLevel(seed, opts = {}) {
     entries.push(['table', eat], ['lamp', eat]);
     for (const b of byRole('bedroom')) entries.push(['bed', b], ['dresser', b]);
     for (const o of byRole('office').slice(0, multi ? 1 : Infinity)) entries.push(['desk', o]); // one desk per house when there are bedrooms on every floor
+    // the extras that make it someone's home: an armchair and the TV in the living room (or family room), bookshelves in offices/dens
+    const lounge = [L, ...byRole('den')].filter(i => i !== undefined && area(rooms[i]) >= 60); // roomy enough to still have space for a box
+    if (lounge.length && rng() < 0.75) entries.push(['armchair', lounge[Math.floor(rng() * lounge.length)]]);
+    if (lounge.length && rng() < 0.65) entries.push(['tv', lounge[Math.floor(rng() * lounge.length)]]);
+    const studies = [...byRole('office'), ...byRole('den')];
+    if (studies.length && rng() < 0.6) entries.push(['bookshelf', studies[Math.floor(rng() * studies.length)]]);
     // boxes: at least one in every room, the rest by floor area; fragile favours kitchen/dining, heavy the office/laundry
     const furnCells = entries.reduce((a, [t]) => a + cellsOf(t), 0);
     // multi-floor houses: fewer boxes, spread thin over every floor, so a crew has to split up and look around
@@ -285,6 +291,47 @@ export function generateLevel(seed, opts = {}) {
   const doorPts = [...opens.map(o => (o.vertical ? { x: o.at, z: o.c } : { x: o.c, z: o.at })), ...doors.flatMap(d => { const p = d.vertical ? { x: d.at, z: d.c } : { x: d.c, z: d.at }; // wide openings: keep their whole width clear
     const k = d.vertical ? 'z' : 'x'; // along the wall the doorway is cut in
     return d.w > DOOR ? [p, { ...p, [k]: p[k] - (d.w / 2 - 1) }, { ...p, [k]: p[k] + (d.w / 2 - 1) }] : [p]; }), level.frontDoor];
+  // ---- built-ins: each room type gets the fixtures that make it read as that room (they stay behind when you move out).
+  //      Backed onto a wall, clear of doorways and of each other; solid to walk into but low enough to see over. ----
+  const FIXTURES = {
+    kitchen: [['fridge', 0.9, 0.8], ['stove', 0.9, 0.75]], bathroom: [['tub', 1.7, 0.85], ['toilet', 0.55, 0.7], ['sink', 0.7, 0.5]],
+    laundry: [['washer', 0.75, 0.7], ['dryer', 0.75, 0.7]], garage: [['workbench', 2.0, 0.7]], office: [['bookcase', 1.2, 0.4]],
+    den: [['fireplace', 1.6, 0.5]], living: [['fireplace', 1.6, 0.5]], dining: [['sideboard', 1.6, 0.5]], bedroom: [['nightstand', 0.5, 0.45]],
+    kids: [['toychest', 0.9, 0.55]], play: [['toychest', 0.9, 0.55]], storage: [['shelving', 1.8, 0.5]],
+  };
+  const fixtures = [];
+  const doorNear = (fx0, fz0, fx1, fz1, pad) => doorPts.some(p => p.x > fx0 - pad && p.x < fx1 + pad && p.z > fz0 - pad && p.z < fz1 + pad);
+  for (const r of rooms) {
+    const list = FIXTURES[r.kind] || FIXTURES[r.role];
+    if (!list) continue;
+    for (const [type, fw, fd] of list) {
+      const sides = ['z0', 'x0', 'x1', 'z1'].map(sd => [sd, rng()]).sort((a, b) => a[1] - b[1]).map(([sd]) => sd);
+      if (sides.includes('z0')) { sides.splice(sides.indexOf('z0'), 1); sides.unshift('z0'); } // the far wall faces the camera: show it off
+      let spot = null;
+      for (const side of sides) {
+        const along = side[0] === 'z' ? [r.x0, r.x1] : [r.z0, r.z1];
+        const span = along[1] - along[0] - 2 * (fw / 2 + 0.5);
+        if (span < 0) continue;
+        for (let k = 0; k < 6 && !spot; k++) {
+          const u = along[0] + fw / 2 + 0.5 + rng() * span, inset = T / 2 + fd / 2 + 0.02;
+          const c = side === 'z0' ? { x: u, z: r.z0 + inset } : side === 'z1' ? { x: u, z: r.z1 - inset } : side === 'x0' ? { x: r.x0 + inset, z: u } : { x: r.x1 - inset, z: u };
+          const hw = side[0] === 'z' ? fw / 2 : fd / 2, hd = side[0] === 'z' ? fd / 2 : fw / 2;
+          const box = { x0: c.x - hw, x1: c.x + hw, z0: c.z - hd, z1: c.z + hd };
+          if (doorNear(box.x0, box.z0, box.x1, box.z1, DOOR / 2 + 0.7)) continue;
+          if (fixtures.some(f => box.x0 < f.box.x1 + 0.3 && box.x1 > f.box.x0 - 0.3 && box.z0 < f.box.z1 + 0.3 && box.z1 > f.box.z0 - 0.3)) continue;
+          spot = { type, side, x: +c.x.toFixed(2), z: +c.z.toFixed(2), w: fw, d: fd, box };
+        }
+        if (spot) break;
+      }
+      if (spot) fixtures.push(spot);
+    }
+  }
+  for (const f of fixtures) {
+    level.props.push({ kind: 'fixture', type: f.type, side: f.side, x: f.x, z: f.z, w: f.w, d: f.d });
+    level.walls.push({ ...f.box, invisible: true, fixture: true }); // solid, but eyes see over it (lineBlocked skips invisible walls)
+  }
+  level.fixtures = fixtures.map(f => ({ type: f.type, ...f.box }));
+
   const placed = [];
   const totalArea = rooms.reduce((a, r) => a + area(r), 0);
   const open = rooms.filter(r => r.role !== 'hall' && r.role !== 'stairs'), openArea = open.reduce((a, r) => a + area(r), 0);
@@ -349,14 +396,15 @@ export function generateLevel(seed, opts = {}) {
     const nearDoor = (x0, z0, x1, z1, pad) => doorPts.some(p => p.x > x0 - pad && p.x < x1 + pad && p.z > z0 - pad && p.z < z1 + pad);
     const corners = [[r.x0 + 0.9, r.z0 + 0.9], [r.x1 - 0.9, r.z0 + 0.9], [r.x0 + 0.9, r.z1 - 0.9], [r.x1 - 0.9, r.z1 - 0.9]];
     const first = RI(0, 3);
-    const corner = r.role === 'hall' ? null : [0, 1, 2, 3].map(k => corners[(first + k) % 4]).find(([cx, cz]) => !nearDoor(cx, cz, cx, cz, DOOR / 2 + 1.0));
+    const corner = r.role === 'hall' ? null : [0, 1, 2, 3].map(k => corners[(first + k) % 4]).find(([cx, cz]) => !nearDoor(cx, cz, cx, cz, DOOR / 2 + 1.0) && !fixtures.some(f => cx > f.box.x0 - 0.7 && cx < f.box.x1 + 0.7 && cz > f.box.z0 - 0.7 && cz < f.box.z1 + 0.7));
     if (corner && !placed.some(([, px, pz]) => Math.hypot(px - corner[0], pz - corner[1]) < 1.5)) level.props.push({ kind: 'plant', x: corner[0], z: corner[1] });
     if (r.name === 'Kitchen' && Math.max(w, d) > 7) { // counter along the first wall with no doorway in its way
       const opts = [
         { x: (r.x0 + r.x1) / 2, z: r.z1 - 0.9, w: w * 0.6, d: 1.0 }, { x: (r.x0 + r.x1) / 2, z: r.z0 + 0.9, w: w * 0.6, d: 1.0 },
         { x: r.x0 + 0.9, z: (r.z0 + r.z1) / 2, w: 1.0, d: d * 0.6 }, { x: r.x1 - 0.9, z: (r.z0 + r.z1) / 2, w: 1.0, d: d * 0.6 },
       ].filter(c => Math.max(c.w, c.d) > 4);
-      const c = opts.find(c => !nearDoor(c.x - c.w / 2, c.z - c.d / 2, c.x + c.w / 2, c.z + c.d / 2, DOOR / 2 + 0.9));
+      const hitsFixture = (c) => fixtures.some(f => c.x - c.w / 2 < f.box.x1 + 0.2 && c.x + c.w / 2 > f.box.x0 - 0.2 && c.z - c.d / 2 < f.box.z1 + 0.2 && c.z + c.d / 2 > f.box.z0 - 0.2);
+      const c = opts.find(c => !nearDoor(c.x - c.w / 2, c.z - c.d / 2, c.x + c.w / 2, c.z + c.d / 2, DOOR / 2 + 0.9) && !hitsFixture(c));
       if (c) level.props.push({ kind: 'counter', ...c, color: 0xdddddd });
     }
     if (r.storey === 0) level.cat.push([(r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2]); // the cat stays downstairs

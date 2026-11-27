@@ -230,3 +230,41 @@ test('every inner doorway is listed for the renderer, and sits in a gap in the w
     }
   }
 });
+
+test('rooms get their built-ins (fridge, tub, washer…): against a wall, never in a doorway, never on top of cargo, and everything stays reachable', async () => {
+  const { generateLevel } = await import('../shared/level.js');
+  const { createNav } = await import('../server/nav.js');
+  const seen = new Set();
+  for (let seed = 1; seed <= 80; seed++) for (const opts of [{}, { floors: 2 }]) {
+    const L = generateLevel(seed * 6007, opts);
+    for (const f of L.fixtures) {
+      seen.add(f.type);
+      const room = L.rooms.find(r => (f.x0 + f.x1) / 2 > r.x0 && (f.x0 + f.x1) / 2 < r.x1 && (f.z0 + f.z1) / 2 > r.z0 && (f.z0 + f.z1) / 2 < r.z1);
+      assert.ok(room, `seed ${seed}: ${f.type} outside any room`);
+      const gap = Math.min(f.x0 - room.x0, room.x1 - f.x1, f.z0 - room.z0, room.z1 - f.z1);
+      assert.ok(gap < 0.3, `seed ${seed}: ${f.type} isn't against a wall`);
+      for (const d of L.doors) {
+        const x = d.vertical ? d.at : d.c, z = d.vertical ? d.c : d.at;
+        assert.ok(!(x > f.x0 - 1 && x < f.x1 + 1 && z > f.z0 - 1 && z < f.z1 + 1), `seed ${seed}: ${f.type} blocks a doorway`);
+      }
+      for (const [t, x, z] of L.items) assert.ok(!(x > f.x0 - 0.3 && x < f.x1 + 0.3 && z > f.z0 - 0.3 && z < f.z1 + 0.3), `seed ${seed}: ${t} spawned in the ${f.type}`);
+    }
+    const nav = createNav(L);
+    for (const [t, x, z] of L.items) assert.ok(nav.findPath({ x: 11, z: 0 }, { x, z }), `seed ${seed}: ${t} unreachable`);
+  }
+  for (const t of ['fridge', 'stove', 'tub', 'toilet', 'sink', 'washer', 'dryer', 'bookcase', 'sideboard', 'nightstand']) assert.ok(seen.has(t), `no ${t} in 160 houses`);
+});
+
+test('new cargo: armchair, TV (fragile) and bookshelf turn up in homes and fit the truck budget', async () => {
+  const { generateLevel } = await import('../shared/level.js');
+  const { ITEM_TYPES } = await import('../shared/logic.js');
+  assert.ok(ITEM_TYPES.tv.fragile && ITEM_TYPES.bookshelf.h === 2 && ITEM_TYPES.armchair.needsWrap);
+  const count = { armchair: 0, tv: 0, bookshelf: 0 };
+  for (let seed = 1; seed <= 100; seed++) {
+    const L = generateLevel(seed * 4421);
+    for (const [t] of L.items) if (t in count) count[t]++;
+    const cells = L.items.reduce((a, [t]) => a + cellsOf(ITEM_TYPES[t]), 0);
+    assert.ok(cells <= 56, `seed ${seed}: ${cells} cells`);
+  }
+  for (const [t, n] of Object.entries(count)) assert.ok(n >= 15, `${t} in only ${n} of 100 houses`);
+});
