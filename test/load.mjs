@@ -1,6 +1,6 @@
 // Load test: node test/load.mjs [baseUrl] [rooms] [seconds]
 // Opens N rooms × 4 real WebSocket players sending input at 20 Hz and checks snapshot delivery.
-import { Client } from 'colyseus.js';
+import { Client } from '@colyseus/sdk';
 const base = process.argv[2] || 'http://localhost:2567';
 const ROOMS = Number(process.argv[3]) || 10, SECS = Number(process.argv[4]) || 20;
 const wait = (ms) => new Promise(r => setTimeout(r, ms));

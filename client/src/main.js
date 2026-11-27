@@ -1,4 +1,4 @@
-import { Client } from 'colyseus.js';
+import { Client } from '@colyseus/sdk';
 import { GameScene } from './scene.js';
 import { Input, ACTIONS, keyName, PAD_LABEL } from './input.js';
 import { mergeItems } from '../../shared/snap.js';
@@ -231,19 +231,13 @@ function attach(r) {
   r.onMessage('snap', (s) => { mergeItems(s, itemCache); if (!s.itemsDelta) onSnap(s); });
   r.onMessage('evt', onEvent);
   r.onMessage('chat', onChat);
-  r.onLeave(async (code) => {
+  // a dropped socket (phones switching apps, a signal blip): the SDK reconnects on its own into the same mover
+  r.onDrop(() => { if (room !== r) return; reconnecting = true; toast('📡 Connection lost, reconnecting…', 'crunch'); });
+  r.onReconnect(() => { if (room !== r) return; reconnecting = false; toast('✅ Reconnected!'); try { sessionStorage.setItem('sm_rt', JSON.stringify({ roomId: r.roomId, token: r.reconnectionToken })); } catch {} });
+  r.onLeave((code) => { // gone for good: left on purpose, kicked, or reconnecting gave up
+    reconnecting = false;
     if (room !== r) return; // we left on purpose (Main menu, Quit): not a disconnect
     const intentional = code === 1000 || code === 4000;
-    if (!intentional && snap && (snap.phase === 'playing' || snap.phase === 'meeting' || snap.phase === 'countdown')) {
-      // phones drop the socket when you switch apps: try to slip back into the same mover
-      reconnecting = true;
-      toast('📡 Connection lost, reconnecting…', 'crunch');
-      for (let i = 0; i < 12; i++) {
-        try { const back = await client.reconnect(r.reconnectionToken); reconnecting = false; toast('✅ Reconnected!'); attach(back); return; }
-        catch { await new Promise(res => setTimeout(res, 2000)); }
-      }
-      reconnecting = false;
-    }
     room = null; snap = null; lastPhase = null;
     try { sessionStorage.removeItem('sm_rt'); } catch {}
     history.replaceState(null, '', location.pathname);

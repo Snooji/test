@@ -1,5 +1,5 @@
 // Integration smoke test: node test/smoke.mjs [baseUrl]
-import { Client } from 'colyseus.js';
+import { Client } from '@colyseus/sdk';
 
 const base = process.argv[2] || 'http://localhost:2567';
 const wait = (ms) => new Promise(r => setTimeout(r, ms));

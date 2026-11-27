@@ -322,3 +322,12 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
 - Passwords: none exist (email gate + signed tokens); admin key compared in constant time
 - Exposed files: only dist/ is served (dotfiles ignored); og/icon render pages, source, data, .env, package.json all 404; no source maps
 - Tests: test/security.test.js, routes.test.js updated (sessions, lockout, CSRF, account tokens, header credentials)
+
+## Colyseus 0.18 (2026-11-27)
+- Server @colyseus/core 0.18.30 + ws-transport 0.18.5 + schema 5; client colyseus.js → @colyseus/sdk 0.18.10. npm audit: 0 vulnerabilities
+- 0.18 sends unexpected disconnects to onDrop (onLeave now gets a close code, not "consented"): the 30 s hold moved to onDrop, the
+  welcome back to onReconnect, onLeave only removes. Without this, dropped phones would never have been held
+- Client: the SDK reconnects on its own (same room object, onDrop → onReconnect; onLeave only once it gives up), replacing the hand-made
+  retry loop. Page-reload rejoin via the saved token kept. Startup banner off (greet: false)
+- Tests: e2e-reconnect.mjs (server cuts the socket like lost signal → same mover back, round continues, can move), unit test for
+  onDrop/onReconnect/onLeave. Load test: 10 rooms × 4 players, 20 snaps/s, p99 gap 51 ms (unchanged)

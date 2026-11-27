@@ -163,6 +163,7 @@ export class MoveRoom extends Room {
         x.task = y.task = null; x.x = it.x - 1.2; x.z = it.z; y.x = it.x + 1.2; y.z = it.z; p.x = it.x + 1.4; p.z = it.z + 0.6;
         this.startDuel(p, it);
       });
+      this.onMessage('debug_drop', (c) => { const ws = c.ref; (ws?.terminate || ws?.close)?.call(ws); }); // cut the socket, no goodbye (= a phone losing signal)
       this.onMessage('debug_long_meeting', () => { if (this.meeting) this.meeting.timeLeft = 120; }); // slow test browsers
       this.onMessage('debug_break', (c) => {
         const it = [...this.items.values()].find(i => i.state === 'floor' && i.type === 'fragile');
@@ -301,23 +302,30 @@ export class MoveRoom extends Room {
     this.bots.delete(id);
   }
 
-  async onLeave(client, consented) {
+  /** Dropped without saying goodbye (phones drop the socket when you switch apps): mid-round, hold their mover for 30 s. */
+  onDrop(client) {
+    const p = this.players.get(client.sessionId);
+    if (!p || !this.inRound()) return; // not in a round: nothing to hold, onLeave tidies up
+    p.in.mx = 0; p.in.mz = 0; p.in.hold = false; p.away = true;
+    this.releaseCarry(p); // never leave a crewmate holding the other end
+    this.system(`📡 ${p.name} lost connection. Holding their spot for 30 s…`);
+    const wait = this.allowReconnection(client, 30); // back in time → onReconnect; not → onLeave
+    wait?.catch?.(() => {});
+  }
+
+  onReconnect(client) {
+    const p = this.players.get(client.sessionId);
+    if (!p) return;
+    p.away = false; p.resync = true; // the next snapshot is a full one
+    this.sendRole(p);
+    this.system(`✅ ${p.name} is back!`);
+  }
+
+  /** Gone for good: left on purpose, dropped outside a round, or didn't make it back in time. */
+  async onLeave(client) {
     this.msgBudget?.delete(client.sessionId);
     const p = this.players.get(client.sessionId);
     if (!p) return;
-    if (!consented && this.inRound() && typeof this.allowReconnection === 'function') {
-      // phones drop connections when switching apps: hold their mover for 30 s
-      p.in.mx = 0; p.in.mz = 0; p.in.hold = false; p.away = true;
-      this.releaseCarry(p); // never leave a crewmate holding the other end
-      this.system(`📡 ${p.name} lost connection. Holding their spot for 30 s…`);
-      try {
-        await this.allowReconnection(client, 30);
-        p.away = false; p.resync = true;
-        this.sendRole(p);
-        this.system(`✅ ${p.name} is back!`);
-        return;
-      } catch { /* timed out */ }
-    }
     this.releaseCarry(p);
     this.players.delete(p.id);
     if (this.hostId === p.id) this.hostId = [...this.players.values()].find(o => !o.bot)?.id || null;

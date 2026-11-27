@@ -59,7 +59,7 @@ app.use((err, req, res, _next) => {
 });
 
 const httpServer = http.createServer(app);
-const gameServer = new Server({ transport: new WebSocketTransport({ server: httpServer }) });
+const gameServer = new Server({ greet: false, transport: new WebSocketTransport({ server: httpServer }) });
 gameServer.define('move', MoveRoom).filterBy(['quick']);
 gameServer.define('demo', DemoRoom);
 

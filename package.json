@@ -15,10 +15,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@colyseus/core": "^0.16.26",
-    "@colyseus/schema": "^3.0.76",
-    "@colyseus/ws-transport": "^0.16.5",
-    "colyseus.js": "^0.16.22",
+    "@colyseus/core": "^0.18.30",
+    "@colyseus/schema": "^5.0.52",
+    "@colyseus/sdk": "^0.18.10",
+    "@colyseus/ws-transport": "^0.18.5",
     "express": "^4.22.3",
     "pg": "^8.23.1",
     "three": "^0.187.0"

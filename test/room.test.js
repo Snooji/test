@@ -919,3 +919,27 @@ test('in the truck, Rotate turns a piece on the same side and Flip tips it onto 
   assert.notEqual(h(), h0, 'flip tips it onto another side');
   assert.ok(orientations('couch').length > 2);
 });
+
+test('dropped mid-round (Colyseus onDrop): the mover is held for 30 s, released from any lift, and back on reconnect', async () => {
+  const room = new MoveRoom(), handlers = {}, said = [];
+  room.onMessage = (t, fn) => { handlers[t] = fn; }; room.setSimulationInterval = () => {}; room.clients = [];
+  room.broadcast = (type, m) => { if (type === 'chat') said.push(m.text); };
+  room.onCreate({ dolly: false });
+  for (const id of ['A', 'B']) { const c = { sessionId: id, send: () => {} }; room.clients.push(c); room.onJoin(c, {}, { name: id === 'A' ? 'Ada' : 'Bo', email: id + '@x.io' }); }
+  room.startRound(); room.phase = 'playing';
+  let held = 0; room.allowReconnection = (client, secs) => { held = secs; return Promise.resolve(client); };
+  const a = room.players.get('A');
+  room.onDrop({ sessionId: 'A' });
+  assert.equal(held, 30, 'reconnection allowed for 30 s');
+  assert.ok(a.away && room.players.has('A'), 'the mover stays, marked away');
+  assert.ok(said.some(t => /Ada lost connection/.test(t)));
+  room.onReconnect({ sessionId: 'A', send: () => {} });
+  assert.ok(!a.away && a.resync, 'back, with a full snapshot next');
+  assert.ok(said.some(t => /Ada is back/.test(t)));
+  // outside a round a drop holds nothing: onLeave (which Colyseus calls next) removes them
+  room.phase = 'lobby'; held = 0;
+  room.onDrop({ sessionId: 'B' });
+  assert.equal(held, 0);
+  await room.onLeave({ sessionId: 'B' }, 1006);
+  assert.ok(!room.players.has('B'));
+});
