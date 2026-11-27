@@ -421,9 +421,10 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
     v.box(0, 0.3, 0.05, 0.9, 0.34, 0.8, W(c)).box(0, 0.72, -0.32, 0.9, 0.6, 0.22, W(c));
     for (const sx of [-1, 1]) v.box(sx * 0.4, 0.52, 0.02, 0.14, 0.38, 0.78, W(shade(c, 0.85)));
     if (!wrapped) { v.box(0, 0.5, 0.08, 0.62, 0.1, 0.6, 0xe9a46b); for (const sx of [-1, 1]) for (const sz of [-1, 1]) v.box(sx * 0.38, 0.06, sz * 0.32, 0.08, 0.12, 0.08, 0x3a2a1f); }
-  } else if (type === 'tv') { // flat screen on its little stand
-    v.box(0, 0.06, 0, 0.5, 0.06, 0.3, W(0x2b2b33)).box(0, 0.2, 0, 0.1, 0.22, 0.08, W(0x2b2b33)).box(0, 0.62, 0, 0.96, 0.62, 0.08, W(0x1d1b19));
-    if (!wrapped) glow = new Vox().box(0, 0.62, 0.05, 0.86, 0.52, 0.02, 0x3f7fa8);
+  } else if (type === 'tv') { // a big flat screen: wide, tall, a few centimetres thin, on a slim two-foot stand
+    v.box(-0.6, 0.03, 0, 0.36, 0.06, 0.34, W(0x2b2b33)).box(0.6, 0.03, 0, 0.36, 0.06, 0.34, W(0x2b2b33)); // feet
+    v.box(0, 0.62, 0, 1.86, 1.06, 0.1, W(0x1d1b19));                                                        // panel + bezel
+    if (!wrapped) glow = new Vox().box(0, 0.63, 0.05, 1.74, 0.94, 0.02, 0x3f7fa8);                           // the screen
   } else if (type === 'bookshelf') { // two-cell tall shelving with rows of coloured books
     const wood = t.color;
     v.box(0, 0.8, -0.2, 0.9, 1.6, 0.06, W(wood));

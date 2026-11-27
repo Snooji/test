@@ -375,3 +375,15 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
 - AI: route progress tracking — no metre gained on the route in 6 s → give that goal up and step aside (an AI could dither
   forever in a doorway at a three-way hall junction). Fixed a crash this exposed (dash code read a cleared route)
 - AI loaded: 2 floors 86%, 3 floors 83%, 4 floors 83%
+
+## Crew size, TV, dolly stairs fix, Home Screen layout (2026-11-27)
+- Crew size 2-6, the crew chief's pick in the lobby (solo fills with AI, extra AI step out, extra humans watch, joins past
+  crew + 2 refused); two more yard spawns and a second row of ramp spots; AI movers 5-6 use the full character roster
+- TV is a flat screen: two cells wide, one deep, one tall, modelled wide and thin on a slim stand
+- Boxes on the two-wheel dolly kept their old position on the server, so on the stairs they showed up on the wrong floor
+  (left behind / hanging in the air). Their positions now follow the dolly every tick, including the floor change; the client
+  shows them with the dolly
+- Home Screen (iPhone) layout: the canvas is sized by CSS to fill the screen and the renderer matches it (innerHeight can be
+  short in a standalone app: black bar at the bottom); safe-area insets are CSS variables; the Menu button was pinned 6 px from
+  the top (under the status bar) and the crew chips overlapped the top bar. Phone HUD now: pills left, Menu right, minimap and
+  a column of crew chips down the right, all below the notch (checked with a simulated notch)

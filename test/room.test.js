@@ -943,3 +943,35 @@ test('dropped mid-round (Colyseus onDrop): the mover is held for 30 s, released 
   await room.onLeave({ sessionId: 'B' }, 1006);
   assert.ok(!room.players.has('B'));
 });
+
+test('crew size: the crew chief picks 2-6 movers; solo fills with AI, extra humans watch, a full room turns joins away', () => {
+  const { room, join, send } = makeRoom({});
+  join('A', 'Ada');
+  room.hostId = 'A'; room.solo = true;
+  send('A', 'crew', { size: 6 });
+  assert.equal(room.crewSize, 6);
+  assert.equal(room.movers().length, 6, 'solo: five AI movers join Ada');
+  assert.equal(new Set([...room.players.values()].map(p => p.char)).size, 6, 'six different characters');
+  send('A', 'crew', { size: 3 });
+  assert.equal(room.movers().length, 3, 'AI step out when the crew shrinks');
+  send('A', 'crew', { size: 9 }); assert.equal(room.crewSize, 3, 'ignores nonsense');
+  room.startRound(); while (room.phase !== 'playing') room.tick(0.05);
+  const slots = new Set();
+  for (const p of room.movers()) { p.x = 11; p.z = 0; room.takeRampSlot(p); p.loadMode = true; slots.add(p.rampSlot); }
+  assert.equal(slots.size, 3, 'each mover gets their own spot on the ramp');
+});
+
+test('crew size 6: six humans all move, a 7th and 8th watch, a 9th is turned away', () => {
+  const { room, join, send } = makeRoom({});
+  for (const id of 'ABCDEF') join(id, 'P' + id);
+  room.hostId = 'A';
+  send('A', 'crew', { size: 6 });
+  for (const id of 'GH') join(id, 'P' + id);
+  assert.equal(room.movers().length, 6);
+  assert.equal([...room.players.values()].filter(p => p.spectator).length, 2);
+  assert.throws(() => room.onAuth({}, { email: 'x', token: 'y' }, { ip: '203.0.113.50', headers: {} }), /full/);
+  room.startRound();
+  const slots = [];
+  for (const p of room.movers()) { p.x = 11; p.z = 0; room.takeRampSlot(p); p.loadMode = true; slots.push(p.rampSlot); }
+  assert.deepEqual(slots.sort(), [0, 1, 2, 3, 4, 5], 'six spots on the ramp');
+});

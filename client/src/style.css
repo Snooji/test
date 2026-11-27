@@ -7,9 +7,11 @@
   --display: 'Bungee', 'Arial Black', Impact, sans-serif;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* the safe area (notch, home bar) as variables: used everywhere below, and settable in tests to mimic an iPhone */
+:root { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px); }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); overscroll-behavior: none; }
 body { touch-action: none; user-select: none; -webkit-user-select: none; }
-#app canvas { display: block; position: fixed; inset: 0; }
+#app canvas { display: block; position: fixed; inset: 0; width: 100% !important; height: 100% !important; } /* always the whole screen; the renderer matches it */
 .hidden { display: none !important; }
 button { font: inherit; color: inherit; cursor: pointer; border: 0; }
 input { font: inherit; user-select: text; -webkit-user-select: text; }
@@ -64,7 +66,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 
 /* HUD */
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
-.topbar { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 0; right: 0; display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 0 8px; }
+.topbar { position: absolute; top: max(10px, var(--sat)); left: 0; right: 0; display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 0 8px; }
 .pill { background: rgba(23,19,16,.75); border: 2px solid rgba(214,196,170,.45); border-radius: 999px; padding: 6px 12px; font-weight: 800; font-size: 15px; }
 .pill.danger { background: var(--danger); border-color: #fff; pointer-events: auto; animation: glow 1s infinite; }
 @keyframes glow { 50% { box-shadow: 0 0 22px 6px rgba(255,68,102,.8) } }
@@ -87,7 +89,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 #joyzone { position: fixed; left: 0; top: 0; bottom: 0; width: 55%; z-index: 11; touch-action: none; }
 #joybase { display: none; position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.25); }
 #joyknob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,.5); transform: translate(-50%,-50%); }
-#controls { position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 12; display: grid; grid-template-columns: auto auto; gap: 10px; align-items: end; }
+#controls { position: fixed; right: max(12px, var(--sar)); bottom: max(16px, var(--sab)); z-index: 12; display: grid; grid-template-columns: auto auto; gap: 10px; align-items: end; }
 #controls button { border-radius: 50%; display: grid; place-items: center; font-size: 24px; background: rgba(58,48,40,.75); border: 3px solid rgba(255,255,255,.4); touch-action: none; line-height: 1; }
 #controls button span { font-size: 9px; font-weight: 800; letter-spacing: .5px; margin-top: -6px; }
 #controls button.down { transform: scale(.92); background: rgba(111,212,168,.8); }
@@ -145,7 +147,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 #countdown small { display: block; font-size: 22px; color: var(--ink); text-align: center; }
 @keyframes pop { from { transform: scale(1.6); opacity: 0 } }
 #btn-help { width: 60px; height: 60px; background: rgba(192,57,43,.92) !important; grid-column: 1 / 3; justify-self: end; }
-#dpad { position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 13; display: grid; grid-template-columns: repeat(3, 58px); grid-template-rows: repeat(3, 58px) auto; gap: 4px; }
+#dpad { position: fixed; left: max(16px, var(--sal)); bottom: max(24px, var(--sab)); z-index: 13; display: grid; grid-template-columns: repeat(3, 58px); grid-template-rows: repeat(3, 58px) auto; gap: 4px; }
 #dpad button { background: rgba(58,48,40,.8); border: 2px solid rgba(255,255,255,.4); border-radius: 14px; font-size: 22px; touch-action: none; }
 #dpad button.down { background: rgba(111,212,168,.85); }
 #dpad [data-dir=up] { grid-column: 2; grid-row: 1; } #dpad [data-dir=left] { grid-column: 1; grid-row: 2; }
@@ -261,7 +263,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 /* =================== main menu over the live demo game =================== */
 .menu-screen { display: block; place-items: start; justify-items: start; padding: 0; overflow-y: auto; touch-action: pan-y;
   background: linear-gradient(90deg, rgba(23,19,16,.92) 0%, rgba(23,19,16,.72) 30%, rgba(23,19,16,.15) 60%, rgba(23,19,16,0) 75%); }
-.menu-shell { position: relative; width: min(440px, 100%); min-height: 100%; padding: max(28px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 64px max(clamp(24px, 4vw, 56px), env(safe-area-inset-left)); display: grid; align-content: start; gap: 14px; }
+.menu-shell { position: relative; width: min(440px, 100%); min-height: 100%; padding: max(28px, var(--sat)) max(20px, var(--sar)) 64px max(clamp(24px, 4vw, 56px), var(--sal)); display: grid; align-content: start; gap: 14px; }
 .brand .wordmark { font-family: var(--display); font-size: clamp(38px, 6vw, 54px); line-height: .92; letter-spacing: .01em; color: var(--ink); text-shadow: 0 4px 0 rgba(0,0,0,.35); }
 .brand .wordmark span { display: block; color: var(--orange); }
 .brand .byline { margin-top: 8px; font-size: 13px; color: var(--mute); letter-spacing: .02em; }
@@ -313,7 +315,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 .menu-links .link { margin: 0; }
 
 /* promo: a moving-box shipping label */
-.promo { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: 46px; width: min(330px, calc(100vw - 40px)); z-index: 21;
+.promo { position: fixed; right: max(20px, var(--sar)); bottom: 46px; width: min(330px, calc(100vw - 40px)); z-index: 21;
   background: #f3e3c2; color: #2a1d0e; border-radius: 6px; padding: 16px 16px 12px; box-shadow: 0 14px 40px rgba(0,0,0,.45);
   background-image: linear-gradient(90deg, transparent 0 calc(50% - 22px), rgba(214,190,140,.9) calc(50% - 22px) calc(50% + 22px), transparent calc(50% + 22px)); background-size: 100% 18px; background-repeat: no-repeat; }
 .promo::after { content: ""; position: absolute; inset: 7px; border: 2px dashed rgba(42,29,14,.25); border-radius: 4px; pointer-events: none; }
@@ -325,7 +327,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 .book-cta:hover { background: #2a2260; }
 .book-cta:active { transform: translateY(2px); box-shadow: 0 2px 0 #171310; }
 .promo-area { display: block; text-align: center; margin-top: 7px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6b5432; position: relative; z-index: 1; }
-.powered { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; padding: 10px max(16px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom)); font-size: 12px; color: var(--mute); text-align: center; background: linear-gradient(0deg, rgba(23,19,16,.85), rgba(23,19,16,0)); pointer-events: none; }
+.powered { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; padding: 10px max(16px, var(--sal)) max(10px, var(--sab)); font-size: 12px; color: var(--mute); text-align: center; background: linear-gradient(0deg, rgba(23,19,16,.85), rgba(23,19,16,0)); pointer-events: none; }
 .powered b { color: var(--ink); }
 .res-promo .promo { position: relative; right: auto; bottom: auto; margin: 22px auto 4px; width: min(360px, 100%); }
 
@@ -333,12 +335,12 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
   .menu-screen { background: linear-gradient(180deg, rgba(23,19,16,.1) 0%, rgba(23,19,16,.75) 22%, rgba(23,19,16,.92) 100%); }
   .menu-shell { width: 100%; padding-top: 34vh; padding-bottom: 24px; }
   .menu-screen .promo { position: relative; right: auto; bottom: auto; margin: 6px auto 16px; width: min(420px, calc(100% - 40px)); }
-  .menu-screen .powered { position: relative; background: none; padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  .menu-screen .powered { position: relative; background: none; padding-bottom: max(18px, var(--sab)); }
   .menu-shell { padding-top: 26vh; }
 }
 @media (prefers-reduced-motion: reduce) { .mi::before, .mi .txt, .mi .chev { transition: none; } }
 @media (min-width: 1000px) {
-  .res-promo .promo { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: 24px; margin: 0; width: 320px; }
+  .res-promo .promo { position: fixed; right: max(20px, var(--sar)); bottom: 24px; margin: 0; width: 320px; }
 }
 @media (pointer: coarse) {
   .pill.icon { padding: 4px 7px; }
@@ -375,7 +377,7 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: var(--mute); text-transform: up
 .tally .ln { display: flex; justify-content: space-between; } .tally .ln.neg span:last-child { color: var(--danger); } .tally .ln.tot { font-weight: 800; border-top: 1px solid rgba(255,255,255,.15); margin-top: 4px; padding-top: 4px; }
 .pod .tl { font-size: 10.5px; color: var(--mute); }
 
-.voxel-tag { position: fixed; right: 12px; top: calc(10px + env(safe-area-inset-top)); z-index: 60; font: 600 11px system-ui; color: #e9dcc6; background: rgba(33,27,22,.72); border: 1px solid rgba(214,196,170,.35); border-radius: 999px; padding: 4px 10px; text-decoration: none; pointer-events: auto; }
+.voxel-tag { position: fixed; right: 12px; top: calc(10px + var(--sat)); z-index: 60; font: 600 11px system-ui; color: #e9dcc6; background: rgba(33,27,22,.72); border: 1px solid rgba(214,196,170,.35); border-radius: 999px; padding: 4px 10px; text-decoration: none; pointer-events: auto; }
 body:has(#hud:not(.hidden)) .voxel-tag { display: none; } /* menu only: never over the game HUD */
 
 /* voxel crew carousel */
@@ -433,7 +435,7 @@ html, body { -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
 
 /* ---------- in-game menu (warm charcoal / off-white, per the design rules) ---------- */
 :root { --gm-bg: #1f1a16; --gm-bg2: #2b241e; --gm-ink: #f4ead8; --gm-dim: #c9bba5; --gm-line: rgba(244,234,216,.16); --gm-accent: #ff8a3d; --gm-gold: #ffd166; --gm-red: #e5534b; }
-.gm-open { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); z-index: 30; pointer-events: auto; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px 0 12px;
+.gm-open { position: fixed; top: calc(10px + var(--sat)); right: max(10px, var(--sar)); z-index: 30; pointer-events: auto; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px 0 12px;
   background: rgba(31,26,22,.88); color: var(--gm-ink); border: 1px solid var(--gm-line); border-radius: 10px; font: 700 15px Rubik, system-ui, sans-serif; cursor: pointer; }
 .gm-open:hover, .gm-open:focus-visible { border-color: var(--gm-accent); outline: none; }
 .gm-open .burger { display: grid; gap: 4px; width: 18px; }
@@ -462,8 +464,8 @@ html, body { -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
 .gm-confirm-row { display: flex; gap: 8px; } .gm-confirm-row .gm-btn { flex: 1; }
 @media (max-width: 600px) {
   .gm { align-items: flex-end; padding: 0; }
-  .gm-sheet { width: 100%; border-radius: 16px 16px 0 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
-  .gm-open { top: 6px; right: 6px; min-height: 40px; padding: 0 10px; font-size: 13px; }
+  .gm-sheet { width: 100%; border-radius: 16px 16px 0 0; padding-bottom: max(16px, var(--sab)); }
+  .gm-open { top: max(6px, var(--sat)); right: max(6px, var(--sar)); min-height: 40px; padding: 0 10px; font-size: 13px; }
 }
 @media (prefers-reduced-motion: no-preference) { .gm-sheet { animation: gm-in .14s ease-out; } @keyframes gm-in { from { opacity: 0; transform: translateY(-6px); } } }
 /* keep the top bar clear of the Menu button */
@@ -491,7 +493,7 @@ html, body { -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
 #joyzone { left: 0; top: auto; bottom: 0; width: 50vw; height: 62vh; background: none; }
 #joybase { width: 120px; height: 120px; margin: -60px 0 0 -60px; background: rgba(244,234,216,.06); border: 1.5px solid rgba(244,234,216,.22); }
 #joyknob { width: 50px; height: 50px; background: rgba(244,234,216,.38); box-shadow: 0 2px 8px rgba(0,0,0,.3); }
-#controls { right: max(14px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: grid; gap: 12px;
+#controls { right: max(14px, var(--sar)); bottom: max(18px, var(--sab)); display: grid; gap: 12px;
   grid-template-columns: auto auto; grid-template-areas: "call call" "help help" "dash act"; align-items: end; justify-items: end; }
 #controls button { display: grid; place-content: center; text-align: center; font-family: Rubik, system-ui, sans-serif; color: var(--ink);
   background: rgba(31,26,22,.82); border: 1px solid rgba(244,234,216,.22); border-radius: 999px; touch-action: none; line-height: 1.1; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
@@ -504,14 +506,14 @@ html, body { -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
 #controls #btn-dash { grid-area: dash; width: 66px; height: 66px; margin-bottom: 4px; }
 #controls #btn-help { grid-area: help; width: auto; height: 44px; padding: 0 16px; background: rgba(229,83,75,.9); border-color: rgba(255,200,195,.5); }
 #controls #btn-callout { grid-area: call; width: auto; height: 44px; padding: 0 16px; background: rgba(31,26,22,.9); border-color: var(--danger); }
-#swipe-hint { position: fixed; z-index: 12; left: 50%; bottom: max(130px, calc(env(safe-area-inset-bottom) + 120px)); transform: translateX(-50%);
+#swipe-hint { position: fixed; z-index: 12; left: 50%; bottom: max(130px, calc(var(--sab) + 120px)); transform: translateX(-50%);
   padding: 6px 12px; border-radius: 999px; background: rgba(23,19,16,.8); color: var(--dim); font: 500 13px Rubik, system-ui, sans-serif; pointer-events: none; }
 @media (pointer: fine) { #swipe-hint { display: none !important; } }
 @media (max-width: 380px) { #controls #btn-action { width: 84px; height: 84px; } #controls #btn-dash { width: 58px; height: 58px; } }
 /* phones: the hint sits under the top bar, notifications below it (no pile-up over the pills) */
 @media (pointer: coarse) {
-  #prompt { top: calc(112px + env(safe-area-inset-top)); bottom: auto; border-width: 1px; border-color: rgba(111,212,168,.55); font-weight: 600; }
-  #toasts { top: calc(168px + env(safe-area-inset-top)); }
+  #prompt { top: calc(112px + var(--sat)); bottom: auto; border-width: 1px; border-color: rgba(111,212,168,.55); font-weight: 600; }
+  #toasts { top: calc(168px + var(--sat)); }
   body.aiming #toasts { display: none; } /* aiming in the truck: keep the view clear */
 }
 
@@ -589,11 +591,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media (max-width: 560px) { .lb-foot { position: static; box-shadow: none; } }
 /* a long results card (daily leaderboard, load report) scrolls; the buttons always stay in reach */
 .results-card { max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; }
-.results-card .res-buttons { position: sticky; bottom: 0; z-index: 2; margin: 10px -20px 0; padding: 12px 20px max(14px, env(safe-area-inset-bottom)); background: #1f1a16; border-top: 1px solid var(--line); }
+.results-card .res-buttons { position: sticky; bottom: 0; z-index: 2; margin: 10px -20px 0; padding: 12px 20px max(14px, var(--sab)); background: #1f1a16; border-top: 1px solid var(--line); }
 .results-card .rank-list li { min-height: 48px; }
 
 /* truck on phones: D-pad bottom left (warm), Rotate / Flip next to the big button */
-#dpad { left: max(16px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); grid-template-rows: repeat(3, 58px); }
+#dpad { left: max(16px, var(--sal)); bottom: max(24px, var(--sab)); grid-template-rows: repeat(3, 58px); }
 #dpad button { background: rgba(31,26,22,.85); border: 1px solid rgba(244,234,216,.25); color: var(--ink); border-radius: 12px; }
 #dpad button.down { background: rgba(58,48,40,.95); border-color: var(--gold); }
 #controls { grid-template-areas: "call call" "help help" "rot flip" "dash act"; }
@@ -671,3 +673,18 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .gm-btn kbd { opacity: 1; } .gm-primary kbd { border-color: rgba(31,26,22,.6); color: #1f1a16; }
 
 .gm-sub { display: block; font-size: 12px; color: var(--gm-dim); }
+
+/* phones, and the Home Screen app in particular: the HUD is placed from the safe area, so nothing hides under the notch or the
+   Menu button. Top bar left, Menu right; the minimap and a column of crew chips (up to six) down the right edge. */
+@media (pointer: coarse) {
+  .topbar { top: max(10px, var(--sat)); }
+  #minimap { top: calc(var(--sat) + 62px); right: 8px; left: auto; bottom: auto; }
+  #scoreboard { flex-direction: column; align-items: flex-end; top: calc(var(--sat) + 136px); right: 8px; left: auto; }
+  #toasts { top: calc(var(--sat) + 96px); }
+}
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 520px) {
+  .topbar { top: max(4px, var(--sat)); }
+  #minimap { top: calc(var(--sat) + 44px); }
+  #scoreboard { top: calc(var(--sat) + 112px); }
+  #toasts { top: calc(var(--sat) + 40px); }
+}

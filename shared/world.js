@@ -69,7 +69,7 @@ export const PROPS = [
 
 // spread out in the yard in front of the ramp so movers never start stacked
 export const PLAYER_SPAWNS = [
-  { x: 8.2, z: -3.3 }, { x: 8.2, z: -1.1 }, { x: 8.2, z: 1.1 }, { x: 8.2, z: 3.3 },
+  { x: 8.2, z: -3.3 }, { x: 8.2, z: -1.1 }, { x: 8.2, z: 1.1 }, { x: 8.2, z: 3.3 }, { x: 6.9, z: -2.2 }, { x: 6.9, z: 2.2 }, // movers 5-6 a step behind
 ];
 
 // [type, x, z]

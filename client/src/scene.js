@@ -108,6 +108,9 @@ export class GameScene {
     this.scene.add(this.objective);
 
     addEventListener('resize', () => this.resize());
+    addEventListener('orientationchange', () => setTimeout(() => this.resize(), 250));
+    visualViewport?.addEventListener('resize', () => this.resize());
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.resize()).observe(this.renderer.domElement);
     this.resize();
   }
 
@@ -133,8 +136,10 @@ export class GameScene {
   }
 
   resize() {
-    const w = innerWidth, h = innerHeight;
-    this.renderer.setSize(w, h);
+    // the canvas is sized by CSS to fill the screen; match it (a Home Screen app on iPhone can report a short innerHeight at launch)
+    const c = this.renderer.domElement, w = c.clientWidth || innerWidth, h = c.clientHeight || innerHeight;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.fov = w < h ? 58 : 42; // portrait phones see more
     this.camera.updateProjectionMatrix();
@@ -395,7 +400,8 @@ export class GameScene {
 
   /** Screen point → truck grid cell (for drag-to-aim). null when not over the truck. */
   pickGrid(clientX, clientY) {
-    const v = new THREE.Vector2((clientX / innerWidth) * 2 - 1, -(clientY / innerHeight) * 2 + 1);
+    const rc = this.renderer.domElement.getBoundingClientRect();
+    const v = new THREE.Vector2(((clientX - rc.left) / rc.width) * 2 - 1, -((clientY - rc.top) / rc.height) * 2 + 1);
     this.raycaster.setFromCamera(v, this.camera);
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(TRUCK.floorY + CELL));
     const hit = new THREE.Vector3();
@@ -484,7 +490,7 @@ export class GameScene {
           o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
           o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
           o.position.y = damp(o.position.y, 0.36 + (dv.data?.y || 0), 14, dt);
-          o.visible = seen(it);
+          o.visible = dv.data ? seen(dv.data) : seen(it);
           o.rotation.y = dv.obj.rotation.y;
         }
         continue;
@@ -496,7 +502,7 @@ export class GameScene {
           o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
           o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
           o.position.y = damp(o.position.y, 0.14 + idx * 0.82 + (d.y || 0), 14, dt);
-          o.visible = seen(it);
+          o.visible = seen(d); // shown with the dolly it rides (its floor), never left behind on the stairs
           o.rotation.y = dv.obj.rotation.y;
         }
         continue;

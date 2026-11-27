@@ -26,19 +26,20 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
 const TICK = 50;          // ms (20 Hz)
-const MAX_MOVERS = 4;
+const MAX_CREW = 6, DEFAULT_CREW = 4; // movers per round: the crew chief picks 2-6 in the lobby (this.crewSize)
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 export class MoveRoom extends Room {
   static store = null; // set by server/index.js; null in unit tests
-  maxClients = 6; // 4 movers + 2 spectators
+  maxClients = MAX_CREW + 2; // up to 6 movers + 2 watching (joins past crewSize + 2 are turned away in onAuth)
 
   onAuth(client, options, context) {
     // joins (and room creation) per visitor: 40 a minute is plenty for a real player, stops scripted floods
     const ip = (isProd() && context?.headers?.['cf-connecting-ip']) || context?.ip || 'unknown';
     if (!joinLimit.hit(String(ip))) throw new ServerError(429, 'Too many joins. Wait a minute and try again.');
+    if (this.players && this.players.size >= (this.crewSize || DEFAULT_CREW) + 2) throw new ServerError(409, 'That crew is full.');
     const email = cleanEmail(options?.email);
     if (!verifyToken(email, options?.token)) throw new ServerError(401, 'Sign in at the gate first.');
     return { email, name: cleanName(options?.name) || 'Mover' };
@@ -50,6 +51,7 @@ export class MoveRoom extends Room {
     const on = this.onMessage.bind(this);
     this.onMessage = (type, fn) => on(type, (c, m) => (this.flooding(c) ? undefined : fn(c, m)));
     this.phase = 'lobby';
+    this.crewSize = Math.max(2, Math.min(MAX_CREW, Math.round(Number(options.crew) || DEFAULT_CREW)));
     this.mode = '3min';
     this.game = options.game === 'sabotage' ? 'sabotage' : 'classic';
     this.difficulty = DIFFICULTY[options.difficulty] ? options.difficulty : 'normal';
@@ -220,6 +222,13 @@ export class MoveRoom extends Room {
       for (const b of this.bots.values()) b.setDifficulty(m.level);
     });
     this.onMessage('addBot', (c) => { if (hostInLobby(c)) this.addBot(); });
+    // crew size (2-6 movers): the crew chief's call. Solo games fill the crew with AI movers; with friends, extra AI step out.
+    this.onMessage('crew', (c, m) => {
+      const n = Math.round(Number(m?.size));
+      if (!hostInLobby(c) || !(n >= 2 && n <= MAX_CREW)) return;
+      this.crewSize = n;
+      this.fitCrew();
+    });
     this.onMessage('game', (c, m) => {
       if (!hostInLobby(c) || !['classic', 'sabotage'].includes(m?.game)) return;
       const wasExact = this.isExact();
@@ -238,7 +247,7 @@ export class MoveRoom extends Room {
   onJoin(client, options, auth) {
     this.forceFull = true; // the newcomer needs every item
     // a friend joining a full lobby takes a bot's seat
-    if (this.phase === 'lobby' && this.movers().length >= MAX_MOVERS && this.bots.size) this.removeBot([...this.bots.keys()].pop());
+    if (this.phase === 'lobby' && this.movers().length >= this.crewSize && this.bots.size) this.removeBot([...this.bots.keys()].pop());
     const used = new Set([...this.players.values()].map(p => p.char));
     const asked = ALL_CHAR_IDS.includes(options?.char) && !used.has(options.char) ? options.char : null;
     const want = asked && charUnlocked(asked, null) ? asked : CHARS.find(c => !used.has(c)) || 'nova';
@@ -246,7 +255,7 @@ export class MoveRoom extends Room {
     const p = {
       id: client.sessionId, name: auth.name, email: auth.email, char: want,
       x: 0, z: 0, face: 0, score: 0, strikes: 0, out: false,
-      spectator: movers >= MAX_MOVERS || this.inRound(),
+      spectator: movers >= this.crewSize || this.inRound(),
       carry: null, loadMode: false, cursor: { gx: 1, gz: 0, rot: 0 }, cursorCd: 0,
       dashT: 0, dashCd: 0, loaded: 0, task: null,
       in: { mx: 0, mz: 0, hold: false, tapN: 0, dashN: 0, rotN: 0, flipN: 0 },
@@ -256,7 +265,7 @@ export class MoveRoom extends Room {
     this.players.set(p.id, p);
     if (!this.hostId) this.hostId = p.id;
     this.event({ kind: 'toast', text: `${p.name} joined the crew${p.spectator ? ' (spectating this round)' : ''}` });
-    if (this.soloPending) { this.soloPending = false; for (let i = 0; i < 3; i++) this.addBot(); }
+    if (this.soloPending) { this.soloPending = false; for (let i = 1; i < this.crewSize; i++) this.addBot(); } // a full crew of AI movers
     if (this.tutorialMode && !this.bots.size) { const c = this.addBot(); if (c) { c.name = 'Coach'; this.bots.get(c.id).coach = true; } }
     if (this.quick && this.phase === 'lobby' && !this.autoStartAt) this.autoStartAt = 30;
     p.suit = 'classic'; p.profile = { games: 0, wins: 0 };
@@ -278,13 +287,21 @@ export class MoveRoom extends Room {
   }
 
   movers() { return [...this.players.values()].filter(p => !p.spectator); }
+  /** keep the crew at crewSize: AI movers leave first if there are too many; solo games fill up with AI; extra humans watch */
+  fitCrew() {
+    if (this.inRound()) return;
+    while (this.movers().length > this.crewSize && this.bots.size) this.removeBot([...this.bots.keys()].pop());
+    let i = 0;
+    for (const p of this.players.values()) if (!p.bot) p.spectator = i++ >= this.crewSize;
+    if (this.solo && !this.tutorialMode) while (this.movers().length < this.crewSize && this.addBot()) { /* fill */ }
+  }
   inRound() { return this.phase === 'playing' || this.phase === 'meeting' || this.phase === 'countdown'; }
 
   addBot() {
-    if (this.movers().length >= MAX_MOVERS || this.inRound()) return null;
+    if (this.movers().length >= this.crewSize || this.inRound()) return null;
     const used = new Set([...this.players.values()].map(p => p.char));
     const usedNames = new Set([...this.players.values()].map(p => p.name));
-    const char = CHARS.find(c => !used.has(c)) || 'nova';
+    const char = CHARS.find(c => !used.has(c)) || ALL_CHAR_IDS.find(c => !used.has(c)) || 'nova'; // a 5th and 6th mover come from the full roster
     const name = BOT_NAMES.find(n => !usedNames.has(n)) || 'Bot';
     const id = `bot-${++this.botSeq}`;
     const p = this.newPlayer(id, name, char, { bot: true });
@@ -446,7 +463,7 @@ export class MoveRoom extends Room {
     let i = 0;
     for (const p of this.players.values()) {
       Object.assign(p, { score: 0, strikes: 0, out: false, carry: null, loadMode: false, loaded: 0, breaks: 0, task: null, dashCd: 0, dashT: 0, energy: 1, injuredT: 0 });
-      p.spectator = i >= MAX_MOVERS;
+      p.spectator = i >= this.crewSize;
       this.placeAtSpawn(p, i++);
     }
     this.timeLeft = this.tutorialMode ? 3600 : RULES.MODES[this.mode] + (this.twist === 'mansion' && this.mode !== 'load' ? 60 : 0)
@@ -641,7 +658,7 @@ export class MoveRoom extends Room {
         if (!p.bot && (this.elapsed - (p.stairHintAt || -99)) > 6) { p.stairHintAt = this.elapsed; this.tell(p, 'The furniture dolly stays downstairs. Carry the piece up or down the stairs, or use the two-wheel dolly for boxes.'); }
       }
       if (item) { item.x = p.x + Math.sin(p.face) * 0.2; item.z = p.z + Math.cos(p.face) * 0.2; }
-      if (dly) { dly.x = p.x + Math.sin(p.face) * 0.9; dly.z = p.z + Math.cos(p.face) * 0.9; }
+      if (dly) { dly.x = p.x + Math.sin(p.face) * 0.9; dly.z = p.z + Math.cos(p.face) * 0.9; this.syncDollyStack(dly); }
       if (fd) { const off = this.flatReach(fd); fd.x = p.x + Math.sin(p.face) * off; fd.z = p.z + Math.cos(p.face) * off; fd.face = p.face; this.syncFlatPiece(fd); }
     }
 
@@ -902,7 +919,10 @@ export class MoveRoom extends Room {
     if (!d) return;
     d.state = 'floor'; d.pusher = null;
     if (this.level.hitsWall(d.x, d.z, 0.4) || inRamp(d.x, d.z)) { d.x = p.x - 1; d.z = p.z; }
+    this.syncDollyStack(d);
   }
+  /** boxes riding a dolly are wherever the dolly is (up the stairs included: they're on its floor, not left behind) */
+  syncDollyStack(d) { for (const id of d.stack || []) { const b = this.items.get(id); if (b) { b.x = d.x; b.z = d.z; } } }
 
   /** next box off the dolly (top of the stack) into your hands, in the truck */
   feedFromDolly(p) {
@@ -1107,7 +1127,7 @@ export class MoveRoom extends Room {
       move(p, dz);
       if (item) move(item, dz);
       const dly = this.dollyOf(p), fd = this.flatOf(p);
-      if (dly) move(dly, dz);
+      if (dly) { move(dly, dz); this.syncDollyStack(dly); } // its boxes change floor with it
       if (fd) { move(fd, dz); this.syncFlatPiece(fd); }
     }
     for (const item of this.items.values()) {
@@ -1213,7 +1233,7 @@ export class MoveRoom extends Room {
 
   /** Movers aiming in the truck each stand in their own spot on the ramp. */
   takeRampSlot(p) {
-    const SLOTS = [[11.4, -1.7], [11.4, -0.55], [11.4, 0.6], [11.4, 1.75]];
+    const SLOTS = [[11.4, -1.7], [11.4, -0.55], [11.4, 0.6], [11.4, 1.75], [10.3, -1.15], [10.3, 1.15]]; // a second row for crews of 5-6
     const used = new Set([...this.players.values()].filter(o => o !== p && o.loadMode).map(o => o.rampSlot));
     const i = SLOTS.findIndex((_, k) => !used.has(k));
     p.rampSlot = i;
@@ -1578,7 +1598,7 @@ export class MoveRoom extends Room {
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
       floors: this.floors,
-      level: { seed: this.level.seed, code: this.level.classic || this.level.tutorial ? null : houseCode(this.level.seed), classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo,
+      level: { seed: this.level.seed, code: this.level.classic || this.level.tutorial ? null : houseCode(this.level.seed), classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo, crewSize: this.crewSize,
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,

@@ -318,7 +318,7 @@ function renderLobby(s, me) {
   if ($('share-link').value !== link) $('share-link').value = link;
   const host = s.hostId === myId;
   const lv = s.level;
-  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready, p.setup]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors]);
+  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready, p.setup]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors, s.crewSize]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
   renderCrewCarousel(s);
@@ -327,6 +327,7 @@ function renderLobby(s, me) {
   // house setup: everyone picks (your pick is highlighted); the crew chief's pick is the house shown; one pick is drawn at start
   const mine = me?.setup || (host ? { floors: s.level?.floors || 1, twist: s.twist } : null);
   for (const b of $('twists').children) { b.classList.toggle('on', b.dataset.twist === mine?.twist); b.disabled = !me || me.bot || !!s.daily; }
+  for (const b of $('crew').children) { b.classList.toggle('on', Number(b.dataset.crew) === (s.crewSize || 4)); b.disabled = !host || !!s.level?.tutorial; } // the crew chief's call
   for (const b of $('floors').children) { b.classList.toggle('on', Number(b.dataset.floors) === mine?.floors); b.disabled = !me || !!s.daily || !!s.level?.classic; }
   const TW = { none: 'no twist', zerog: 'Zero-G', mansion: 'Moon Mansion' };
   const picks = s.players.filter(p => !p.bot && !p.spectator).map(p => ({ p, x: p.setup || (p.id === s.hostId ? { floors: s.level?.floors || 1, twist: s.twist } : null) })).filter(o => o.x);
@@ -351,7 +352,7 @@ function renderLobby(s, me) {
   const movers = s.players.filter(p => !p.spectator);
   const bots = s.players.filter(p => p.bot);
   // the crew as a list; status is words, not icons
-  $('lobby-players').innerHTML = `<h2>Crew <small>${movers.length} of 4 movers</small></h2><ul class="crew-list">` + s.players.map(p => {
+  $('lobby-players').innerHTML = `<h2>Crew <small>${movers.length} of ${s.crewSize || 4} movers</small></h2><ul class="crew-list">` + s.players.map(p => {
     const st = p.id === s.hostId ? 'Crew chief' : p.bot ? 'AI mover' : p.spectator ? 'Watching' : p.ready ? 'Ready' : 'Not ready yet';
     return `<li class="${p.id === myId ? 'me' : ''}"><span class="cl-pic">${portrait(p.char)}</span><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}</b><span class="cl-st ${p.ready || p.id === s.hostId ? 'ok' : ''}">${st}</span></li>`;
   }).join('') + '</ul>';
@@ -412,6 +413,7 @@ $('chars').addEventListener('click', (e) => {
   sfx('blip');
 });
 $('code-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('code-input').value.trim(); if (v && room) { room.send('seed', { code: v }); $('code-input').value = ''; } });
+$('crew').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) { room.send('crew', { size: Number(b.dataset.crew) }); sfx('blip'); } });
 $('floors').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('floors', { floors: Number(b.dataset.floors) }); });
 $('twists').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('twist', { twist: b.dataset.twist }); });
 $('suits').addEventListener('click', (e) => {

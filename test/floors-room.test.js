@@ -91,6 +91,8 @@ test('the two-wheel dolly bumps up the stairs with its boxes; the furniture doll
   assert.equal(L.floorOf(a.z), 1, 'pushed the dolly upstairs');
   assert.equal(L.floorOf(d.z), 1, 'the dolly came too');
   assert.deepEqual(d.stack, [box.id], 'box still on it');
+  assert.equal(L.floorOf(box.z), 1, 'the box went up with the dolly (not left on the floor below)');
+  assert.ok(Math.hypot(box.x - d.x, box.z - d.z) < 0.01, 'and sits right on it');
   // furniture dolly
   const fd = room.items.get('flatdolly');
   assert.equal(L.floorOf(fd.z), 0, 'the furniture dolly starts downstairs');
