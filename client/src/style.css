@@ -688,3 +688,17 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   #scoreboard { top: calc(var(--sat) + 112px); }
   #toasts { top: calc(var(--sat) + 40px); }
 }
+
+/* ---- teams ---- */
+.tchip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--tc); color: #171310; font-size: 12px; font-weight: 800; vertical-align: middle; }
+.tcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tcol { border: 2px solid var(--tc); border-radius: 12px; padding: 8px; min-width: 0; }
+.tcol h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.tcol .tjoin { margin-top: 6px; width: 100%; }
+#scoreboard .sb.team { background: var(--tc); color: #171310; font-weight: 800; }
+#scoreboard .sb.tm { box-shadow: inset 3px 0 0 var(--tc); }
+.outcome.team-win { color: var(--tc); }
+.tcol .crew-list { grid-template-columns: 1fr; }
+.tcol .crew-list li { grid-template-columns: 26px minmax(0, 1fr); row-gap: 0; padding: 4px 0; }
+.tcol .crew-list li .cl-st { grid-column: 2; font-size: 11px; line-height: 1.1; }
+.tcol .crew-list li .cl-pic svg { width: 24px; height: 24px; }

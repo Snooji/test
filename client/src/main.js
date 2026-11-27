@@ -1,5 +1,7 @@
 import { Client } from '@colyseus/sdk';
-import { GameScene } from './scene.js';
+import { GameScene, TEAM_COLORS } from './scene.js';
+const TEAM_NAMES = ['Orange', 'Teal', 'Purple'];
+const teamChip = (t) => t ? `<span class="tchip" style="--tc:${TEAM_COLORS[t - 1]}">${TEAM_NAMES[t - 1]}</span>` : '';
 import { Input, ACTIONS, keyName, PAD_LABEL } from './input.js';
 import { mergeItems } from '../../shared/snap.js';
 import { PORTRAITS, CHARACTERS, portrait, charInfo, CREW_ORDER, setPortrait } from './portraits.js';
@@ -318,7 +320,7 @@ function renderLobby(s, me) {
   if ($('share-link').value !== link) $('share-link').value = link;
   const host = s.hostId === myId;
   const lv = s.level;
-  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready, p.setup]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors, s.crewSize]);
+  const key = JSON.stringify([s.players.map(p => [p.id, p.name, p.char, p.bot, p.suit, p.ready, p.setup, p.team]), s.hostId, s.mode, s.difficulty, s.level?.seed, s.game, s.twist, s.floors, s.crewSize, s.teamN]);
   if ($('lobby').dataset.key === key) return;
   $('lobby').dataset.key = key;
   renderCrewCarousel(s);
@@ -327,6 +329,7 @@ function renderLobby(s, me) {
   // house setup: everyone picks (your pick is highlighted); the crew chief's pick is the house shown; one pick is drawn at start
   const mine = me?.setup || (host ? { floors: s.level?.floors || 1, twist: s.twist } : null);
   for (const b of $('twists').children) { b.classList.toggle('on', b.dataset.twist === mine?.twist); b.disabled = !me || me.bot || !!s.daily; }
+  for (const b of $('teams').children) { const n = Number(b.dataset.teams); b.classList.toggle('on', n === (s.teamN || 0)); b.disabled = !host || s.game === 'sabotage' || (n === 3 && (s.crewSize || 4) < 6) || !!s.level?.tutorial; }
   for (const b of $('crew').children) { b.classList.toggle('on', Number(b.dataset.crew) === (s.crewSize || 4)); b.disabled = !host || !!s.level?.tutorial; } // the crew chief's call
   for (const b of $('floors').children) { b.classList.toggle('on', Number(b.dataset.floors) === mine?.floors); b.disabled = !me || !!s.daily || !!s.level?.classic; }
   const TW = { none: 'no twist', zerog: 'Zero-G', mansion: 'Moon Mansion' };
@@ -348,14 +351,24 @@ function renderLobby(s, me) {
   $('game-desc').textContent = s.game === 'sabotage'
     ? '🕵️ One mover is secretly a saboteur. Pack the truck perfectly before time runs out, or vote them out. Needs 3+ movers.'
     : s.mode === 'load' ? '🧩 Full load: the house holds exactly one truckload. Pack it perfectly. Hold the action on the ramp to pull pieces back out.'
+    : s.teamN ? `🤝 ${s.teamN} teams, one truck. Every point you score counts for your team. Steal from the other team, never your own.`
     : '🏆 Everyone for themselves. Most points still on the truck wins.';
   const movers = s.players.filter(p => !p.spectator);
   const bots = s.players.filter(p => p.bot);
   // the crew as a list; status is words, not icons
-  $('lobby-players').innerHTML = `<h2>Crew <small>${movers.length} of ${s.crewSize || 4} movers</small></h2><ul class="crew-list">` + s.players.map(p => {
+  const row = (p) => {
     const st = p.id === s.hostId ? 'Crew chief' : p.bot ? 'AI mover' : p.spectator ? 'Watching' : p.ready ? 'Ready' : 'Not ready yet';
     return `<li class="${p.id === myId ? 'me' : ''}"><span class="cl-pic">${portrait(p.char)}</span><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}</b><span class="cl-st ${p.ready || p.id === s.hostId ? 'ok' : ''}">${st}</span></li>`;
-  }).join('') + '</ul>';
+  };
+  if (s.teamN) { // a column per team, with a button to switch to it
+    const cols = Array.from({ length: s.teamN }, (_, i) => i + 1).map(t => {
+      const ms = movers.filter(p => p.team === t);
+      const join = me && !me.spectator && me.team !== t ? `<button class="ghost small tjoin" data-team="${t}">Join ${TEAM_NAMES[t - 1]}</button>` : '';
+      return `<div class="tcol" style="--tc:${TEAM_COLORS[t - 1]}"><h3>${teamChip(t)} <small>${ms.length}</small></h3><ul class="crew-list">${ms.map(row).join('')}</ul>${join}</div>`;
+    }).join('');
+    const watching = s.players.filter(p => p.spectator);
+    $('lobby-players').innerHTML = `<h2>Crew <small>${movers.length} of ${s.crewSize || 4} movers · ${s.teamN} teams</small></h2><div class="tcols">${cols}</div>` + (watching.length ? `<ul class="crew-list">${watching.map(row).join('')}</ul>` : '');
+  } else $('lobby-players').innerHTML = `<h2>Crew <small>${movers.length} of ${s.crewSize || 4} movers</small></h2><ul class="crew-list">` + s.players.map(row).join('') + '</ul>';
   const waitingOn = s.players.filter(p => !p.bot && !p.spectator && p.id !== s.hostId && !p.ready);
   const meReadyL = !!me?.ready;
   show('btn-ready-lobby', !host && !!me && !me.spectator);
@@ -367,7 +380,7 @@ function renderLobby(s, me) {
   markDiff($('lobby-diff'), s.difficulty);
   for (const b of $('lobby-diff').children) b.disabled = !host;
   show($('btn-addbot').parentElement, host);
-  $('btn-addbot').disabled = movers.length >= 4;
+  $('btn-addbot').disabled = movers.length >= (s.crewSize || 4);
   $('btn-rmbot').disabled = bots.length === 0;
   show('btn-start', host);
   $('btn-start').disabled = host && waitingOn.length > 0;
@@ -413,6 +426,8 @@ $('chars').addEventListener('click', (e) => {
   sfx('blip');
 });
 $('code-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('code-input').value.trim(); if (v && room) { room.send('seed', { code: v }); $('code-input').value = ''; } });
+$('teams').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) { room.send('teams', { n: Number(b.dataset.teams) }); sfx('blip'); } });
+$('lobby-players').addEventListener('click', (e) => { const b = e.target.closest('.tjoin'); if (b && room) { room.send('team', { t: Number(b.dataset.team) }); sfx('blip'); } });
 $('crew').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) { room.send('crew', { size: Number(b.dataset.crew) }); sfx('blip'); } });
 $('floors').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('floors', { floors: Number(b.dataset.floors) }); });
 $('twists').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && room) room.send('twist', { twist: b.dataset.twist }); });
@@ -509,8 +524,9 @@ function renderHud(s, me) {
   if (me && s.phase === 'playing' && (me.energy ?? 1) < 0.3 && !(me.injured > 0) && energyTipRound !== s.level?.seed) { energyTipRound = s.level?.seed; toast('⚡ Running out of energy! Slow down, or stop for a second to catch your breath, before you get hurt.'); }
   renderDuel(s);
   // compact: a strip of avatar + score chips (names only where there's room); you're highlighted, leader gets a crown
-  setHTML('scoreboard', [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
-    .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''}" title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join(''));
+  const teamRow = s.teams ? [...s.teams].sort((a, b) => b.score - a.score).map((t, i) => `<div class="sb team" style="--tc:${TEAM_COLORS[t.t - 1]}">${i === 0 && t.score > 0 ? '<i class="crown">👑</i>' : ''}<span class="nm">${t.name}${me?.team === t.t ? ' (you)' : ''}</span><b>${t.score}</b></div>`).join('') : '';
+  setHTML('scoreboard', teamRow + [...s.players].filter(p => !p.spectator).sort((a, b) => b.score - a.score)
+    .map((p, i) => `<div class="sb ${p.out ? 'out' : ''} ${p.id === myId ? 'me' : ''} ${p.team ? 'tm' : ''}" ${p.team ? `style="--tc:${TEAM_COLORS[p.team - 1]}"` : ''} title="${esc(p.name)}">${i === 0 && p.score > 0 ? '<i class="crown">👑</i>' : ''}${portrait(p.char)}<span class="nm">${p.id === myId ? 'You' : esc(p.name)}</span><b>${p.score}</b>${p.strikes ? `<em>${'✖'.repeat(p.strikes)}</em>` : ''}</div>`).join(''));
   renderPrompt(s, me);
 }
 
@@ -618,7 +634,7 @@ function onEvent(e) {
     sfx('fanfare');
     setTimeout(() => {
       const r = snap?.results, me = snap?.players.find(p => p.id === myId);
-      const won = r && (r.winnerId === myId || (r.game === 'sabotage' && ((r.winners === 'crew' && r.saboteurId !== myId) || (r.winners === 'saboteur' && r.saboteurId === myId))));
+      const won = r && (r.teams ? !!r.winTeam && me?.team === r.winTeam : r.winnerId === myId || (r.game === 'sabotage' && ((r.winners === 'crew' && r.saboteurId !== myId) || (r.winners === 'saboteur' && r.saboteurId === myId))));
       if (won || /Perfect load|Training complete/.test(r?.reason || '')) { scene.confetti(me?.x ?? 11, me?.z ?? 0); buzz([30, 30, 30, 30, 80]); }
     }, 300);
   }
@@ -725,12 +741,17 @@ function renderResults(s, me) {
   $('results').dataset.key = key;
   $('res-reason').textContent = r.reason;
   if (r.game === 'sabotage') myRole = null;
-  const w = r.players.find(p => p.id === r.winnerId);
+  const w = r.players.find(p => p.id === r.winnerId), live0 = new Map(s.players.map(p => [p.id, p]));
   if (r.game === 'sabotage') {
     const sp = r.players.find(p => p.id === r.saboteurId);
     $('res-winner').innerHTML = `<div class="outcome ${r.winners}">${r.winners === 'crew' ? '🧰 CREW WINS' : '🕵️ SABOTEUR WINS'}</div>`
       + (sp ? `${portrait(sp.char)}<div class="w">The saboteur was ${esc(sp.name)}${sp.id === myId ? ' (you!)' : ''}</div>` : '')
       + `<div class="team">Final crew score: ${r.crewScore}</div>`;
+  } else if (r.teams) {
+    const mine = live0.get(myId)?.team;
+    $('res-winner').innerHTML = (r.winTeam ? `<div class="outcome team-win" style="--tc:${TEAM_COLORS[r.winTeam - 1]}">${TEAM_NAMES[r.winTeam - 1].toUpperCase()} TEAM WINS${mine === r.winTeam ? ' 🎉' : ''}</div>` : '<div class="outcome">IT’S A TIE</div>')
+      + `<div class="team">${r.teams.map(t => `${teamChip(t.t)} <b>${t.score}</b>`).join(' · ')}</div>`
+      + (w ? `<div class="w">Top mover: ${esc(w.name)}${w.id === myId ? ' (you)' : ''}</div>` : '');
   } else
   $('res-winner').innerHTML = w ? `<div class="w">${esc(w.name)}${w.id === myId ? ' (you)' : ''} is Mover of the Day</div>` : '<div class="w">Nobody stayed on the truck.</div>';
   // podium: every mover with name on top, place, points, crown for the winner, ✅ when ready to restart
@@ -742,7 +763,7 @@ function renderResults(s, me) {
     const what = [t ? `${t.pieces} piece${t.pieces === 1 ? '' : 's'} loaded` : null, t?.placement ? `packing ${t.placement > 0 ? '+' : ''}${t.placement}` : null, p.out ? 'off the truck' : null, rd ? 'ready to restart' : null].filter(Boolean).join(' · ');
     return `<li class="${p.id === myId ? 'me' : ''} ${p.out ? 'out' : ''} ${p.id === r.winnerId ? 'win' : ''}">
       <span class="rk">${ordinal(i + 1)}</span><span class="rk-pic">${portrait(p.char)}</span>
-      <span class="rk-who"><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}${p.bot ? ' <small>AI</small>' : ''}</b>${what ? `<small>${what}</small>` : ''}</span>
+      <span class="rk-who"><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}${p.bot ? ' <small>AI</small>' : ''} ${teamChip(live.get(p.id)?.team)}</b>${what ? `<small>${what}</small>` : ''}</span>
       <span class="rk-pts"><b>${p.score}</b><small>points</small></span></li>`;
   }).join('') + '</ol>';
   const humans = s.players.filter(p => !p.bot);

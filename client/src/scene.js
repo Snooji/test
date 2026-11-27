@@ -5,6 +5,9 @@ import { levelFromSnapshot, STOREY_H, FLOOR_DZ } from '../../shared/level.js';
 import { makeMover, makeItem, makeCat, sprite, labelTexture, mat } from './models.js';
 import * as VX from './voxel.js';
 
+/** team colours: Orange, Teal, Purple (same order as the server's TEAM_NAMES) */
+export const TEAM_COLORS = ['#ff8a3d', '#2ec4b6', '#a66cff'];
+
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 /** cells [x,y,z] a loaded item occupies relative to its grid anchor */
 const cellsOf = (it) => {
@@ -201,16 +204,20 @@ export class GameScene {
     for (const p of snap.players) {
       seen.add(p.id);
       let v = this.players.get(p.id);
-      if (!v || v.char !== p.char || v.suit !== p.suit) {
+      if (!v || v.char !== p.char || v.suit !== p.suit || (v.team || 0) !== (p.team || 0)) {
         if (v) this.scene.remove(v.root);
         const root = makeMover(p.char, SUITS.find(x => x.id === p.suit)?.color ?? null);
-        const label = sprite(p.name, { fg: '#fff', stroke: '#000', font: 'bold 40px system-ui' });
+        const label = sprite(p.name, { fg: p.team ? TEAM_COLORS[p.team - 1] : '#fff', stroke: '#000', font: 'bold 40px system-ui' }); // team games: names in team colours
         label.position.y = 2.25; root.add(label);
         const ready = sprite('✅ READY', { fg: '#55ffcc', stroke: '#171310', font: 'bold 40px system-ui' }, [2, 0.5]);
         ready.position.y = 2.85; ready.visible = false; root.add(ready);
         root.position.set(p.x, 0, p.z);
         this.scene.add(root);
-        v = { root, char: p.char, suit: p.suit, label, ready, face: p.face };
+        if (p.team) { // a team-coloured ring at their feet
+          const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 28), new THREE.MeshBasicMaterial({ color: TEAM_COLORS[p.team - 1], transparent: true, opacity: 0.85, depthWrite: false }));
+          ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; root.add(ring);
+        }
+        v = { root, char: p.char, suit: p.suit, team: p.team || 0, label, ready, face: p.face };
         this.players.set(p.id, v);
       }
       v.ready.visible = !!p.ready && (snap.phase === 'results' || snap.phase === 'lobby');

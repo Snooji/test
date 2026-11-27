@@ -28,6 +28,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const SEP_STEP = 0.025;     // max push per tick when two movers overlap (well under walking pace)
 const REACH = 1.7;        // interaction distance
 const TICK = 50;          // ms (20 Hz)
+export const TEAM_NAMES = ['Orange', 'Teal', 'Purple'];
 const MAX_CREW = 6, DEFAULT_CREW = 4; // movers per round: the crew chief picks 2-6 in the lobby (this.crewSize)
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -54,6 +55,7 @@ export class MoveRoom extends Room {
     this.onMessage = (type, fn) => on(type, (c, m) => (this.flooding(c) ? undefined : fn(c, m)));
     this.phase = 'lobby';
     this.crewSize = Math.max(2, Math.min(MAX_CREW, Math.round(Number(options.crew) || DEFAULT_CREW)));
+    this.teamN = 0; // 0 = everyone for themselves; 2 or 3 teams sharing the truck, scored as a team
     this.mode = '3min';
     this.game = options.game === 'sabotage' ? 'sabotage' : 'classic';
     this.difficulty = DIFFICULTY[options.difficulty] ? options.difficulty : 'normal';
@@ -229,12 +231,33 @@ export class MoveRoom extends Room {
       const n = Math.round(Number(m?.size));
       if (!hostInLobby(c) || !(n >= 2 && n <= MAX_CREW)) return;
       this.crewSize = n;
+      if (this.teamN === 3 && n < 6) this.teamN = 2;
       this.fitCrew();
+    });
+    // teams: the crew chief picks off / 2 / 3 (3 needs a crew of 6); everyone shares the one truck
+    this.onMessage('teams', (c, m) => {
+      const n = Number(m?.n) | 0;
+      if (!hostInLobby(c) || this.game === 'sabotage' || ![0, 2, 3].includes(n)) return;
+      if (n === 3 && this.crewSize < 6) return this.tell(this.players.get(c.sessionId), 'Three teams need a crew of 6.');
+      this.teamN = n; this.balanceTeams(true);
+    });
+    // switch sides in the lobby, as long as the teams stay even (one apart at most)
+    this.onMessage('team', (c, m) => {
+      const p = this.players.get(c.sessionId), t = Number(m?.t) | 0;
+      if (!p || p.spectator || !this.teamN || this.inRound() || t < 1 || t > this.teamN || p.team === t) return;
+      const size = (k) => this.movers().filter(o => o.team === k).length;
+      if (size(t) + 1 > size(p.team)) { // that would make it lopsided: an AI mover on that side swaps with you, else no room
+        const bot = this.movers().find(o => o.bot && o.team === t);
+        if (!bot) return this.tell(p, `The ${TEAM_NAMES[t - 1]} team is full. Teams stay even.`);
+        bot.team = p.team;
+      }
+      p.team = t;
     });
     this.onMessage('game', (c, m) => {
       if (!hostInLobby(c) || !['classic', 'sabotage'].includes(m?.game)) return;
       const wasExact = this.isExact();
       this.game = m.game;
+      if (this.game === 'sabotage') this.teamN = 0; // the crew against a saboteur already is a team game
       if (this.isExact() !== wasExact && !this.classic) { this.newLevel(false); this.resetWorld(); }
     });
     this.onMessage('removeBot', (c) => {
@@ -296,6 +319,34 @@ export class MoveRoom extends Room {
     let i = 0;
     for (const p of this.players.values()) if (!p.bot) p.spectator = i++ >= this.crewSize;
     if (this.solo && !this.tutorialMode) while (this.movers().length < this.crewSize && this.addBot()) { /* fill */ }
+  }
+  /** keep every mover on a team, the teams even (at most one apart); `fresh` deals everyone out again */
+  balanceTeams(fresh = false) {
+    const movers = this.movers();
+    if (!this.teamN) { for (const p of this.players.values()) p.team = 0; return; }
+    for (const p of this.players.values()) if (p.spectator || fresh) p.team = 0;
+    const cap = Math.ceil(movers.length / this.teamN), size = (k) => movers.filter(o => o.team === k).length;
+    // humans first so friends get dealt out evenly before the AI fill in
+    for (const p of [...movers].sort((a, b) => (a.bot ? 1 : 0) - (b.bot ? 1 : 0))) {
+      if (p.team >= 1 && p.team <= this.teamN && size(p.team) <= cap) continue;
+      p.team = 0;
+      let best = 1; for (let k = 2; k <= this.teamN; k++) if (size(k) < size(best)) best = k;
+      p.team = best;
+    }
+    // still lopsided (people switched, then someone left): move an AI mover over, else whoever joined last
+    for (let guard = 0; guard < 6; guard++) {
+      const ks = Array.from({ length: this.teamN }, (_, i) => i + 1).sort((a, b) => size(b) - size(a));
+      if (size(ks[0]) - size(ks[ks.length - 1]) <= 1) break;
+      const from = movers.filter(o => o.team === ks[0]), pick = from.find(o => o.bot) || from[from.length - 1];
+      pick.team = ks[ks.length - 1];
+    }
+  }
+  teamScores() {
+    if (!this.teamN) return null;
+    return Array.from({ length: this.teamN }, (_, i) => {
+      const ms = this.movers().filter(p => p.team === i + 1);
+      return { t: i + 1, name: TEAM_NAMES[i], score: ms.reduce((a, p) => a + p.score, 0), members: ms.map(p => p.id) };
+    });
   }
   inRound() { return this.phase === 'playing' || this.phase === 'meeting' || this.phase === 'countdown'; }
 
@@ -461,6 +512,7 @@ export class MoveRoom extends Room {
 
   startRound() {
     if (this.phase === 'lobby' || this.phase === 'results') this.drawSetup();
+    this.balanceTeams();
     this.resetWorld();
     let i = 0;
     for (const p of this.players.values()) {
@@ -500,6 +552,7 @@ export class MoveRoom extends Room {
   // ---------- simulation ----------
   tick(dt) {
     this.lastDt = dt;
+    if (this.teamN && !this.inRound() && this.phase !== 'driveoff') this.balanceTeams(); // people come and go in the lobby
     this.elapsed = (this.elapsed || 0) + dt;
     this.moveCat(dt);
     if (this.phase === 'countdown') {
@@ -768,7 +821,7 @@ export class MoveRoom extends Room {
   nearestItem(p) {
     let best = null, bd = REACH;
     for (const it of this.items.values()) {
-      const grab = !p.bot && this.holderOf(it) && this.holderOf(it) !== p && !p.carry; // a box someone carries / a dolly someone pushes
+      const grab = !p.bot && this.holderOf(it) && this.holderOf(it) !== p && !p.carry && !(this.teamN && this.holderOf(it).team === p.team); // a box someone carries / a dolly someone pushes
       if ((it.type === 'dolly' || it.type === 'flatdolly') && (p.bot || it.state !== 'floor') && !grab) continue; // AI movers leave the dollies alone
       const stealable = grab || (it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 2 && !p.carry && !it.carriers.includes(p.id));
       if (it.state !== 'floor' && !(it.state === 'carried' && ITEM_TYPES[it.type].teamCarry && it.carriers.length === 1) && !stealable) continue;
@@ -800,8 +853,9 @@ export class MoveRoom extends Room {
     const one = this.holderOf(item);
     const holders = one ? [one] : item.carriers.map(id => this.players.get(id)).filter(Boolean);
     if (holders.some(h => h.loadMode || h.duel || h === p)) return; // already at the truck, or busy
+    if (this.teamN && holders.every(h => h.team === p.team)) return this.tell(p, 'That’s your teammate! Steal from the other team.');
     if (one && one.carry && one.carry !== item.id) return; // pushing a dolly but also holding a box (unloading it)
-    const victim = holders.sort((a, b) => dist(p, a) - dist(p, b))[0];
+    const victim = holders.filter(h => !this.teamN || h.team !== p.team).sort((a, b) => dist(p, a) - dist(p, b))[0]; // never your own teammate
     if (!victim) return;
     const d = { item: item.id, a: p.id, b: victim.id, t: DUEL_SECONDS, ca: 0, cb: 0, tok: { [p.id]: DUEL_TAP_BURST, [victim.id]: DUEL_TAP_BURST } };
     this.duels.set(item.id, d);
@@ -1611,6 +1665,10 @@ export class MoveRoom extends Room {
     let winner = (forcedWinnerId && players.find(p => p.id === forcedWinnerId)) || players.find(p => !p.out) || null;
     if (winners === 'saboteur' && sab) winner = players.find(p => p.id === sab.id) || winner;
     if (winners === 'crew') winner = players.find(p => sab ? p.id !== sab.id : true) || winner;
+    const teams = this.teamScores()?.sort((a, b) => b.score - a.score) || null;
+    const tie = teams && teams.length > 1 && teams[0].score === teams[1].score;
+    const teamWinner = !teams ? null : forcedWinnerId ? this.players.get(forcedWinnerId)?.team || null : tie ? null : teams[0].t; // a tie: no team wins
+    if (teams) winner = teamWinner ? players.find(p => this.players.get(p.id)?.team === teamWinner) || null : null; // the team's top scorer
     const loaded = [...this.items.values()].filter(i => i.state === 'loaded' && !i.damaged);
     const teamTotal = loaded.reduce((s, i) => s + Object.values(i.earned || {}).reduce((a, b) => a + b, 0), 0);
     const unresolved = this.breaks.filter(b => !b.resolved).map(b => ({
@@ -1624,7 +1682,7 @@ export class MoveRoom extends Room {
     ].map(([k, title]) => { const p = best(k); return p ? { id: p.id, name: p.name, title, value: p[k] } : null; }).filter(Boolean);
     this.results = { reason, awards, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null, tally: this.tally || null,
       driveoff: this.driveoff ? { safety: this.driveoff.safety, damaged: this.driveoff.damaged.map(d => ({ name: d.name, reason: d.reason, by: d.by })), lost: this.driveoff.lost } : null,
-      game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
+      teams, winTeam: teamWinner, game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
     this.event({ kind: 'end' });
     this.recordResults();
@@ -1638,7 +1696,7 @@ export class MoveRoom extends Room {
     store.event('round_end').catch(() => {});
     for (const p of this.players.values()) {
       if (p.bot || p.spectator || !p.email) continue;
-      const won = r.game === 'sabotage' ? (r.winners === 'saboteur' ? p.id === r.saboteurId : p.id !== r.saboteurId && r.winners === 'crew') : r.winnerId === p.id;
+      const won = r.teams ? !!r.winTeam && p.team === r.winTeam : r.game === 'sabotage' ? (r.winners === 'saboteur' ? p.id === r.saboteurId : p.id !== r.saboteurId && r.winners === 'crew') : r.winnerId === p.id;
       store.recordGame(p.email, { won, loaded: p.loaded }).catch(() => {});
       if (this.level?.daily) store.addScore({ day: this.level.daily, email: p.email, name: p.name, score: p.score, detail: `${this.level.name} · ${this.mode === 'load' ? 'Full load' : this.mode}` }).catch(() => {});
     }
@@ -1669,7 +1727,7 @@ export class MoveRoom extends Room {
     const players = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, char: p.char, x: +p.x.toFixed(2), z: +p.z.toFixed(2), face: +p.face.toFixed(2),
       carry: p.carry, loadMode: p.loadMode, cursor: p.loadMode ? p.cursor : null, score: p.score, strikes: p.strikes,
-      out: p.out, spectator: p.spectator, task: p.task, unloading: !!p.unloading, dolly: p.dolly || null, flatDolly: p.flatDolly || null, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0, energy: +(p.energy ?? 1).toFixed(2), injured: +(p.injuredT || 0).toFixed(1),
+      out: p.out, spectator: p.spectator, task: p.task, team: p.team || 0, unloading: !!p.unloading, dolly: p.dolly || null, flatDolly: p.flatDolly || null, dashCd: +p.dashCd.toFixed(1), dashing: p.dashT > 0, energy: +(p.energy ?? 1).toFixed(2), injured: +(p.injuredT || 0).toFixed(1),
       room: this.level.roomAt(p.x, p.z), setup: p.setup || null, bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
@@ -1687,7 +1745,7 @@ export class MoveRoom extends Room {
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,
       floors: this.floors,
-      level: { seed: this.level.seed, code: this.level.classic || this.level.tutorial ? null : houseCode(this.level.seed), classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo, crewSize: this.crewSize,
+      level: { seed: this.level.seed, code: this.level.classic || this.level.tutorial ? null : houseCode(this.level.seed), classic: !!this.level.classic, exact: !!this.level.exact, mansion: !!this.level.mansion, floors: this.level.floors || 1, tutorial: !!this.level.tutorial, daily: this.level.daily || null, name: this.level.name, rooms: this.level.rooms.length, yard: this.level.yardDistance }, difficulty: this.difficulty, solo: this.solo, crewSize: this.crewSize, teamN: this.teamN, teams: this.teamScores(),
       loadedCount: [...this.items.values()].filter(i => i.state === 'loaded').length, totalItems: this.items.size,
       players, items, cat: { x: +this.cat.x.toFixed(2), z: +this.cat.z.toFixed(2), face: this.cat.face || 0 },
       openBreaks: this.breaks.filter(b => !b.resolved).length,
