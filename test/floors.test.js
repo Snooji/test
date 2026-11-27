@@ -195,3 +195,22 @@ test('smaller upper floors: about half of multi-floor houses step back upstairs,
   }
   assert.ok(smaller > n * 0.3 && smaller < n * 0.7, `${smaller} of ${n} houses are smaller upstairs`);
 });
+
+test('stairs are easy to reach: open (no door), off a hallway (its end, or a bay perpendicular to it) or the living room, entered onto a landing', () => {
+  const kinds = { hall: 0, living: 0 };
+  for (const opts of [{ floors: 2 }, { floors: 3 }, { floors: 4, mansion: true }]) for (const s of SEEDS) {
+    const L = generateLevel(s, opts), tag = `seed ${s} ${JSON.stringify(opts)} ${L.variant.layout}`;
+    for (const well of L.rooms.filter(r => r.role === 'stairs')) {
+      const touches = (o) => { const x = o.vertical ? o.at : o.c, z = o.vertical ? o.c : o.at; return x >= well.x0 - 0.05 && x <= well.x1 + 0.05 && z >= well.z0 - 0.05 && z <= well.z1 + 0.05; };
+      assert.ok(!L.doors.some(touches), `${tag}: a door on the stairwell (floor ${well.storey})`);
+      const opens = L.openings.filter(touches);
+      assert.ok(opens.length >= 1, `${tag}: stairwell on floor ${well.storey} has no opening`);
+      assert.ok(opens.some(o => !o.vertical), `${tag}: no opening onto a landing (floor ${well.storey})`); // landings are the z ends
+      if (well.storey) continue;
+      const nb = L.rooms.filter(o => o !== well && o.storey === 0 && L.doorsBetween(well, o)).map(o => o.role);
+      assert.ok(nb.length && nb.every(r => r === 'hall' || r === 'living'), `${tag}: stairs open onto ${nb}`);
+      if (nb.includes('living')) kinds.living++; else kinds.hall++;
+    }
+  }
+  assert.ok(kinds.hall > 20 && kinds.living > 10, `stairs by a hallway ${kinds.hall}, by the living room ${kinds.living}`);
+});

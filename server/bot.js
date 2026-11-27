@@ -148,6 +148,7 @@ export class Bot {
     }
     if (!this.exploreTo) return this.wander(dt);
     this.goTo(this.exploreTo, dt, false);
+    if (this.noHeadway) { this.visited[this.exploreTo.name] = this.t; this.noHeadway = false; } // can't get in there right now: count it as looked at
     if (!this.path) this.exploreTo = null;
   }
   skipping(id) { return (this.skipUntil.get(id) || 0) > this.t; }
@@ -306,7 +307,11 @@ export class Bot {
     const where = this.seenAt(target);
     if (!where) { this.targetId = null; this.path = null; return; }
     const d = Math.hypot(where.x - p.x, where.z - p.z);
-    if (d > 1.15) { this.goTo(where, dt, false); return; }
+    if (d > 1.15) {
+      this.goTo(where, dt, false);
+      if (this.noHeadway) { this.noHeadway = false; this.skipUntil.set(target.id, this.t + 15); this.targetId = null; this.path = null; } // leave it for now
+      return;
+    }
     if (!this.canSee(target) || !this.stillValid(target)) { this.known.delete(target.id); this.targetId = null; this.path = null; return; }
     this.idle();
     // at the item
@@ -386,6 +391,7 @@ export class Bot {
 
   goTo(target, dt, heavy, mover = null) {
     const p = this.p;
+    this.noHeadway = false;
     const src = mover || p;
     this.repathT -= dt;
     const tgtMoved = this.path && Math.hypot(this.path[this.path.length - 1].x - target.x, this.path[this.path.length - 1].z - target.z) > 1;
@@ -400,10 +406,25 @@ export class Bot {
     while (wp && Math.hypot(wp.x - src.x, wp.z - src.z) < 0.35 && this.pathI < this.path.length - 1) wp = here(this.path[++this.pathI]);
     if (!wp) { this.idle(); return; }
     const dx = wp.x - src.x, dz = wp.z - src.z, d = Math.hypot(dx, dz) || 1;
+    // headway: how much route is left. Moving isn't enough (sliding along a door frame while two equally good routes take
+    // turns is movement); the route has to get shorter. No metre gained in 6 s: give this goal up (the caller picks another).
+    let left = d;
+    for (let i = this.pathI + 1; i < this.path.length; i++) left += Math.hypot(this.path[i].x - this.path[i - 1].x, this.path[i].z - this.path[i - 1].z);
+    const goalKey = Math.round(target.x * 2) + ',' + Math.round(target.z * 2);
+    const fresh = !this.head || this.head.key !== goalKey || this.t - this.head.seen > 0.5; // (a pause to rest or wait doesn't count)
+    if (fresh) this.head = { key: goalKey, best: left, at: this.t, seen: this.t };
+    this.head.seen = this.t;
+    if (fresh) { /* just started on this goal */ }
+    else if (left < this.head.best - 1) { this.head.best = left; this.head.at = this.t; }
+    else if (this.t - this.head.at > 6) {
+      this.head = null; this.path = null; this.repathT = 0; this.noHeadway = true;
+      this.side = -(this.side || 1); this.nudge = 0.7; // and step aside out of whatever corner this was
+    }
     let sp = this.cfg.speed;
     const hauling = p.carry || p.dolly || p.flatDolly;
     if (hauling && (p.energy ?? 1) < this.cfg.pace) sp *= 0.55; // getting tired: carry carefully
     p.in.mx = dx / d * sp; p.in.mz = dz / d * sp; p.in.hold = false;
+    if (this.nudge > 0) { this.nudge -= dt; p.in.mx = -dz / d * sp * this.side; p.in.mz = dx / d * sp * this.side; }
 
     // stuck detection: nudge sideways and repath
     if (this.last && Math.hypot(this.last.x - src.x, this.last.z - src.z) < 0.02 && !p.task) this.stuckT += dt; else this.stuckT = 0;
@@ -413,6 +434,7 @@ export class Bot {
     // an occasional dash on a long open run (never off the start line, never on cooldown)
     const every = this.cfg.dashEvery;
     if (!every || heavy || p.carry || p.dashCd > 0 || this.t < NO_DASH_BEFORE || this.t - this.lastDash < every || inRamp(p.x, p.z)) return;
+    if (!this.path) return; // (just gave up on this goal: a new route comes next tick)
     const remaining = this.path.slice(this.pathI).reduce((s, q, i, a) => s + (i ? Math.hypot(q.x - a[i - 1].x, q.z - a[i - 1].z) : Math.hypot(q.x - p.x, q.z - p.z)), 0);
     if (remaining > 12 && this.rng() < 0.05) { p.pending.dashN = 1; this.lastDash = this.t; }
   }

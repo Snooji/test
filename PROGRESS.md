@@ -362,3 +362,16 @@ Verified: 208 unit tests; all voxel e2e suites, smoke and the accessibility scan
   every floor stays reachable from its stairwell and no floor overhangs the one below (tested)
 - Windows go on every outside wall (not just the bounding box), including the walls facing into notches
 - AI unchanged within noise: 1 floor 95%, 2 floors 92%, 3 floors 84% loaded
+
+## Stairs: open and easy to find (2026-11-27)
+- Audit (tools/stairaudit.mjs): before the change, 400 houses / 720 flights all walkable and pathable, but every stairwell was
+  a side room behind a door, 2-3 rooms in. Now no stairwell has a door. Placement: at the end of the spine hallway (the
+  hall runs onto the stairs; the living room beside it opens onto them too), a bay off a cross/side-wing hallway with the flights
+  perpendicular to it (sometimes at its end), or right off the living room through a wide opening. Of 300 houses: 105 open off
+  the living room (1 step from the front door), the rest off a hallway; 0 problems in 540 flights
+- Flights sit against the wall away from the way in (laneSide), rails on every side that isn't a wall, railings round the hole
+  upstairs on the open sides; you always step onto a landing (tested)
+- Ground plans are checked for every room being reachable before they're used
+- AI: route progress tracking — no metre gained on the route in 6 s → give that goal up and step aside (an AI could dither
+  forever in a doorway at a three-way hall junction). Fixed a crash this exposed (dash code read a cleared route)
+- AI loaded: 2 floors 86%, 3 floors 83%, 4 floors 83%

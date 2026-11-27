@@ -695,8 +695,11 @@ export function buildHouse(scene, level) {
       } else if (st.b === k - 1) { // the stairwell opening on the floor above: railings on the open sides
         const zc = st.dir > 0 ? z0 : z1;
         b.box(st.x0, 0, zc - 0.05, st.x1, 0.95, zc + 0.05, BAN, 0.42);
-        b.box(st.x1, 0, Math.min(z0, z1), st.x1 + 0.1, 0.95, Math.max(z0, z1), BAN, 0.42);
-        for (let z = Math.min(z0, z1); z < Math.max(z0, z1); z += 0.5) b.box(st.x1, 0, z, st.x1 + 0.1, 0.9, z + 0.06, POST, 0.42);
+        for (const [open, x] of [[st.openX1 ?? true, st.x1], [!!st.openX0, st.x0 - 0.1]]) { // railing along each open side of the hole
+          if (!open) continue;
+          b.box(x, 0, Math.min(z0, z1), x + 0.1, 0.95, Math.max(z0, z1), BAN, 0.42);
+          for (let z = Math.min(z0, z1); z < Math.max(z0, z1); z += 0.5) b.box(x, 0, z, x + 0.1, 0.9, z + 0.06, POST, 0.42);
+        }
       }
     }
     for (const p of level.props.filter(p => onK(p.z))) {

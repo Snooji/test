@@ -136,9 +136,12 @@ export function generateLevel(seed, opts = {}) {
   const stairs = [];
   if (multi) {
     const sr = rooms.find(r => r.role === 'stairs' && r.storey === 0);
-    const lx = sr.x0 + T / 2, lanes = [[lx, lx + LANE_W], [lx + LANE_W + RAIL, lx + 2 * LANE_W + RAIL]];
+    // the two flights sit against the wall away from the way in (sr.laneSide), leaving a walkway beside them to both landings
+    const wl = sr.x0 + T / 2, wr = sr.x1 - T / 2, fw = 2 * LANE_W + RAIL;
+    const lx = sr.laneSide === 'x1' ? wr - fw : wl, lanes = [[lx, lx + LANE_W], [lx + LANE_W + RAIL, lx + fw]];
+    if (sr.laneSide === 'x1') lanes.reverse(); // the first flight against the wall either way
     const zl = sr.z0 + T / 2 + LANDING, zh = sr.z1 - T / 2 - LANDING;
-    for (let b = 0; b < nFloors - 1; b++) { const [a, c] = lanes[b % 2]; stairs.push({ b, x0: a, x1: c, zl, zh, dir: b % 2 ? -1 : 1 }); }
+    for (let b = 0; b < nFloors - 1; b++) { const [a, c] = lanes[b % 2]; stairs.push({ b, x0: a, x1: c, zl, zh, dir: b % 2 ? -1 : 1, openX0: a > wl + 0.01, openX1: c < wr - 0.01 }); }
     /** rails on floor k (floor-0 coordinates): both sides of each flight; the top end closed on the floor you climb from,
      *  the bottom end (the stairwell edge) closed on the floor you arrive at */
     const rails = (k) => {
@@ -146,8 +149,8 @@ export function generateLevel(seed, opts = {}) {
       const add = (w) => { const key = [w.x0, w.x1, w.z0, w.z1].map(v => v.toFixed(2)).join(); if (!seen.has(key)) { seen.add(key); out.push(w); } };
       for (const st of stairs) {
         if (st.b !== k && st.b + 1 !== k) continue;
-        if (st.x0 > lx + 0.01) add({ x0: st.x0 - RAIL, x1: st.x0, z0: zl, z1: zh, rail: true });
-        add({ x0: st.x1, x1: st.x1 + RAIL, z0: zl, z1: zh, rail: true });
+        if (st.openX0) add({ x0: st.x0 - RAIL, x1: st.x0, z0: zl, z1: zh, rail: true }); // a rail on every side that isn't a wall
+        if (st.openX1) add({ x0: st.x1, x1: st.x1 + RAIL, z0: zl, z1: zh, rail: true });
         const zc = (st.b === k) === (st.dir > 0) ? zh : zl;
         add({ x0: st.x0, x1: st.x1, z0: zc - RAIL / 2, z1: zc + RAIL / 2, rail: true });
       }
@@ -368,7 +371,7 @@ export function generateLevel(seed, opts = {}) {
         const [, cx, cz] = placed.find(([pt]) => pt === 'couch');
         [x, z] = [[cx, cz + 1.6], [cx, cz - 1.6], [cx + 0.6, cz + 1.7], [cx - 0.6, cz - 1.7], [cx + 2.6, cz], [cx - 2.6, cz]][tries % 6];
       }
-      else { const r = own && (t.furniture || tries < 150) ? own : multi && !t.furniture ? roomOnFloor(placed.length % nFloors) : roomByArea(); x = R(r.x0 + halfX, r.x1 - halfX); z = R(r.z0 + halfZ, r.z1 - halfZ); }
+      else { const r = own ? own : multi && !t.furniture ? roomOnFloor(placed.length % nFloors) : roomByArea(); x = R(r.x0 + halfX, r.x1 - halfX); z = R(r.z0 + halfZ, r.z1 - halfZ); }
       x = Math.round(x * 10) / 10; z = Math.round(z * 10) / 10;
       if (!fits(x, z, false, false)) continue;
       placed.push([type, x, z]);
