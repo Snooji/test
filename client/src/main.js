@@ -196,6 +196,31 @@ function route() {
   track('home_view');
 }
 
+/** connection problems in plain words (never a raw MatchMakeError) */
+function friendlyConnectError(msg) {
+  if (/not found|locked|full|expired/i.test(msg)) return 'That crew is full or no longer exists. Start a new one!';
+  if (/429|too many/i.test(msg)) return 'Too many tries in a row. Wait a minute, then try again.';
+  return 'Can’t reach the game right now. It may be updating to a new version (about a minute). Check your signal and try again shortly.';
+}
+/** a banner over the game while the connection is down, with a way out */
+function netBox(text, canWait) {
+  const el = $('netbox');
+  if (!text) { show(el, false); return; }
+  $('netbox-text').textContent = text;
+  $('netbox').classList.toggle('waiting', !!canWait);
+  show(el, true);
+}
+$('netbox-menu').addEventListener('click', () => {
+  const r = room; room = null; snap = null; lastPhase = null; reconnecting = false;
+  netBox(null);
+  try { sessionStorage.removeItem('sm_rt'); } catch {}
+  r?.leave(true).catch(() => {});
+  history.replaceState(null, '', location.pathname);
+  for (const s of ['hud', 'controls', 'joyzone', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results', 'duel']) show(s, false);
+  route();
+});
+let serverRestarting = false;
+
 async function connect(roomId, extra = {}) {
   $('home-err').textContent = '';
   stopDemo();
@@ -215,7 +240,7 @@ async function connect(roomId, extra = {}) {
     if (/gate/i.test(msg) || err?.code === 401) { try { localStorage.removeItem('sm_gate'); } catch {} gate = null; route(); $('gate-err').textContent = 'Please clock in again.'; return; }
     history.replaceState(null, '', location.pathname);
     route();
-    $('home-err').textContent = /not found|locked|full/i.test(msg) ? 'That crew is full or no longer exists. Start a new one!' : 'Could not connect: ' + msg;
+    $('home-err').textContent = friendlyConnectError(msg);
     return;
   }
   history.replaceState(null, '', `?room=${room.roomId}`);
@@ -234,10 +259,10 @@ function attach(r) {
   r.onMessage('evt', onEvent);
   r.onMessage('chat', onChat);
   // a dropped socket (phones switching apps, a signal blip): the SDK reconnects on its own into the same mover
-  r.onDrop(() => { if (room !== r) return; reconnecting = true; toast('📡 Connection lost, reconnecting…', 'crunch'); });
-  r.onReconnect(() => { if (room !== r) return; reconnecting = false; toast('✅ Reconnected!'); try { sessionStorage.setItem('sm_rt', JSON.stringify({ roomId: r.roomId, token: r.reconnectionToken })); } catch {} });
+  r.onDrop(() => { if (room !== r) return; reconnecting = true; netBox(serverRestarting ? '🔧 The game is updating to a new version. Hang on…' : '📡 Connection lost. Reconnecting…', true); });
+  r.onReconnect(() => { if (room !== r) return; reconnecting = false; netBox(null); toast('✅ Reconnected!'); try { sessionStorage.setItem('sm_rt', JSON.stringify({ roomId: r.roomId, token: r.reconnectionToken })); } catch {} });
   r.onLeave((code) => { // gone for good: left on purpose, kicked, or reconnecting gave up
-    reconnecting = false;
+    reconnecting = false; netBox(null);
     if (room !== r) return; // we left on purpose (Main menu, Quit): not a disconnect
     const intentional = code === 1000 || code === 4000;
     room = null; snap = null; lastPhase = null;
@@ -245,7 +270,9 @@ function attach(r) {
     history.replaceState(null, '', location.pathname);
     for (const s of ['hud', 'controls', 'joyzone', 'chat', 'chat-toggle', 'lobby', 'meeting', 'results']) show(s, false);
     route();
-    if (!intentional) $('home-err').textContent = 'Lost the connection to the crew. Check your signal, then pick a game to jump back in.';
+    if (serverRestarting || code === 4001) $('home-err').textContent = 'The game just updated to a new version, so that round ended. Give it about a minute, then jump back in!';
+    else if (!intentional) $('home-err').textContent = 'Lost the connection to the crew. Check your signal, then pick a game to jump back in.';
+    serverRestarting = false;
   });
 }
 
@@ -620,6 +647,7 @@ function toast(text, cls = '') {
   setTimeout(() => el.remove(), cls ? 5000 : 3200);
 }
 function onEvent(e) {
+  if (e.kind === 'restart') { serverRestarting = true; netBox('🔧 The game is updating to a new version. This round can’t continue. Back in about a minute!', false); return; }
   if (e.kind === 'toast') { if (!(e.private && snap?.tutorial)) toast(e.text); }
   else if (e.kind === 'emote') { scene.emote(e.id, e.e); if (e.e.startsWith('+')) sfx('coin'); else sfx('blip'); if (e.id === myId) buzz(e.e.startsWith('+') ? 25 : 12); }
   else if (e.kind === 'crunch') {

@@ -702,3 +702,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .tcol .crew-list li { grid-template-columns: 26px minmax(0, 1fr); row-gap: 0; padding: 4px 0; }
 .tcol .crew-list li .cl-st { grid-column: 2; font-size: 11px; line-height: 1.1; }
 .tcol .crew-list li .cl-pic svg { width: 24px; height: 24px; }
+
+/* connection lost / server updating: a clear message and a way out */
+#netbox { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(23,19,16,.55); padding: 16px; }
+#netbox.hidden { display: none; }
+#netbox .nb-card { background: var(--panel, #241e19); border-radius: 16px; padding: 20px; max-width: 360px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+#netbox .nb-card p { margin: 10px 0 14px; font-weight: 600; }
+#netbox:not(.waiting) .spin { display: none; }

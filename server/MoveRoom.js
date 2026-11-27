@@ -1702,6 +1702,13 @@ export class MoveRoom extends Room {
     }
   }
 
+  /** The server is about to restart (a new version going live): tell everyone first, so it isn't a mystery freeze. */
+  onBeforeShutdown() {
+    this.event({ kind: 'restart' });
+    this.broadcastSnap?.();
+    return new Promise(res => setTimeout(() => { this.disconnect(4001).catch(() => {}).finally(res); }, 600));
+  }
+
   onUncaughtException(err, method) {
     console.error('room error in', method, err);
     MoveRoom.store?.logError({ where: 'room:' + method, message: err.message, stack: err.stack, ua: '' }).catch(() => {});
