@@ -69,3 +69,46 @@ test('furniture dolly: BACK in the truck puts the piece back on the dolly', () =
   a.pending.dashN = 1; room.tick(DT);
   assert.equal(bed.state, 'flat'); assert.equal(fd.piece, bed.id); assert.equal(a.flatDolly, 'flatdolly'); assert.ok(!a.carry);
 });
+
+test('furniture dolly with boxes: up to four (2x2), never mixed with furniture; a full load wobbles at speed and spills; falls break fragile at once, standard on the 2nd, heavy on the 3rd', async () => {
+  const { MoveRoom } = await import('../server/MoveRoom.js');
+  const room = new MoveRoom(); room.onMessage = () => {}; room.setSimulationInterval = () => {}; room.broadcast = () => {}; room.clients = [];
+  room.onCreate({ dolly: true, seed: 4242 });
+  room.clients.push({ sessionId: 'A', send: () => {} }); room.onJoin({ sessionId: 'A' }, {}, { name: 'Ada', email: 'a@x.io' });
+  room.startRound(); room.phase = 'playing';
+  const p = room.players.get('A'), fd = room.items.get('flatdolly');
+  const boxes = [...room.items.values()].filter(i => ['standard', 'heavy', 'fragile'].includes(i.type) && i.state === 'floor').slice(0, 5);
+  p.flatDolly = fd.id; fd.state = 'pushed'; fd.pusher = p.id;
+  for (const b of boxes) { b.x = p.x + 0.3; b.z = p.z; room.flatTap(p); }
+  assert.equal(fd.stack.length, 4, 'four boxes, no more');
+  assert.ok(fd.stack.every(id => room.items.get(id).state === 'flat'));
+  const couch = [...room.items.values()].find(i => i.type === 'couch'); couch.x = p.x + 0.3; couch.z = p.z;
+  room.flatTap(p); assert.equal(fd.piece, null, 'no furniture on top of boxes');
+  // gentle pushing: no spill
+  p.in.mx = 0.4; p.in.mz = 0;
+  for (let i = 0; i < 100; i++) room.flatWobble(p, fd, 0.05, p.x - 0.08, p.z, p.face);
+  assert.equal(fd.stack.length, 4, 'steady does it');
+  // flat out for long enough: the top box slides off
+  p.in.mx = 1; const top = room.items.get(fd.stack[3]);
+  for (let i = 0; i < 100 && fd.stack.length === 4; i++) room.flatWobble(p, fd, 0.05, p.x - 0.25, p.z, p.face);
+  assert.equal(fd.stack.length, 3, 'a box slid off');
+  assert.ok(top.state !== 'flat', 'the top one came off');
+  // fall rules by type
+  const fallTimes = (type) => {
+    const b = boxes.find(x => x.type === type) || boxes[0]; b.type = type; b.falls = 0;
+    const before = room.breaks.length;
+    for (let n = 1; n <= 5; n++) { b.state = 'flat'; fd.stack.push(b.id); room.spillFromFlat(p, fd); if (room.breaks.length > before) return n; }
+    return 99;
+  };
+  assert.equal(fallTimes('fragile'), 1, 'fragile breaks on the first fall');
+  assert.equal(fallTimes('standard'), 2, 'standard on the second');
+  assert.equal(fallTimes('heavy'), 3, 'heavy on the third');
+});
+
+test('furniture dolly fits a hallway: short (1.3 m) when empty or carrying boxes', async () => {
+  const { MoveRoom } = await import('../server/MoveRoom.js');
+  const room = new MoveRoom(); room.onMessage = () => {}; room.setSimulationInterval = () => {}; room.broadcast = () => {}; room.clients = [];
+  room.onCreate({ dolly: true, seed: 4242 });
+  const fd = room.items.get('flatdolly');
+  assert.ok(room.flatReach(fd) <= 1.25, `reach ${room.flatReach(fd)}`);
+});

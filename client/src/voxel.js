@@ -356,10 +356,11 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
   const t = ITEM_TYPES[type];
   if (type === 'dolly') return dolly();
   if (type === 'flatdolly') { // chunky and bright so it's easy to spot: orange deck, teal carpet, big casters
-    const v = new Vox().box(0, 0.26, 0, 2.2, 0.16, 1.1, (x) => (Math.round(x / VS) & 3) === 0 ? 0xe06f24 : 0xff8a3d);
-    for (const s of [-1, 1]) v.box(0, 0.37, s * 0.44, 2.2, 0.08, 0.18, 0x2ec4b6);
-    v.box(-1.05, 0.55, 0, 0.12, 0.5, 1.1, 0xffd166); // push bar
-    for (const sx of [-0.9, 0.9]) for (const sz of [-0.42, 0.42]) v.cyl(sx, 0.1, sz, 0.12, 0.12, 0x1a1a24, 'z');
+    // 1.3 m long: short enough to swing round a hallway corner (a couch still sticks out past both ends, as it would)
+    const v = new Vox().box(0, 0.26, 0, 1.3, 0.16, 1.1, (x) => (Math.round(x / VS) & 3) === 0 ? 0xe06f24 : 0xff8a3d);
+    for (const s of [-1, 1]) v.box(0, 0.37, s * 0.44, 1.3, 0.08, 0.18, 0x2ec4b6);
+    v.box(-0.6, 0.55, 0, 0.12, 0.5, 1.1, 0xffd166); // push bar
+    for (const sx of [-0.5, 0.5]) for (const sz of [-0.42, 0.42]) v.cyl(sx, 0.1, sz, 0.12, 0.12, 0x1a1a24, 'z');
     const g = new THREE.Group(); g.add(v.mesh()); return g;
   }
   if (loaded && dims) return loadedPiece(type, wrapped, dims);

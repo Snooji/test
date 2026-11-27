@@ -483,13 +483,23 @@ export class GameScene {
         if (!o.userData.tag) { o.userData.tag = sprite('🛞 FURNITURE DOLLY', { fg: '#ffd166', stroke: '#171310', font: 'bold 34px system-ui', w: 400 }, [2.4, 0.5]); o.userData.tag.position.y = 1.5; o.add(o.userData.tag); }
         o.userData.tag.visible = it.state === 'floor';
         if (it.state === 'floor') o.userData.tag.position.y = 1.5 + Math.sin(t * 3) * 0.12;
+        if (!o.userData.warn) { o.userData.warn = sprite('⚠️ WOBBLING', { fg: '#ffd166', stroke: '#171310', font: 'bold 40px system-ui' }, [2.0, 0.5]); o.userData.warn.position.y = 1.9; o.add(o.userData.warn); }
+        o.userData.warn.visible = (it.wobble || 0) > 0.35; // ease off or a box slides off
+        if (o.userData.warn.visible) o.userData.warn.material.opacity = 0.5 + Math.abs(Math.sin(t * (6 + it.wobble * 10))) * 0.5;
       }
-      if (it.state === 'flat') { // riding the furniture dolly
+      if (it.state === 'flat') { // riding the furniture dolly: one piece of furniture, or boxes 2x2 (drawn smaller to fit the deck)
         const dv = this.items.get(it.on);
         if (dv) {
-          o.position.x = damp(o.position.x, dv.obj.position.x, 16, dt);
-          o.position.z = damp(o.position.z, dv.obj.position.z, 16, dt);
-          o.position.y = damp(o.position.y, 0.36 + (dv.data?.y || 0), 14, dt);
+          const k = dv.data?.stack?.indexOf(it.id) ?? -1;
+          let ox = 0, oz = 0;
+          if (k >= 0) {
+            const along = (k % 2 ? 0.31 : -0.31), across = (k < 2 ? -0.27 : 0.27), ry = dv.obj.rotation.y; // local x = the dolly's length
+            ox = Math.cos(ry) * along + Math.sin(ry) * across; oz = -Math.sin(ry) * along + Math.cos(ry) * across;
+            o.scale.setScalar(0.62);
+          }
+          o.position.x = damp(o.position.x, dv.obj.position.x + ox, 16, dt);
+          o.position.z = damp(o.position.z, dv.obj.position.z + oz, 16, dt);
+          o.position.y = damp(o.position.y, 0.36 + (dv.data?.y || 0) + (k >= 0 && (dv.data?.wobble || 0) > 0.35 ? Math.sin(t * 22 + k) * 0.04 * dv.data.wobble : 0), 14, dt);
           o.visible = dv.data ? seen(dv.data) : seen(it);
           o.rotation.y = dv.obj.rotation.y;
         }

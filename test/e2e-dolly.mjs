@@ -80,5 +80,30 @@ s = await snap();
 const loaded = d2.stack.filter(x => s.items.find(i => i.id === x)?.state === 'loaded').length;
 log('unloaded from dolly into truck:', loaded, '| dolly uses', s.items.find(i => i.type === 'dolly').uses);
 if (loaded !== 3) errors.push('not all dolly boxes went into the truck');
+
+// ---- the furniture dolly: four boxes, 2x2 ----
+await tap(); await wait(400); // let go of the two-wheeler if still held
+s = await snap();
+const fd = s.items.find(i => i.type === 'flatdolly');
+if (!fd) errors.push('no furniture dolly');
+else {
+  await tp(fd.x + 0.05, fd.z + 0.05); await wait(300); await tap();
+  await p.waitForFunction((id) => window.__sm.snap.players.find(x => x.id === id)?.flatDolly, id, { timeout: 4000 }).catch(() => {});
+  for (let tries = 0; tries < 10; tries++) {
+    s = await snap();
+    const n = s.items.find(i => i.type === 'flatdolly').stack?.length || 0;
+    if (n >= 4) break;
+    const b = s.items.find(i => i.state === 'floor' && ['standard', 'heavy', 'fragile'].includes(i.type));
+    if (!b) break;
+    await tp(b.x + 0.05, b.z + 0.05); await wait(250); await tap();
+    await p.waitForFunction((n) => (window.__sm.snap.items.find(i => i.type === 'flatdolly').stack?.length || 0) > n, n, { timeout: 3000 }).catch(() => {});
+  }
+  s = await snap();
+  const n4 = s.items.find(i => i.type === 'flatdolly').stack?.length || 0;
+  log('furniture dolly boxes:', n4);
+  if (n4 !== 4) errors.push('furniture dolly did not take 4 boxes');
+  await tp(5, 0); await wait(700);
+  await p.screenshot({ path: `${out}/d04-flatdolly-loaded.png` });
+}
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'DOLLY E2E PASS');
 await browser.close(); process.exit(errors.length ? 1 : 0);

@@ -18,6 +18,8 @@ export const ENERGY = {
   regenStill: 0.35, regenWalk: 0.1, injurySecs: 7, injuryMult: 0.55,
   injuries: ['twisted an ankle', 'pulled a back muscle', 'stubbed a toe', 'tweaked a knee'],
 };
+const FLAT_LEN = 1.3, FLAT_MAX_BOXES = 4; // the furniture dolly: short enough for a hallway, 2x2 boxes or one piece
+const BOX_TYPES = ['standard', 'heavy', 'fragile'];
 const DUEL_SECONDS = 5, DUEL_TAP_COST = 0.008; // ~40 taps (a full 5 s of mashing) = a third of your energy
 // tap allowance: refills at 15 taps/s and holds up to 4, so taps a phone network delivers bunched together all count,
 // while an autoclicker gets a 4-tap burst and then 15/s at most
@@ -418,7 +420,7 @@ export class MoveRoom extends Room {
       const spot = freeSpot(this.level, this.level.items.map(([, x, z]) => ({ x, z })));
       this.items.set('dolly', { id: 'dolly', type: 'dolly', x: spot.x, z: spot.z, state: 'floor', stack: [], uses: 0, strainT: 0, strain: 0, pusher: null, carriers: [], earned: {}, task: null, helpers: [], g: null });
       const spot2 = freeSpot(this.level, [...this.level.items.map(([, x, z]) => ({ x, z })), spot], Math.random, 0); // the furniture dolly lives downstairs
-      this.items.set('flatdolly', { id: 'flatdolly', type: 'flatdolly', x: spot2.x, z: spot2.z, state: 'floor', piece: null, pusher: null, respawnAt: 0, carriers: [], earned: {}, task: null, helpers: [], g: null });
+      this.items.set('flatdolly', { id: 'flatdolly', type: 'flatdolly', x: spot2.x, z: spot2.z, state: 'floor', piece: null, stack: [], wobble: 0, pusher: null, respawnAt: 0, carriers: [], earned: {}, task: null, helpers: [], g: null });
     }
     this.level.items.forEach(([type, x, z], i) => {
       const t = ITEM_TYPES[type];
@@ -660,6 +662,7 @@ export class MoveRoom extends Room {
       if (item) { item.x = p.x + Math.sin(p.face) * 0.2; item.z = p.z + Math.cos(p.face) * 0.2; }
       if (dly) { dly.x = p.x + Math.sin(p.face) * 0.9; dly.z = p.z + Math.cos(p.face) * 0.9; this.syncDollyStack(dly); }
       if (fd) { const off = this.flatReach(fd); fd.x = p.x + Math.sin(p.face) * off; fd.z = p.z + Math.cos(p.face) * off; fd.face = p.face; this.syncFlatPiece(fd); }
+      if (fd) this.flatWobble(p, fd, dt, ox, oz, of);
     }
 
     // pushing a loaded dolly onto the ramp: boxes come off top first, one at a time
@@ -674,9 +677,16 @@ export class MoveRoom extends Room {
       this.tell(p, `Furniture dolly: place the ${ITEM_TYPES[piece.type].label.toLowerCase()} yourself. Aim · ACTION drop · BACK puts it back on the dolly.`);
       return;
     }
+    if (fd2?.stack?.length && !item && inRamp(p.x, p.z) && !p.rampLock) { // furniture dolly of boxes: one at a time, like the two-wheel one
+      p.tripPlaced = 0; p.feedFrom = 'flat';
+      this.feedFromDolly(p);
+      p.cursorCd = 0.35;
+      this.takeRampSlot(p);
+      return;
+    }
     const dly2 = this.dollyOf(p);
     if (dly2 && !item && dly2.stack.length && inRamp(p.x, p.z) && !p.rampLock) {
-      p.tripPlaced = 0;
+      p.tripPlaced = 0; p.feedFrom = 'dolly';
       this.feedFromDolly(p);
       p.cursorCd = 0.35;
       this.takeRampSlot(p);
@@ -835,21 +845,33 @@ export class MoveRoom extends Room {
   // ---------- the furniture dolly (flat, four wheels): one two-mover piece, moved solo, single use ----------
   flatOf(p) { return p.flatDolly ? this.items.get(p.flatDolly) : null; }
   /** how far ahead of the pusher the dolly's centre sits (half the load's length, lengthwise) */
-  flatReach(fd) { const pc = fd.piece && this.items.get(fd.piece), t = pc && ITEM_TYPES[pc.type]; return 0.55 + (t ? Math.max(t.w, t.d) * 0.5 : 1) * 1.0; }
+  flatReach(fd) { const pc = fd.piece && this.items.get(fd.piece), t = pc && ITEM_TYPES[pc.type]; return 0.55 + (t ? Math.max(t.w, t.d) * 0.5 : FLAT_LEN / 2); }
   flatBlocked(p, fd) {
     const pc = fd.piece && this.items.get(fd.piece), t = pc && ITEM_TYPES[pc.type];
-    const len = t ? Math.max(t.w, t.d) : 2, off = this.flatReach(fd), sx = Math.sin(p.face), sz = Math.cos(p.face);
+    const len = t ? Math.max(t.w, t.d) : FLAT_LEN, off = this.flatReach(fd), sx = Math.sin(p.face), sz = Math.cos(p.face);
     for (const k of [off - len / 2 + 0.3, off, off + len / 2 - 0.3]) if (this.level.hitsWall(p.x + sx * k, p.z + sz * k, 0.42)) return true;
     return false;
   }
-  syncFlatPiece(fd) { const pc = fd.piece && this.items.get(fd.piece); if (pc) { pc.x = fd.x; pc.z = fd.z; } }
+  syncFlatPiece(fd) { const pc = fd.piece && this.items.get(fd.piece); if (pc) { pc.x = fd.x; pc.z = fd.z; } for (const id of fd.stack || []) { const b = this.items.get(id); if (b) { b.x = fd.x; b.z = fd.z; } } }
   flatTap(p) {
     const d = this.flatOf(p);
+    d.stack ||= [];
     if (!d.piece) {
+      // the nearest thing it can take: a box (up to four, 2x2) or, while it's empty, one piece of furniture
       let best = null, bd = REACH + 0.6;
       for (const it of this.items.values()) {
-        if (it.state !== 'floor' || !ITEM_TYPES[it.type].teamCarry) continue;
-        const dd = dist(p, it) - Math.max(ITEM_TYPES[it.type].w, ITEM_TYPES[it.type].d) * 0.35; if (dd < bd) { bd = dd; best = it; }
+        if (it.state !== 'floor') continue;
+        const t = ITEM_TYPES[it.type], box = BOX_TYPES.includes(it.type);
+        if (!box && (!t.furniture || t.tool || d.stack.length)) continue;
+        const dd = dist(p, it) - (box ? 0 : Math.max(t.w, t.d) * 0.35);
+        if (dd < bd) { bd = dd; best = it; }
+      }
+      if (best && BOX_TYPES.includes(best.type)) {
+        if (d.stack.length >= FLAT_MAX_BOXES) return this.tell(p, `The furniture dolly is full (${FLAT_MAX_BOXES} boxes). Push it to the truck, and easy on the corners.`);
+        best.state = 'flat'; best.flatId = d.id; best.carriers = []; d.stack.push(best.id); this.syncFlatPiece(d);
+        this.event({ kind: 'emote', id: p.id, e: '📦' });
+        if (d.stack.length === FLAT_MAX_BOXES) this.tell(p, 'Fully loaded: too fast for too long, or a sharp turn, and a box slides off. Fragile ones break; standard after two falls, heavy after three.');
+        return;
       }
       if (best?.assembled) return this.tell(p, `Hold ACTION to take the ${ITEM_TYPES[best.type].label.toLowerCase()} apart first, then load it on the dolly.`);
       if (best) {
@@ -860,6 +882,40 @@ export class MoveRoom extends Room {
       }
     }
     this.dropFlat(p); // nothing to load (or already loaded): set it down where you are
+  }
+  /** A full load (4 boxes) wobbles when pushed flat out for too long or swung round a corner; at the limit the top box
+   *  slides off. Easing off settles it. Fragile boxes break on the first fall, standard on the second, heavy on the third. */
+  flatWobble(p, fd, dt, ox, oz, of) {
+    if ((fd.stack?.length || 0) < FLAT_MAX_BOXES) { fd.wobble = Math.max(0, (fd.wobble || 0) - dt * 0.5); return; }
+    const moved = Math.hypot(p.x - ox, p.z - oz) / Math.max(dt, 1e-3);
+    let turn = Math.abs(p.face - of); if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    const turnRate = turn / Math.max(dt, 1e-3), push = Math.hypot(p.in.mx, p.in.mz);
+    let w = fd.wobble || 0;
+    if (moved > 0.4 && (push > 0.85 || p.dashT > 0)) w += dt * (p.dashT > 0 ? 0.7 : 0.3); // flat out: ~3 s, dashing much sooner
+    if (moved > 0.4 && turnRate > 4) w += turn * 0.22;                                      // a sharp swing round a corner
+    if (moved <= 0.4 || (push < 0.6 && turnRate < 2)) w -= dt * 0.35;                       // taking it steady settles it
+    fd.wobble = Math.max(0, w);
+    if (fd.wobble >= 1) { fd.wobble = 0.5; this.spillFromFlat(p, fd); }
+  }
+  spillFromFlat(p, fd) {
+    const id = fd.stack.pop(), box = id && this.items.get(id);
+    if (!box) return;
+    const side = Math.random() < 0.5 ? -1 : 1, sx = Math.cos(p.face) * side, sz = -Math.sin(p.face) * side;
+    let x = fd.x + sx * 1.0, z = fd.z + sz * 1.0;
+    if (this.level.hitsWall(x, z, 0.45)) { x = fd.x - sx * 1.0; z = fd.z - sz * 1.0; }
+    if (this.level.hitsWall(x, z, 0.45)) { x = p.x; z = p.z; }
+    Object.assign(box, { state: 'floor', flatId: null, x: +x.toFixed(2), z: +z.toFixed(2) });
+    box.falls = (box.falls || 0) + 1;
+    const limit = { fragile: 1, standard: 2, heavy: 3 }[box.type] || 2, label = ITEM_TYPES[box.type].label.toLowerCase();
+    if (box.falls >= limit) {
+      p.score -= ITEM_TYPES[box.type].pts;
+      box.state = 'broken';
+      this.recordBreak(box, [p.id], 'fell off the furniture dolly');
+      this.respawn(box);
+      return;
+    }
+    this.event({ kind: 'emote', id: p.id, e: '😬' });
+    this.tell(p, `A ${label} slid off the dolly! ${limit - box.falls === 1 ? 'One more fall and it breaks.' : `${limit - box.falls} more falls and it breaks.`}`);
   }
   dropFlat(p) {
     const d = this.flatOf(p);
@@ -926,17 +982,18 @@ export class MoveRoom extends Room {
 
   /** next box off the dolly (top of the stack) into your hands, in the truck */
   feedFromDolly(p) {
-    const d = this.dollyOf(p);
+    const d = p.feedFrom === 'flat' ? this.flatOf(p) : this.dollyOf(p);
     const id = d?.stack.pop();
     if (!id) return false;
     const box = this.items.get(id);
-    box.state = 'carried'; box.carriers = [p.id]; box.dollyId = null; box.x = p.x; box.z = p.z;
+    box.state = 'carried'; box.carriers = [p.id]; box.dollyId = null; box.flatId = null; box.x = p.x; box.z = p.z;
     p.carry = id; p.loadMode = true; p.feeding = true;
     p.cursor = { gx: p.cursor?.gx ?? 1, gz: p.cursor?.gz ?? 0, rot: 0 };
     return true;
   }
 
   finishDollyTrip(p) {
+    if (p.feedFrom === 'flat') { p.feeding = false; p.feedFrom = null; p.tripPlaced = 0; return; } // the furniture dolly doesn't wear out on boxes
     const d = this.dollyOf(p);
     p.feeding = false;
     if (!d || !p.tripPlaced) return;
@@ -993,6 +1050,7 @@ export class MoveRoom extends Room {
     if (p.dolly && !p.carry) { this.dropDolly(p); p.loadMode = false; return; }
     if (p.flatDolly && !p.carry) { this.dropFlat(p); p.loadMode = false; return; }
     if (p.flatFeeding && p.carry) this.flatBack(p, this.items.get(p.carry)); // e.g. disconnected while placing: back on the dolly
+    if (p.feeding && p.feedFrom === 'flat' && p.carry) { const d = this.flatOf(p), b = this.items.get(p.carry); if (d && b) { b.state = 'flat'; b.flatId = d.id; b.carriers = []; d.stack.push(b.id); p.carry = null; p.feeding = false; p.feedFrom = null; this.syncFlatPiece(d); } }
     const item = p.carry ? this.items.get(p.carry) : null;
     p.loadMode = false;
     if (!item) { p.carry = null; return; }
@@ -1218,8 +1276,9 @@ export class MoveRoom extends Room {
 
     if (p.pending.dashN && p.flatFeeding) { this.flatBack(p, item); return; } // BACK: the piece goes back on the furniture dolly
     if (p.pending.dashN && p.feeding) { // BACK: the box goes back on top of the dolly
-      const d = this.dollyOf(p);
-      item.state = 'dolly'; item.dollyId = d.id; item.carriers = []; d.stack.push(item.id);
+      const flat = p.feedFrom === 'flat', d = flat ? this.flatOf(p) : this.dollyOf(p);
+      if (flat) { item.state = 'flat'; item.flatId = d.id; } else { item.state = 'dolly'; item.dollyId = d.id; }
+      item.carriers = []; d.stack.push(item.id); if (flat) this.syncFlatPiece(d);
       p.carry = null; p.loadMode = false; p.rampLock = true; p.slotTo = null;
       this.finishDollyTrip(p);
       return;
@@ -1263,7 +1322,7 @@ export class MoveRoom extends Room {
     const t = ITEM_TYPES[item.type];
     const taken = [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z }));
     const spot = freeSpot(this.level, taken);
-    Object.assign(item, { state: 'floor', x: spot.x, z: spot.z, wrapped: false, assembled: !!t.needsDisassemble, carriers: [], earned: {}, g: null, task: null, value: 1, pulled: false, outsideT: 0, prevOwners: null });
+    Object.assign(item, { state: 'floor', x: spot.x, z: spot.z, wrapped: false, assembled: !!t.needsDisassemble, carriers: [], earned: {}, g: null, task: null, value: 1, pulled: false, outsideT: 0, prevOwners: null, falls: 0, flatId: null, dollyId: null }); // a fresh one: no falls yet
     this.event({ kind: 'toast', text: `📦 A replacement ${t.label.toLowerCase()} turned up in the ${this.level.roomAt(spot.x, spot.z)}.` });
   }
 
@@ -1586,7 +1645,7 @@ export class MoveRoom extends Room {
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
       id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
       assembled: i.assembled, g: i.g, n: i.carriers.length, damaged: i.damaged ? 1 : 0, ...(i.pulled && i.value < 1 ? { value: +i.value.toFixed(2) } : {}),
-      ...(i.type === 'dolly' ? { stack: i.stack, uses: i.uses, strain: i.strain, pusher: i.pusher } : {}), ...(i.state === 'dolly' ? { on: i.dollyId } : {}), ...(i.type === 'flatdolly' ? { piece: i.piece, pusher: i.pusher } : {}), ...(i.state === 'flat' ? { on: i.flatId } : {}),
+      ...(i.type === 'dolly' ? { stack: i.stack, uses: i.uses, strain: i.strain, pusher: i.pusher } : {}), ...(i.state === 'dolly' ? { on: i.dollyId } : {}), ...(i.type === 'flatdolly' ? { piece: i.piece, pusher: i.pusher, stack: i.stack || [], wobble: +(i.wobble || 0).toFixed(2) } : {}), ...(i.state === 'flat' ? { on: i.flatId } : {}),
       task: i.task ? { kind: i.task.kind, p: +i.task.progress.toFixed(2) } : null,
     }));
     return {

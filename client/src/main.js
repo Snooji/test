@@ -548,9 +548,12 @@ function renderPrompt(s, me) {
     action = 'HOLD ↩️';
   } else if (me.flatDolly && !me.carry) {
     const d = s.items.find(i => i.id === me.flatDolly), pc = d?.piece && s.items.find(i => i.id === d.piece);
+    const n = d?.stack?.length || 0;
     text = pc ? `🛞 ${ITEM_TYPES[pc.type].label} on the furniture dolly · push it to the 🚚 truck and place it yourself`
-      : `🛞 Furniture dolly · tap ${actKey()} next to a couch, bed, desk or table (take desks/tables apart first)`;
-    action = pc ? 'SET DOWN' : 'LOAD';
+      : n >= 4 ? `🛞 4 boxes · full! Easy on the speed and the corners or one slides off (fragile breaks)`
+      : n ? `🛞 ${n} box${n > 1 ? 'es' : ''} on the furniture dolly · tap ${actKey()} by a box to add one (up to 4) · push to the 🚚 truck`
+      : `🛞 Furniture dolly · tap ${actKey()} by a piece of furniture, or by boxes (up to 4) · take desks/tables apart first`;
+    action = pc || n >= 4 ? 'SET DOWN' : 'LOAD';
   } else if (me.dolly && !me.carry) {
     const d = s.items.find(i => i.id === me.dolly);
     const n = d?.stack?.length || 0;
