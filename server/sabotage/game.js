@@ -8,6 +8,7 @@ import { inRamp } from '../../shared/world.js';
 import { dealRoles, jobsFor } from './roles.js';
 import { pickSabotage, blocked, applySabotage, pickRepair, applyRepair } from './actions.js';
 import { driveOffCheck } from '../../shared/logic.js';
+import { canSee, witness, inspect } from './evidence.js';
 
 const BOXES = new Set(['standard', 'heavy', 'fragile']);
 
@@ -29,7 +30,12 @@ export class SabotageGame {
     this.dark = new Map();      // roomIndex -> seconds of darkness left
     this.padsOutT = 0; this.weakLeft = 0;
     this.strapped = new Set();  // truck pieces the Driver strapped down
+    this.proof = new Map();     // witnessId -> { saboteurId, action, at }
+    this.inspected = [];        // recent inspection results (shown at meetings)
+    this.breakSpots = [];       // breakages: { x, z, at, reported } (anyone who sees one can report it)
   }
+  canSee(from, to) { return canSee(this.level, from, to, this); }
+  onSabotageDone(p, job) { witness(this, p, job); }
 
   get level() { return this.room.level; }
 
@@ -75,6 +81,7 @@ export class SabotageGame {
    *  into a pile that can be repacked. Returns true so the room doesn't respawn it. */
   onBreak(item) {
     this.room.items.delete(item.id);
+    this.breakSpots.push({ x: item.x, z: item.z, at: this.room.elapsed || 0, reported: false });
     if (item.type === 'standard' || item.type === 'heavy') {
       const at = this.walkable(item.x, item.z);
       this.newItem('pile', at.x, at.z, { contents: item.type, value: item.value ?? 1, bornAt: this.room.elapsed || 0, room: item.room });
@@ -244,6 +251,7 @@ export class SabotageGame {
 
   /** the Sabotage button: start the best sabotage in reach (it finishes after its hold if the saboteur stays put) */
   onSabotage(p) {
+    if (p.role === 'inspector' && !p.ghost && this.room.isActive(p)) return this.startInspect(p);
     if (!p.saboteur || !this.room.isActive(p) || p.ghost || this.sabHolds.has(p.id)) return;
     if ((this.cooldown.get(p.id) || 0) > 0) return this.hint(p, `🤫 Lie low: ${Math.ceil(this.cooldown.get(p.id))} s until you can sabotage again.`);
     const job = pickSabotage(this, p);
@@ -252,14 +260,26 @@ export class SabotageGame {
     if (why) return this.hint(p, `🤫 ${why}`);
     this.sabHolds.set(p.id, { ...job, t: 0, x: p.x, z: p.z });
   }
+  /** the Inspector's role button: hold still 2 s next to a box, pile, dolly or piece of furniture */
+  startInspect(p) {
+    if ((this.cooldown.get(p.id) || 0) > 0) return this.hint(p, `🔎 ${Math.ceil(this.cooldown.get(p.id))} s until you can inspect again.`);
+    let best = null, bd = 1.5;
+    for (const it of this.room.items.values()) {
+      if (!['standard', 'heavy', 'fragile', 'pile', 'dolly', 'flatdolly'].includes(it.type) && !ITEM_TYPES[it.type].furniture) continue;
+      const d = Math.hypot(it.x - p.x, it.z - p.z); if (d < bd) { bd = d; best = it; }
+    }
+    if (!best) return this.hint(p, '🔎 Stand next to a box, a pile, a dolly or a piece of furniture to inspect it.');
+    this.sabHolds.set(p.id, { action: 'inspect', id: best.id, t: 0, x: p.x, z: p.z });
+  }
   tickSabotage(dt) {
     for (const [id, job] of this.sabHolds) {
       const p = this.room.players.get(id);
-      const gone = !p || !this.room.isActive(p) || Math.hypot(p.x - job.x, p.z - job.z) > 0.8 || (job.id && !this.room.items.has(job.id));
+      const gone = !p || !this.room.isActive(p) || Math.hypot(p.x - job.x, p.z - job.z) > 1.2 || (job.id && !this.room.items.has(job.id));
       if (gone) { this.sabHolds.delete(id); continue; }
       p.task = { id: job.id || null, kind: 'sabotage' };
       if ((job.t += dt) < HOLD[job.action] - 1e-6) continue;
       this.sabHolds.delete(id);
+      if (job.action === 'inspect') { inspect(this, p, this.room.items.get(job.id)); this.cooldown.set(id, SAB.INSPECT_COOLDOWN); continue; }
       if (blocked(this, p, job)) continue;
       applySabotage(this, p, job);
       this.cooldown.set(id, SAB.SAB_COOLDOWN);
@@ -307,6 +327,25 @@ export class SabotageGame {
     if (!total) return 100;
     const bad = chk.damaged.filter(d => !(/topple/.test(d.reason) && this.strapped.has(d.id))).length;
     return Math.round((100 * (total - bad)) / total);
+  }
+  /** may this mover call a meeting now? Proof always; otherwise after the cooldown, a breakage they can see or an
+   *  emergency meeting they still have. Returns the reason used, or a refusal message. */
+  meetingPass(p, cooldownLeft) {
+    if (p.ghost) return { no: '👻 Ghosts can\'t call meetings.' };
+    const proof = this.proof.get(p.id);
+    if (proof) { this.proof.delete(p.id); return { proof }; }
+    if (cooldownLeft > 0) return { no: `Back to work first: the next meeting can be called in ${Math.ceil(cooldownLeft)} s.` };
+    const seen = this.breakSpots.find(b => !b.reported && this.canSee(p, b));
+    if (seen) { seen.reported = true; return { report: true }; }
+    if (p.meetingsLeft > 0) { p.meetingsLeft--; return { emergency: true }; }
+    return { no: 'No emergency meetings left. Find proof or report a breakage you can see.' };
+  }
+  meetingInfo(pass, p) {
+    const ps = this.room.players;
+    return {
+      proof: pass.proof ? { witness: p.name, saboteur: ps.get(pass.proof.saboteurId)?.name || '?', action: pass.proof.action } : null,
+      report: !!pass.report, inspected: this.inspected.slice(-3), log: this.log.slice(-6),
+    };
   }
   onMeetingStart() {}
   onMeetingEnd() {}

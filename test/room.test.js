@@ -488,29 +488,7 @@ test('sabotage: the saboteur jams furniture, making disassembly take longer', ()
   assert.equal(desk.assembled, true, 'saboteur made no real progress');
 });
 
-test('sabotage: voting out the saboteur wins it for the crew', () => {
-  const { room, send, ids } = sabotageRoom(3);
-  const s = sab(room);
-  const caller = ids.find(id => id !== s.id);
-  send(caller, 'callout');
-  assert.equal(room.phase, 'meeting', 'anyone can call a meeting in sabotage');
-  for (const id of ids) send(id, 'vote', { target: s.id });
-  room.tick(0.05);
-  assert.equal(room.phase, 'results');
-  assert.equal(room.results.winners, 'crew');
-});
 
-test('sabotage: voting out an innocent ejects them, no strikes', () => {
-  const { room, send, ids } = sabotageRoom(4);
-  const s = sab(room);
-  const innocent = ids.filter(id => id !== s.id);
-  send(innocent[0], 'callout');
-  for (const id of ids) send(id, 'vote', { target: innocent[1] });
-  room.tick(0.05);
-  assert.equal(room.phase, 'playing');
-  assert.equal(room.players.get(innocent[1]).out, true);
-  assert.equal(room.players.get(innocent[0]).strikes, 0);
-});
 
 // ---- deploy B ----
 import { SUITS, dailySeed } from '../shared/logic.js';

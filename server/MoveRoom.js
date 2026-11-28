@@ -710,6 +710,7 @@ export class MoveRoom extends Room {
       }
       if (p.task) mult = 0; // working on furniture
       if (p.duel) mult = 0; // in a tap battle
+      if (p.ghost) mult *= 0.5; // sabotage: a wrongly voted-out mover keeps working as a ghost, at half speed
       if (p.injuredT > 0) mult *= ENERGY.injuryMult;
       const dly = this.dollyOf(p);
       if (dly) mult *= dly.stack.some(id => ITEM_TYPES[this.items.get(id)?.type]?.heavy) ? 0.7 : 0.85;
@@ -1542,8 +1543,13 @@ export class MoveRoom extends Room {
     const p = this.players.get(callerId);
     if (this.phase !== 'playing' || this.meeting || !this.isActive(p)) return;
     if (this.movers().length <= 2) return; // 1v1: nobody else to accuse
-    if ((this.elapsed || 0) < (this.meetingCdUntil || 0)) return this.tell(p, `Back to work first: the next meeting can be called in ${Math.ceil(this.meetingCdUntil - this.elapsed)} s.`);
-    if (this.game === 'sabotage') {
+    let info = null;
+    if (this.sab) { // proof any time; else after the cooldown: a breakage you can see, or one of your emergency meetings
+      const pass = this.sab.meetingPass(p, (this.meetingCdUntil || 0) - (this.elapsed || 0));
+      if (pass.no) return this.tell(p, pass.no);
+      info = this.sab.meetingInfo(pass, p);
+    } else if ((this.elapsed || 0) < (this.meetingCdUntil || 0)) return this.tell(p, `Back to work first: the next meeting can be called in ${Math.ceil(this.meetingCdUntil - this.elapsed)} s.`);
+    else if (this.game === 'sabotage') {
       const now = Date.now();
       if (now - (p.lastMeeting || 0) < 20000) return this.tell(p, 'You called a meeting recently. Wait a bit.');
       p.lastMeeting = now;
@@ -1552,12 +1558,13 @@ export class MoveRoom extends Room {
     this.meeting = { callerId, timeLeft: RULES.MEETING_SECONDS, votes: {}, botAt: {} };
     for (const id of this.bots.keys()) if (this.isActive(this.players.get(id))) this.meeting.botAt[id] = 3 + Math.random() * 9;
     for (const o of this.players.values()) { o.task = null; }
-    this.event({ kind: 'meeting', caller: p.name });
+    this.meeting.info = info;
+    this.event({ kind: 'meeting', caller: p.name, ...(info || {}) });
     this.sab?.onMeetingStart();
   }
 
   castVote(p, t) {
-    if (!this.meeting || !p || !this.isActive(p) || this.meeting.votes[p.id]) return;
+    if (!this.meeting || !p || !this.isActive(p) || p.ghost || this.meeting.votes[p.id]) return;
     if (t !== 'skip' && !this.players.has(t)) return;
     this.meeting.votes[p.id] = t;
     p.votes = (p.votes || 0) + 1;
@@ -1594,7 +1601,7 @@ export class MoveRoom extends Room {
       if (Math.random() < 0.6) this.say(p, bot.meetingLine(target));
       this.castVote(p, target);
     }
-    const active = this.activePlayers();
+    const active = this.activePlayers().filter(a => !a.ghost);
     if (m.timeLeft > 0 && !active.every(a => m.votes[a.id])) return;
 
     const target = tallyVotes(m.votes, m.callerId);
@@ -1638,6 +1645,11 @@ export class MoveRoom extends Room {
     this.endMeeting();
     const t = target !== 'skip' ? this.players.get(target) : null;
     if (!t) { this.event({ kind: 'verdict', text: '🤷 No one was voted off. Back to work!', votes }); return; }
+    if (this.sab) { // pack the house: a saboteur is out for good; wrongly voted-out crew keep working as ghosts
+      if (t.saboteur) { t.out = true; this.releaseCarry(t); this.event({ kind: 'verdict', text: `🎯 ${t.name} WAS a saboteur! They're off the job.`, guilty: true, votes }); }
+      else { t.ghost = true; this.event({ kind: 'verdict', text: `😬 ${t.name} was NOT a saboteur. They keep working as a ghost (no votes, no meetings).`, guilty: false, votes }); }
+      return;
+    }
     if (t.saboteur) {
       this.event({ kind: 'verdict', text: `🎯 ${t.name} WAS the saboteur! The crew wins!`, guilty: true, votes });
       return this.endRound(`The crew caught the saboteur: ${t.name}!`, null, 'crew');
