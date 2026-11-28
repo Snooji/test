@@ -3,9 +3,11 @@
 import { ITEM_TYPES } from '../../shared/logic.js';
 import { FLOOR_DZ, mulberry32 } from '../../shared/level.js';
 import { TRUCK } from '../../shared/world.js';
-import { roomQuotas, mixBag, SAB, pileValueFactor } from '../../shared/sabotage.js';
+import { roomQuotas, mixBag, SAB, HOLD, pileValueFactor } from '../../shared/sabotage.js';
 import { inRamp } from '../../shared/world.js';
 import { dealRoles, jobsFor } from './roles.js';
+import { pickSabotage, blocked, applySabotage, pickRepair, applyRepair } from './actions.js';
+import { driveOffCheck } from '../../shared/logic.js';
 
 const BOXES = new Set(['standard', 'heavy', 'fragile']);
 
@@ -20,6 +22,13 @@ export class SabotageGame {
     this.seq = 0;
     this.houseValue = 0;      // everything the house holds, furniture + every box it will be packed into
     this.lostValue = 0;       // broken, damaged or spoiled: the saboteurs' score
+    this.cooldown = new Map();  // saboteurId -> seconds until they can sabotage again
+    this.sabHolds = new Map();  // saboteurId -> { action, id|room, t, x, z }
+    this.history = [];          // every finished sabotage: { by, action, at, x, z } (the end screen tells all)
+    this.fixes = new Map();     // repair key -> { t, tick }
+    this.dark = new Map();      // roomIndex -> seconds of darkness left
+    this.padsOutT = 0; this.weakLeft = 0;
+    this.strapped = new Set();  // truck pieces the Driver strapped down
   }
 
   get level() { return this.room.level; }
@@ -117,8 +126,13 @@ export class SabotageGame {
     if (next) { next.role = 'driver'; this.room.event({ kind: 'toast', text: `🚚 ${next.name} is the Driver now.` }); }
   }
 
-  tick(_dt) {
+  tick(dt) {
     this.keepDriver();
+    for (const [id, t] of this.cooldown) this.cooldown.set(id, Math.max(0, t - dt));
+    for (const [ri, t] of this.dark) { if (t - dt <= 0) this.dark.delete(ri); else this.dark.set(ri, t - dt); }
+    if (this.padsOutT > 0) this.padsOutT = Math.max(0, this.padsOutT - dt);
+    this.tickSabotage(dt);
+    this.tickTampered(dt);
     // a pack job stops (and starts over) the moment its packer lets go or puts the flat box down
     for (const [id, job] of this.packing) {
       const p = this.room.players.get(id);
@@ -144,6 +158,7 @@ export class SabotageGame {
     const target = this.room.nearestItem(p);
     if (st && (target?.id === 'flatstack' || this.near(p, st))) { // right by the stack: a flat box, whatever else is near
       const fb = this.newItem('flatbox', p.x, p.z, { state: 'carried', carriers: [p.id] });
+      if (this.weakLeft > 0) { this.weakLeft--; fb.weak = true; }
       p.carry = fb.id;
       this.room.event({ kind: 'emote', id: p.id, e: '📦' });
       return true;
@@ -154,6 +169,19 @@ export class SabotageGame {
   /** holding ACTION: pack a flat box in this room (faster with a partner holding alongside) */
   onHold(p, dt) {
     if (this.carrying(p, 'flatbox')) return this.pack(p, dt);
+    if (!p.carry && !p.ghost) {
+      const job = pickRepair(this, p);
+      if (job) {
+        p.task = { id: job.key, kind: job.kind };
+        const f = this.fixes.get(job.key) || { t: 0, tick: -1 };
+        // a two-mover repair only moves with a second mover holding beside it
+        const helpers = job.pair ? [...this.room.players.values()].filter(o => this.room.isActive(o) && !o.carry && o.in.hold && Math.hypot(o.x - job.pair.x, o.z - job.pair.z) < 1.6).length : 1;
+        if (helpers >= (job.pair ? 2 : 1) && f.tick !== this.room.elapsed) { f.t += dt / job.secs; f.tick = this.room.elapsed; }
+        this.fixes.set(job.key, f);
+        if (f.t >= 1 - 1e-6) { this.fixes.delete(job.key); applyRepair(this, job); this.note(`${p.name} ${{ restrap: 'strapped the load', breaker: 'flipped the breaker', refillPads: 'refilled the pads', fixWheel: 'fixed a dolly wheel', retape: 're-taped a box' }[job.kind]}`); }
+        return true;
+      }
+    }
     // an empty-handed mover holding next to a packer is their partner (the packer's job does the counting)
     if (!p.carry) for (const [id, job] of this.packing) {
       const q = this.room.players.get(id);
@@ -180,9 +208,10 @@ export class SabotageGame {
     // done: the flat box becomes the room's next box, at the packer's feet
     const fb = this.carrying(p, 'flatbox');
     this.room.items.delete(fb.id); p.carry = null; this.packing.delete(p.id);
+    const weak = fb.weak ? { tampered: 'weak', tell: 'sag' } : {};
     const type = this.bags.get(ri).shift() || 'standard';
     this.quota.set(ri, this.quota.get(ri) - 1);
-    this.newItem(type, p.x + Math.sin(p.face) * 0.7, p.z + Math.cos(p.face) * 0.7, { room: ri, shownType: type, lastHandlers: [p.id, partner?.id].filter(Boolean) });
+    this.newItem(type, p.x + Math.sin(p.face) * 0.7, p.z + Math.cos(p.face) * 0.7, { room: ri, shownType: type, lastHandlers: [p.id, partner?.id].filter(Boolean), ...weak });
     p.packed = (p.packed || 0) + 1; if (partner) partner.packed = (partner.packed || 0) + 1;
     this.note(`${partner ? `${p.name} + ${partner.name}` : p.name} packed a box in the ${r.name}`);
     this.room.event({ kind: 'emote', id: p.id, e: '📦' });
@@ -210,10 +239,79 @@ export class SabotageGame {
     return true;
   }
 
-  onSabotage(_p) {}
+  /** a room's light switch: just inside its corner */
+  switchOf(ri) { const r = this.level.rooms[ri]; return { x: r.x0 + 0.5, z: r.z0 + 0.5 + FLOOR_DZ * (r.storey || 0) }; }
+
+  /** the Sabotage button: start the best sabotage in reach (it finishes after its hold if the saboteur stays put) */
+  onSabotage(p) {
+    if (!p.saboteur || !this.room.isActive(p) || p.ghost || this.sabHolds.has(p.id)) return;
+    if ((this.cooldown.get(p.id) || 0) > 0) return this.hint(p, `🤫 Lie low: ${Math.ceil(this.cooldown.get(p.id))} s until you can sabotage again.`);
+    const job = pickSabotage(this, p);
+    if (!job) return this.hint(p, '🤫 Nothing to sabotage right here.');
+    const why = blocked(this, p, job);
+    if (why) return this.hint(p, `🤫 ${why}`);
+    this.sabHolds.set(p.id, { ...job, t: 0, x: p.x, z: p.z });
+  }
+  tickSabotage(dt) {
+    for (const [id, job] of this.sabHolds) {
+      const p = this.room.players.get(id);
+      const gone = !p || !this.room.isActive(p) || Math.hypot(p.x - job.x, p.z - job.z) > 0.8 || (job.id && !this.room.items.has(job.id));
+      if (gone) { this.sabHolds.delete(id); continue; }
+      p.task = { id: job.id || null, kind: 'sabotage' };
+      if ((job.t += dt) < HOLD[job.action] - 1e-6) continue;
+      this.sabHolds.delete(id);
+      if (blocked(this, p, job)) continue;
+      applySabotage(this, p, job);
+      this.cooldown.set(id, SAB.SAB_COOLDOWN);
+      this.history.push({ by: id, action: job.action, at: Math.round(this.room.elapsed || 0), x: +p.x.toFixed(1), z: +p.z.toFixed(1) });
+      this.onSabotageDone?.(p, job);
+    }
+  }
+
+  /** tampered boxes: cut tape bursts on the first lift; a weak box may burst on lifting and while carried; a loose
+   *  two-wheel dolly drops its top box every few seconds it's pushed */
+  tickTampered(dt) {
+    const rng = this.rng || Math.random;
+    for (const it of [...this.room.items.values()]) {
+      if (it.state === 'carried' && (it.tampered === 'cut' || it.tampered === 'weak')) {
+        const first = !it.liftSeen; it.liftSeen = true;
+        if ((first && (it.tampered === 'cut' || rng() < SAB.WEAK_BURST_ON_LIFT)) || (it.tampered === 'weak' && rng() < SAB.WEAK_BURST_PER_S * dt)) this.burst(it, 'burst open');
+      } else if (it.state !== 'carried') it.liftSeen = false;
+      if (it.type === 'dolly' && it.loose && it.state === 'pushed' && it.stack.length) {
+        const pu = this.room.players.get(it.pusher);
+        if (pu && Math.hypot(pu.in.mx, pu.in.mz) > 0.5 && (it.looseT = (it.looseT || 0) + dt) >= 6) { it.looseT = 0; this.dropTop(it); }
+      }
+    }
+  }
+  dropTop(d) {
+    const box = this.room.items.get(d.stack.pop());
+    if (!box) return;
+    const at = this.walkable(d.x + 0.9, d.z);
+    Object.assign(box, { state: 'floor', dollyId: null, x: at.x, z: at.z });
+    if (box.type === 'fragile') this.burst(box, 'fell off the wobbly dolly');
+    else this.room.event({ kind: 'toast', text: '😬 A box fell off the wobbly dolly!' });
+  }
+  /** a packed box gives way: whoever held it drops it, and it breaks (fragile: lost; else a pile to repack) */
+  burst(it, how) {
+    for (const id of it.carriers || []) { const o = this.room.players.get(id); if (o) { o.carry = null; o.loadMode = false; } }
+    it.carriers = []; it.state = 'broken';
+    this.room.recordBreak(it, [], how);
+    this.onBreak(it);
+  }
+
+  /** pieces in the truck that would topple off a wobbly tower at the drive-off (and aren't strapped) */
+  wobbly() { return driveOffCheck(this.room.grid).damaged.filter(d => /topple/.test(d.reason) && !this.strapped.has(d.id)).map(d => d.id); }
+  /** the drive-off safety % as it stands: strapped pieces don't topple */
+  liveSafety() {
+    const chk = driveOffCheck(this.room.grid), total = this.room.grid.items.size;
+    if (!total) return 100;
+    const bad = chk.damaged.filter(d => !(/topple/.test(d.reason) && this.strapped.has(d.id))).length;
+    return Math.round((100 * (total - bad)) / total);
+  }
   onMeetingStart() {}
   onMeetingEnd() {}
   onLeave(p) {
+    this.sabHolds.delete(p.id);
     const fb = this.carrying(p, 'flatbox');
     if (fb) { this.room.items.delete(fb.id); p.carry = null; }
     this.packing.delete(p.id);
@@ -222,7 +320,8 @@ export class SabotageGame {
   snapshot() {
     const roles = {};
     for (const p of this.room.players.values()) if (p.role) roles[p.id] = p.role === 'saboteur' ? 'mover' : p.role; // never who the saboteurs are
-    return { quota: [...this.quota], total: [...this.total], roles, lost: Math.round(this.lostValue), houseValue: this.houseValue };
+    return { quota: [...this.quota], total: [...this.total], roles, lost: Math.round(this.lostValue), houseValue: this.houseValue,
+      dark: [...this.dark.keys()], padsOut: this.padsOutT > 0 };
   }
 }
 

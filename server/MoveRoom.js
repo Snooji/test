@@ -736,7 +736,7 @@ export class MoveRoom extends Room {
       const piece = this.items.get(fd2.piece);
       fd2.piece = null; fd2.state = 'parked';
       piece.state = 'carried'; piece.carriers = [p.id]; piece.flatId = null; piece.x = p.x; piece.z = p.z;
-      p.carry = piece.id; p.loadMode = true; p.flatFeeding = fd2.id; p.cursor = bestSpot(this.grid, piece.type); p.cursorCd = 0.35;
+      p.carry = piece.id; p.loadMode = true; p.flatFeeding = fd2.id; p.cursor = bestSpot(this.aimGrid(), piece.type); p.cursorCd = 0.35;
       this.takeRampSlot(p);
       this.tell(p, `Furniture dolly: place the ${ITEM_TYPES[piece.type].label.toLowerCase()} yourself. Aim · ACTION drop · BACK puts it back on the dolly.`);
       return;
@@ -772,7 +772,7 @@ export class MoveRoom extends Room {
     // carrying into the ramp → load mode (leader only for team carries)
     if (item && item.carriers[0] === p.id && inRamp(item.x, item.z) && !p.rampLock && !ITEM_TYPES[item.type].tool) { // (a flat box isn't cargo)
       p.loadMode = true;
-      p.cursor = bestSpot(this.grid, item.type); // start on a spot that follows the packing rules (new movers follow the outline)
+      p.cursor = bestSpot(this.aimGrid(), item.type); // start on a spot that follows the packing rules (new movers follow the outline)
       this.takeRampSlot(p);
       p.cursorCd = 0.35; // grace so held movement doesn't jerk the cursor on entry
       this.tell(p, 'In the truck: aim, then place it. Turn the piece if it doesn’t fit. Back leaves the truck.');
@@ -981,14 +981,15 @@ export class MoveRoom extends Room {
   /** A full load (4 boxes) wobbles when pushed flat out for too long or swung round a corner; at the limit the top box
    *  slides off. Easing off settles it. Fragile boxes break on the first fall, standard on the second, heavy on the third. */
   flatWobble(p, fd, dt, ox, oz, of) {
-    const loaded = (fd.stack?.length || 0) >= FLAT_MAX_BOXES || (this.sab && fd.piece); // sabotage: a piece of furniture can slide off too
+    const loaded = (fd.stack?.length || 0) >= FLAT_MAX_BOXES || (this.sab && fd.piece) || (fd.loose && (fd.stack?.length || fd.piece)); // sabotage: a piece can slide off; a loose wheel shakes any load
     if (!loaded) { fd.wobble = Math.max(0, (fd.wobble || 0) - dt * 0.5); return; }
     const moved = Math.hypot(p.x - ox, p.z - oz) / Math.max(dt, 1e-3);
     let turn = Math.abs(p.face - of); if (turn > Math.PI) turn = 2 * Math.PI - turn;
     const turnRate = turn / Math.max(dt, 1e-3), push = Math.hypot(p.in.mx, p.in.mz);
     let w = fd.wobble || 0;
-    if (moved > 0.4 && (push > 0.85 || p.dashT > 0)) w += dt * (p.dashT > 0 ? 0.7 : 0.3); // flat out: ~3 s, dashing much sooner
-    if (moved > 0.4 && turnRate > 4) w += turn * 0.22;                                      // a sharp swing round a corner
+    const lf = fd.loose ? 3 : 1;                                                             // a loosened wheel: 3× the wobble
+    if (moved > 0.4 && (push > 0.85 || p.dashT > 0)) w += dt * (p.dashT > 0 ? 0.7 : 0.3) * lf; // flat out: ~3 s, dashing much sooner
+    if (moved > 0.4 && turnRate > 4) w += turn * 0.22 * lf;                                 // a sharp swing round a corner
     if (moved <= 0.4 || (push < 0.6 && turnRate < 2)) w -= dt * 0.35;                       // taking it steady settles it
     fd.wobble = Math.max(0, w);
     if (fd.wobble >= 1) { fd.wobble = 0.5; if (this.sab && fd.piece) this.sab.pieceFalls(p, fd); else this.spillFromFlat(p, fd); }
@@ -1065,6 +1066,12 @@ export class MoveRoom extends Room {
     this.dropDolly(p);
   }
 
+  /** The truck as the movers see it: each piece by its label (a mislabelled box reads as what its marks say). */
+  aimGrid() {
+    if (!this.sab) return this.grid;
+    return { cells: this.grid.cells, items: new Map([...this.grid.items].map(([id, rec]) => [id, { ...rec, type: this.items.get(id)?.shownType || rec.type }])) };
+  }
+
   /** Carrying a box (or a piece of furniture) next to a parked dolly that has room: it goes on the dolly. */
   putOnDolly(p, item) {
     const t = ITEM_TYPES[item.type], isBox = BOX_TYPES.includes(item.type);
@@ -1122,7 +1129,7 @@ export class MoveRoom extends Room {
     const box = this.items.get(id);
     box.state = 'carried'; box.carriers = [p.id]; box.dollyId = null; box.flatId = null; box.x = p.x; box.z = p.z;
     p.carry = id; p.loadMode = true; p.feeding = true;
-    p.cursor = bestSpot(this.grid, box.type);
+    p.cursor = bestSpot(this.aimGrid(), box.type);
     return true;
   }
 
@@ -1352,6 +1359,7 @@ export class MoveRoom extends Room {
       const t = ITEM_TYPES[it.type];
       const kind = it.assembled ? 'disassemble' : (t.needsWrap && !it.wrapped ? 'wrap' : null);
       if (!kind) continue;
+      if (kind === 'wrap' && this.sab?.padsOutT > 0) { this.sab.hint(p, '🧣 The moving pads are gone! Refill them at the garage shelf.'); continue; }
       if (it.jam > 0 && kind === 'disassemble' && !p.saboteur && !it.jamNoticed) { it.jamNoticed = true; this.tell(p, '🔩 These bolts are way too tight… someone has been messing with this.'); }
       if (!it.task || it.task.kind !== kind) it.task = { kind, progress: 0, contributors: [] };
       if (p.saboteur && kind === 'disassemble') { // looks like helping; actually over-tightens the bolts
@@ -1359,7 +1367,7 @@ export class MoveRoom extends Room {
         p.task = { id: it.id, kind };
         continue;
       }
-      const secs = (kind === 'wrap' ? RULES.WRAP_SECONDS : RULES.DISASSEMBLE_SECONDS + (it.jam || 0)) * (p.injuredT > 0 ? 1.6 : 1);
+      const secs = (kind === 'wrap' ? RULES.WRAP_SECONDS * (it.snag ? 2 : 1) : RULES.DISASSEMBLE_SECONDS + (it.jam || 0)) * (p.injuredT > 0 ? 1.6 : 1);
       it.task.progress += dt / secs;
       it.helpers.push(p.id);
       if (!it.task.contributors.includes(p.id)) it.task.contributors.push(p.id);
@@ -1819,7 +1827,7 @@ export class MoveRoom extends Room {
       room: this.level.roomAt(p.x, p.z), setup: p.setup || null, bot: !!p.bot, away: !!p.away, suit: p.suit || 'classic', ready: !!p.ready,
     }));
     const items = [...this.items.values()].filter(i => i.state !== 'broken').map(i => ({
-      id: i.id, type: i.type, x: +i.x.toFixed(2), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
+      id: i.id, type: i.shownType || i.type, x: +i.x.toFixed(2), ...(i.tell ? { tell: i.tell } : {}), z: +i.z.toFixed(2), state: i.state, wrapped: i.wrapped,
       assembled: i.assembled, g: i.g, n: i.carriers.length, damaged: i.damaged ? 1 : 0, ...(i.pulled && i.value < 1 ? { value: +i.value.toFixed(2) } : {}),
       ...(i.type === 'dolly' ? { stack: i.stack, uses: i.uses, strain: i.strain, pusher: i.pusher } : {}), ...(i.state === 'dolly' ? { on: i.dollyId } : {}), ...(i.type === 'flatdolly' ? { piece: i.piece, pusher: i.pusher, stack: i.stack || [], wobble: +(i.wobble || 0).toFixed(2) } : {}), ...(i.state === 'flat' ? { on: i.flatId } : {}),
       task: i.task ? { kind: i.task.kind, p: +i.task.progress.toFixed(2) } : null,
