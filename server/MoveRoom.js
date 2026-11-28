@@ -1,4 +1,5 @@
 import { Room, ServerError } from '@colyseus/core';
+import { SabotageGame } from './sabotage/game.js';
 import { debugHooksOn, limiter, isProd } from './security.js';
 import { createGrid, placeItem, tallyVotes, ITEM_TYPES, RULES, GRID, footprint, orientations, ORIENT_LABEL, canFitAny, isRemovable, removeFromGrid, topItemAt, SUITS, suitUnlocked, dailySeed, driveOffCheck, placementQuality, gridGaps, bestSpot } from '../shared/logic.js';
 import { Bot, BOT_NAMES, DIFFICULTY } from './bot.js';
@@ -58,6 +59,7 @@ export class MoveRoom extends Room {
     this.teamN = 0; // 0 = everyone for themselves; 2 or 3 teams sharing the truck, scored as a team
     this.mode = '3min';
     this.game = options.game === 'sabotage' ? 'sabotage' : 'classic';
+    this.sab = null;
     this.difficulty = DIFFICULTY[options.difficulty] ? options.difficulty : 'normal';
     this.bots = new Map();
     this.botSeq = 0;
@@ -103,6 +105,7 @@ export class MoveRoom extends Room {
         if (v > p.in[k]) { p.pending[k] += Math.min(3, v - p.in[k]); p.in[k] = v; }
       }
     });
+    this.onMessage('sab', (c) => { const p = this.players.get(c.sessionId); if (p && this.phase === 'playing') this.sab?.onSabotage(p); });
     this.onMessage('duelTap', (c) => this.duelTap(this.players.get(c.sessionId)));
     this.onMessage('char', (c, m) => {
       const p = this.players.get(c.sessionId);
@@ -396,6 +399,7 @@ export class MoveRoom extends Room {
     this.msgBudget?.delete(client.sessionId);
     const p = this.players.get(client.sessionId);
     if (!p) return;
+    this.sab?.onLeave(p);
     this.releaseCarry(p);
     this.players.delete(p.id);
     if (this.hostId === p.id) this.hostId = [...this.players.values()].find(o => !o.bot)?.id || null;
@@ -530,6 +534,8 @@ export class MoveRoom extends Room {
     for (const b of this.bots.values()) b.reset();
     this.overtime = false; this.drain = 0; this.driveoff = null; this.pendingEnd = null; this.resultsT = 0; this.tally = null;
     for (const p of this.players.values()) { p.saboteur = false; p.lastMeeting = 0; }
+    this.sab = this.game === 'sabotage' && !this.tutorialMode ? new SabotageGame(this) : null; // pack the house: its own rules
+    if (this.sab) this.sab.setupWorld();
     if (this.game === 'sabotage') {
       const movers = this.movers();
       movers[Math.floor(Math.random() * movers.length)].saboteur = true;
@@ -576,6 +582,7 @@ export class MoveRoom extends Room {
       this.updateFlatDolly();
       this.updateDuels(dt);
       this.updateDecay(dt);
+      this.sab?.tick(dt);
       if (this.twist === 'zerog') this.updateZeroG(dt);
       if (this.tutorial) this.updateTutorial();
       this.checkEnd();
@@ -776,6 +783,7 @@ export class MoveRoom extends Room {
   }
 
   onTap(p, item) {
+    if (this.sab?.onTap(p, item)) return;
     if (item) { // set it down on the floor
       this.releaseCarry(p);
       return;
@@ -1289,6 +1297,7 @@ export class MoveRoom extends Room {
     for (const it of this.items.values()) it.helpers = [];
     for (const p of this.players.values()) {
       p.task = null;
+      if (this.sab && this.isActive(p) && p.in.hold && this.sab.onHold(p, dt)) continue; // packing, repairs, sabotage holds
       if (!this.isActive(p) || p.carry || !p.in.hold) continue;
       const it = this.nearestItem(p);
       if (!it || it.state !== 'floor') continue;
@@ -1404,6 +1413,7 @@ export class MoveRoom extends Room {
   }
 
   respawn(item) {
+    if (this.sab?.onBreak(item)) return; // sabotage: broken is gone for good
     const t = ITEM_TYPES[item.type];
     const taken = [...this.items.values()].filter(i => i.state === 'floor').map(i => ({ x: i.x, z: i.z }));
     const spot = freeSpot(this.level, taken);
@@ -1487,6 +1497,7 @@ export class MoveRoom extends Room {
     for (const id of this.bots.keys()) if (this.isActive(this.players.get(id))) this.meeting.botAt[id] = 3 + Math.random() * 9;
     for (const o of this.players.values()) { o.task = null; }
     this.event({ kind: 'meeting', caller: p.name });
+    this.sab?.onMeetingStart();
   }
 
   castVote(p, t) {
@@ -1564,6 +1575,7 @@ export class MoveRoom extends Room {
     this.phase = 'playing';
     for (const b of this.breaks) b.discussed = true;
     this.meetingCdUntil = (this.elapsed || 0) + 30;
+    this.sab?.onMeetingEnd();
   }
 
   resolveSabotageVote(target, votes) {
@@ -1582,6 +1594,11 @@ export class MoveRoom extends Room {
 
   // ---------- end ----------
   checkEnd() {
+    if (this.sab) { // sabotage has its own endings and no clock
+      const r = this.sab.checkEnd();
+      if (r) this.endRound(r.reason, null, r.winner);
+      return;
+    }
     const all = [...this.items.values()];
     const remaining = all.filter(i => !ITEM_TYPES[i.type].tool && (i.state === 'floor' || i.state === 'carried' || i.state === 'dolly' || i.state === 'flat'));
     let filled = 0;
@@ -1763,7 +1780,7 @@ export class MoveRoom extends Room {
       phase: this.phase, mode: this.mode, hostId: this.hostId, timeLeft: Math.max(0, Math.round(this.timeLeft)),
       countdown: this.phase === 'countdown' ? Math.ceil(this.countdown) : 0, driveT: this.phase === 'driveoff' ? +this.driveT.toFixed(2) : 0,
       canCallOut: this.canCallOut(),
-      game: this.game, overtime: !!this.overtime, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
+      game: this.game, overtime: !!this.overtime, sab: this.sab ? this.sab.snapshot() : null, crewScore: this.game === 'sabotage' ? this.crewScore() : null,
       duels: [...(this.duels?.values() || [])].map(d => ({ item: d.item, a: d.a, b: d.b, t: +Math.max(0, d.t).toFixed(1), ca: +d.ca.toFixed(1), cb: +d.cb.toFixed(1) })),
       quick: this.quick, autoStart: this.quick && this.autoStartAt > 0 ? Math.ceil(this.autoStartAt) : 0, twist: this.twist, zeroG: this.zeroG,
       daily: this.daily, tutorial: this.tutorial && this.tutorial.step >= 0 ? { step: this.tutorial.step, total: this.tutorial.total, text: this.tutorial.text, target: this.tutorial.target } : null,

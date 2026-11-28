@@ -111,7 +111,8 @@ test('sabotage: a crew bot that did not see the crunch cannot name the saboteur'
   const far = room.level.rooms.reduce((m, r) => (r.x0 + r.x1) / 2 < (m.x0 + m.x1) / 2 ? r : m);
   bot.p.x = (far.x0 + far.x1) / 2; bot.p.z = (far.z0 + far.z1) / 2;
   a.x = 11.2; a.z = 0;
-  const box = [...room.items.values()].find(i => i.type === 'fragile');
+  // Sabotage starts unpacked (no loose boxes): a packed fragile box stands in for the one that gets crushed
+  const box = { id: 'tbox', type: 'fragile', x: a.x, z: a.z, state: 'floor', carriers: [], earned: {}, helpers: [], g: null };
   assert.ok(!bot.canSeePoint(a.x, a.z), 'setup: Ada is out of sight');
   for (let i = 0; i < 10; i++) room.recordBreak(box, ['A'], 'got crushed');
   assert.ok((bot.sus.A || 0) < 1, `blind bot suspects Ada at ${bot.sus.A}`);

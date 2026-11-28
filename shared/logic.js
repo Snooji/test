@@ -21,6 +21,12 @@ export const ITEM_TYPES = {
   armchair: { label: 'Armchair',     w: 1, d: 1, h: 1, pts: 25, heavy: false, fragile: false, furniture: true, needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0xc0703f },
   tv:       { label: 'TV',           w: 2, d: 1, h: 1, pts: 35, heavy: false, fragile: true,  furniture: true, needsWrap: true,  needsDisassemble: false, teamCarry: false, color: 0x2b2b33 },
   bookshelf: { label: 'Bookshelf',   w: 1, d: 1, h: 2, pts: 35, heavy: true,  fragile: false, furniture: true, needsWrap: false, needsDisassemble: false, teamCarry: false, color: 0x7a5233 },
+  // Sabotage (pack the house) props: not cargo
+  flatstack: { label: 'Flat Boxes',  w: 1, d: 1, pts: 0, heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, tool: true, color: 0xc8955a },
+  flatbox:   { label: 'Flat Box',    w: 1, d: 1, pts: 0, heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, tool: true, color: 0xc8955a },
+  pile:      { label: 'Spilled Box', w: 1, d: 1, pts: 0, heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, tool: true, color: 0xa87842 },
+  padcrate:  { label: 'Moving Pads', w: 1, d: 1, pts: 0, heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, tool: true, color: 0x2f5fd0 },
+  breaker:   { label: 'Breaker Box', w: 1, d: 1, pts: 0, heavy: false, fragile: false, furniture: false, needsWrap: false, needsDisassemble: false, teamCarry: false, tool: true, color: 0x8a8f96 },
   table:    { label: 'Table',        w: 2, d: 1, pts: 40, heavy: true,  fragile: false, furniture: true,  needsWrap: false, needsDisassemble: true,  teamCarry: true,  color: 0xb07d4f },
 };
 

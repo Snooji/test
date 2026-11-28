@@ -512,20 +512,6 @@ test('sabotage: voting out an innocent ejects them, no strikes', () => {
   assert.equal(room.players.get(innocent[0]).strikes, 0);
 });
 
-test('sabotage: after time runs out the crew score drains; at zero the saboteur wins', () => {
-  const { room } = sabotageRoom(3);
-  const box = [...room.items.values()].find(i => i.type === 'heavy');
-  load(room, room.players.get('A'), box.id, 0, 0);
-  assert.equal(room.crewScore(), 20);
-  room.timeLeft = 0.01;
-  room.tick(0.05);
-  assert.equal(room.phase, 'playing', 'overtime, not game over');
-  assert.ok(room.overtime);
-  for (let i = 0; i < 40 && room.phase === 'playing'; i++) room.tick(0.5);
-  assert.equal(room.phase, 'results');
-  assert.equal(room.results.winners, 'saboteur');
-});
-
 // ---- deploy B ----
 import { SUITS, dailySeed } from '../shared/logic.js';
 
