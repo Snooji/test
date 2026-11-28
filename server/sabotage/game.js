@@ -5,6 +5,7 @@ import { FLOOR_DZ, mulberry32 } from '../../shared/level.js';
 import { TRUCK } from '../../shared/world.js';
 import { roomQuotas, mixBag, SAB, pileValueFactor } from '../../shared/sabotage.js';
 import { inRamp } from '../../shared/world.js';
+import { dealRoles, jobsFor } from './roles.js';
 
 const BOXES = new Set(['standard', 'heavy', 'fragile']);
 
@@ -92,7 +93,32 @@ export class SabotageGame {
     this.room.event({ kind: 'toast', text: `😬 The ${ITEM_TYPES[piece.type].label.toLowerCase()} slid off the furniture dolly. Damaged!`, cls: 'crunch' });
   }
 
+  /** deal roles at the start of the round and tell each mover theirs (saboteurs also learn their partner) */
+  dealRoles(rng = Math.random) {
+    const movers = this.room.movers(), roles = dealRoles(movers, rng);
+    for (const p of movers) {
+      p.role = roles.get(p.id); p.saboteur = p.role === 'saboteur';
+      p.meetingsLeft = p.role === 'foreman' ? 2 : 1; p.ghost = false;
+    }
+    this.hadDriver = movers.length >= 5;
+    for (const p of movers) {
+      const card = { kind: 'role', role: p.role, saboteur: p.saboteur };
+      if (p.saboteur) card.partners = movers.filter(o => o !== p && o.saboteur).map(o => o.id);
+      this.room.clients.find(c => c.sessionId === p.id)?.send('evt', card);
+    }
+  }
+  jobsFor(p) { return jobsFor(this, p); }
+  /** a crew role whose holder is gone passes to a living crew mover (only the Driver needs passing on) */
+  keepDriver() {
+    if (!this.hadDriver) return;
+    const live = this.room.movers().filter(p => this.room.isActive(p) && !p.ghost && !p.saboteur);
+    if (live.some(p => p.role === 'driver')) return;
+    const next = live.find(p => p.role === 'mover') || live[0];
+    if (next) { next.role = 'driver'; this.room.event({ kind: 'toast', text: `🚚 ${next.name} is the Driver now.` }); }
+  }
+
   tick(_dt) {
+    this.keepDriver();
     // a pack job stops (and starts over) the moment its packer lets go or puts the flat box down
     for (const [id, job] of this.packing) {
       const p = this.room.players.get(id);
@@ -193,7 +219,11 @@ export class SabotageGame {
     this.packing.delete(p.id);
   }
   checkEnd() { return null; }
-  snapshot() { return { quota: [...this.quota], total: [...this.total] }; }
+  snapshot() {
+    const roles = {};
+    for (const p of this.room.players.values()) if (p.role) roles[p.id] = p.role === 'saboteur' ? 'mover' : p.role; // never who the saboteurs are
+    return { quota: [...this.quota], total: [...this.total], roles, lost: Math.round(this.lostValue), houseValue: this.houseValue };
+  }
 }
 
 export const isProp = (type) => !!ITEM_TYPES[type]?.tool;

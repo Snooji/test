@@ -535,8 +535,8 @@ export class MoveRoom extends Room {
     this.overtime = false; this.drain = 0; this.driveoff = null; this.pendingEnd = null; this.resultsT = 0; this.tally = null;
     for (const p of this.players.values()) { p.saboteur = false; p.lastMeeting = 0; }
     this.sab = this.game === 'sabotage' && !this.tutorialMode ? new SabotageGame(this) : null; // pack the house: its own rules
-    if (this.sab) this.sab.setupWorld();
-    if (this.game === 'sabotage') {
+    if (this.sab) { this.sab.setupWorld(); this.sab.dealRoles(); }
+    else if (this.game === 'sabotage') {
       const movers = this.movers();
       movers[Math.floor(Math.random() * movers.length)].saboteur = true;
       for (const p of movers) this.sendRole(p);
