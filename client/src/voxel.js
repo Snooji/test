@@ -266,28 +266,39 @@ function boxColour(type, w, h, d) {
 }
 
 // ---------- moving boxes: plain cardboard, tape across the top; fragile = a broken wine glass, heavy = an anvil, standard = nothing ----------
-const BROKEN_GLASS = [ // printed in red, 11×12 pixels
+// box marks, printed on the front like real moving-box stickers: ↑↑ this way up (standard), a cracked glass (fragile), an anvil (heavy)
+const THIS_WAY_UP = [ // printed in charcoal, 11×9 pixels
+  '..X.....X..',
+  '.XXX...XXX.',
+  'XXXXX.XXXXX',
+  '..X.....X..',
+  '..X.....X..',
+  '..X.....X..',
+  '..X.....X..',
+  '...........',
   'XXXXXXXXXXX',
-  'X....X....X',
-  'X...X.....X',
-  '.X...X...X.',
-  '.X..X....X.',
-  '..X..X..X..',
-  '...XXXXX...',
-  '.....X.....',
-  '.....X.....',
-  '.....X.....',
-  '...XXXXX...',
-  '..XXXXXXX..',
 ];
-const ANVIL = [ // printed in charcoal, 12×7 pixels
-  'XXXXXXXXXXXX',
-  '.XXXXXXXXXXX',
-  '...XXXXXXXX.',
-  '.....XXXX...',
-  '.....XXXX...',
-  '...XXXXXXXX.',
+const BROKEN_GLASS = [ // printed in red, 11×11 pixels: a filled wine glass with a crack down the bowl
+  'XXXXX.XXXXX',
+  'XXXX.XXXXXX',
+  'XXXXX.XXXXX',
+  '.XXX.XXXXX.',
+  '.XXXX.XXXX.',
+  '..XXXXXXX..',
+  '...XXXXX...',
+  '.....X.....',
+  '.....X.....',
+  '.....X.....',
+  '...XXXXX...',
+];
+const ANVIL = [ // printed in charcoal, 12×7 pixels: the horn to the left
   '..XXXXXXXXXX',
+  'XXXXXXXXXXXX',
+  '.XXXXXXXXXX.',
+  '.....XXXXX..',
+  '.....XXXX...',
+  '....XXXXXX..',
+  '...XXXXXXXX.',
 ];
 const CARD = [0xc8955a, 0xc28f55, 0xcd9a60], TAPE = 0xe6c690, SEAM = 0xa87842;
 /** A closed moving box w×h×d (metres), base centred on the origin. Returns a Group with a single mesh. */
@@ -300,15 +311,13 @@ function cardboardBox(type, w, h, d) {
     return CARD[(Math.round(x / VS) + Math.round(y / VS) * 3 + Math.round(z / VS) * 5 & 7) === 0 ? 1 : 0];
   });
   v.into(b);
-  const art = type === 'fragile' ? [BROKEN_GLASS, 0xc0392b] : type === 'heavy' ? [ANVIL, 0x2b241e] : null;
-  if (art) {
-    const [mask, col] = art, P = 0.035, rows = mask.length, cols = mask[0].length, dv = new Vox(P);
-    const top = Math.round(h / P), front = Math.round((d / 2) / P);
+  const art = type === 'fragile' ? [BROKEN_GLASS, 0xd0312d] : type === 'heavy' ? [ANVIL, 0x231c16] : [THIS_WAY_UP, 0x231c16];
+  {
+    const [mask, col] = art, rows = mask.length, cols = mask[0].length;
+    const P = Math.min(w * 0.7 / cols, h * 0.62 / rows), dv = new Vox(P);                     // big and clear, like a printed sticker
+    const front = Math.round((d / 2) / P), mid = Math.round((h * 0.44) / P);                 // centred a little low, clear of the tape
     mask.forEach((row, r) => [...row].forEach((ch, c) => {
-      if (ch !== 'X') return;
-      const i = c - Math.floor(cols / 2);
-      dv.set(i, top, Math.round(0.24 / P) + r - Math.floor(rows / 2), col);                // on the lid, beside the tape (seen from above)
-      dv.set(i, Math.round((h * 0.5) / P) + Math.floor(rows / 2) - r, front, col);       // and on the front
+      if (ch === 'X') dv.set(c - Math.floor(cols / 2), mid + Math.floor(rows / 2) - r, front, col);
     }));
     dv.into(b, 0, 0, 0, P);
   }
