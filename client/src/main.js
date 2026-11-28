@@ -677,11 +677,18 @@ function renderPrompt(s, me) {
     if (t?.teamCarry && it.n === 1 && s.players.filter(p => !p.out && !p.spectator).length > 1) text = `💪 Need a crewmate on the other end of the ${t.label.toLowerCase()} · ${isTouch ? 'Need a hand' : input.pad.connected ? 'Y' : keyName(input.binds.help)} calls for help`;
     else if (t) text = `Carrying ${t.label}${t.heavy && !t.furniture ? ' (heavy = slow!)' : ''} → take it to the 🚚 LOAD ZONE`;
     action = 'SET DOWN';
+    // a parked dolly with room right here: the tap puts it on
+    const isBox = ['standard', 'heavy', 'fragile'].includes(it?.type);
+    const dl = it && s.items.find(d => (d.type === 'dolly' || d.type === 'flatdolly') && d.state === 'floor' && Math.hypot(d.x - me.x, d.z - me.z) <= 1.9
+      && (d.type === 'dolly' ? isBox && (d.stack?.length || 0) < 3 : !d.piece && (isBox ? (d.stack?.length || 0) < 4 : t?.furniture && !(d.stack?.length) && !(t.needsDisassemble && it.assembled))));
+    if (dl) { text = `TAP to put the ${t.label.toLowerCase()} on the ${dl.type === 'dolly' ? 'dolly' : 'furniture dolly'}`; action = 'STACK'; }
   } else {
     const it = nearest(s, me);
     if (it) {
       const t = ITEM_TYPES[it.type];
-      if (it.assembled) { text = `🔧 HOLD to disassemble the ${t.label.toLowerCase()}`; action = 'HOLD 🔧'; }
+      const loadedDolly = (it.type === 'dolly' || it.type === 'flatdolly') && it.state === 'floor' && (it.stack?.length || it.piece);
+      if (loadedDolly) { text = `TAP to push the ${it.type === 'dolly' ? 'dolly' : 'furniture dolly'} · HOLD to take the top ${it.piece ? 'piece' : 'box'} off`; action = 'PUSH'; }
+      else if (it.assembled) { text = `🔧 HOLD to disassemble the ${t.label.toLowerCase()}`; action = 'HOLD 🔧'; }
       else if (it.state === 'pushed') { text = `⚔️ TAP to fight for the ${t.label.toLowerCase()}${it.stack?.length || it.piece ? ' and its load' : ''}: a 5-second tap battle!`; action = 'STEAL'; }
       else if (it.state === 'carried' && !t.teamCarry) { text = `⚔️ TAP to fight for that ${t.label.toLowerCase()}: a 5-second tap battle!`; action = 'STEAL'; }
       else if (it.state === 'carried' && it.n === 2) { text = `⚔️ TAP to steal an end of the ${t.label.toLowerCase()}: a 5-second tap battle!`; action = 'STEAL'; }
@@ -700,7 +707,7 @@ function renderPrompt(s, me) {
   // the big button says what it will do right now
   const WORD = { 'ACTION': ['Grab', ''], 'GRAB': ['Grab', ''], 'SET DOWN': ['Drop', ''], 'DROP': ['Place', ''], 'PULL': ['Pull out', ''],
     'HOLD ↩️': ['Unload', 'hold'], 'STACK': ['Stack', ''], 'LOAD': ['Load', ''], 'LIFT': ['Lift', ''], 'STEAL': ['Steal', ''], 'TAP': ['Tap!', 'tap battle'],
-    'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'HOLD 🔧': ['Take apart', 'hold'] };
+    'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'PUSH': ['Push', 'hold: take off'], 'HOLD 🔧': ['Take apart', 'hold'] };
   const [w, sub] = WORD[action] || [action, ''];
   if ($('action-label').textContent !== w) setText('action-label', w);
   // nothing in reach (a plant, a built-in bookshelf, an empty corner): the button greys out, so it's clear what can be picked up

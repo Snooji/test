@@ -784,7 +784,8 @@ export class MoveRoom extends Room {
 
   onTap(p, item) {
     if (this.sab?.onTap(p, item)) return;
-    if (item) { // set it down on the floor
+    if (item) { // put it on a parked dolly with room, else set it down on the floor
+      if (this.putOnDolly(p, item)) return;
       this.releaseCarry(p);
       return;
     }
@@ -1051,7 +1052,7 @@ export class MoveRoom extends Room {
     let box = null, bd = REACH;
     for (const it of this.items.values()) {
       if (it.state !== 'floor' || !['standard', 'heavy', 'fragile'].includes(it.type)) continue;
-      const dd = dist(p, it); if (dd < bd) { bd = dd; box = it; }
+      const dd = Math.min(dist(p, it), dist(d, it)); if (dd < bd) { bd = dd; box = it; } // within reach of you or of the dolly's nose
     }
     if (box && d.stack.length < 3) {
       box.state = 'dolly'; box.dollyId = d.id; box.carriers = [];
@@ -1062,6 +1063,44 @@ export class MoveRoom extends Room {
     if (box) return this.tell(p, 'The dolly is full (3 boxes). Push it to the truck.');
     // nothing to stack: set the dolly down (boxes stay on it)
     this.dropDolly(p);
+  }
+
+  /** Carrying a box (or a piece of furniture) next to a parked dolly that has room: it goes on the dolly. */
+  putOnDolly(p, item) {
+    const t = ITEM_TYPES[item.type], isBox = BOX_TYPES.includes(item.type);
+    if (!isBox && !(t.furniture && !(t.needsDisassemble && item.assembled))) return false;
+    const near = ['dolly', 'flatdolly'].map(id => this.items.get(id)).filter(dl => dl && dl.state === 'floor' && dist(p, dl) <= REACH + 0.2)
+      .sort((a, b) => dist(p, a) - dist(p, b));
+    for (const dl of near) {
+      const two = dl.type === 'dolly';
+      const room = two ? isBox && dl.stack.length < 3 : !dl.piece && (isBox ? (dl.stack?.length || 0) < FLAT_MAX_BOXES : !(dl.stack?.length));
+      if (!room) continue;
+      for (const id of item.carriers) { const o = this.players.get(id); if (o) { o.carry = null; o.loadMode = false; } }
+      item.carriers = [];
+      if (two) { Object.assign(item, { state: 'dolly', dollyId: dl.id }); dl.stack.push(item.id); this.syncDollyStack(dl); }
+      else { Object.assign(item, { state: 'flat', flatId: dl.id }); if (isBox) (dl.stack ||= []).push(item.id); else dl.piece = item.id; this.syncFlatPiece(dl); }
+      this.event({ kind: 'emote', id: p.id, e: two ? '🛒' : '🛞' });
+      return true;
+    }
+    return false;
+  }
+
+  /** Hold next to a parked, loaded dolly: its top box (or its piece of furniture) comes off into your hands, to restack. */
+  takeOffDolly(p, dl) {
+    let id;
+    if (dl.type === 'dolly') id = dl.stack.pop();
+    else if (dl.piece) { id = dl.piece; dl.piece = null; dl.wobble = 0; }
+    else id = dl.stack?.pop();
+    const it = id && this.items.get(id);
+    if (!it) return false;
+    Object.assign(it, { state: 'carried', carriers: [p.id], dollyId: null, flatId: null, x: p.x, z: p.z });
+    p.carry = it.id;
+    this.event({ kind: 'emote', id: p.id, e: '📦' });
+    return true;
+  }
+  parkedLoadedDolly(p) {
+    return ['dolly', 'flatdolly'].map(id => this.items.get(id))
+      .find(dl => dl && dl.state === 'floor' && dist(p, dl) <= 1.3 && (dl.stack?.length || dl.piece)) || null;
   }
 
   dropDolly(p) {
@@ -1300,7 +1339,14 @@ export class MoveRoom extends Room {
     for (const p of this.players.values()) {
       p.task = null;
       if (this.sab && this.isActive(p) && p.in.hold && this.sab.onHold(p, dt)) continue; // packing, repairs, sabotage holds
+      if (!p.in.hold) p.unstackT = 0;
       if (!this.isActive(p) || p.carry || !p.in.hold) continue;
+      const dl = !p.dolly && !p.flatDolly ? this.parkedLoadedDolly(p) : null;
+      if (dl) { // hold by a loaded dolly: take the top thing off (restack)
+        p.unstackT = (p.unstackT || 0) + dt; p.task = { id: dl.id, kind: 'unstack' };
+        if (p.unstackT >= 0.4) { p.unstackT = 0; this.takeOffDolly(p, dl); }
+        continue;
+      }
       const it = this.nearestItem(p);
       if (!it || it.state !== 'floor') continue;
       const t = ITEM_TYPES[it.type];
