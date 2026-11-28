@@ -770,7 +770,7 @@ export class MoveRoom extends Room {
     } else p.unloadT = 0;
 
     // carrying into the ramp → load mode (leader only for team carries)
-    if (item && item.carriers[0] === p.id && inRamp(item.x, item.z) && !p.rampLock) {
+    if (item && item.carriers[0] === p.id && inRamp(item.x, item.z) && !p.rampLock && !ITEM_TYPES[item.type].tool) { // (a flat box isn't cargo)
       p.loadMode = true;
       p.cursor = bestSpot(this.grid, item.type); // start on a spot that follows the packing rules (new movers follow the outline)
       this.takeRampSlot(p);
@@ -848,6 +848,7 @@ export class MoveRoom extends Room {
    *  (A two-mover lift is fought over end by end: see startDuel.) */
   holderOf(it) {
     if ((it.type === 'dolly' || it.type === 'flatdolly') && it.state === 'pushed') return this.players.get(it.pusher) || null;
+    if (ITEM_TYPES[it.type].tool) return null; // props (a flat box) aren't worth a fight
     if (it.state === 'carried' && it.carriers.length === 1 && !ITEM_TYPES[it.type].teamCarry) return this.players.get(it.carriers[0]) || null;
     return null;
   }
