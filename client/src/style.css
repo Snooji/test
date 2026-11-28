@@ -1011,3 +1011,6 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .lobby-card .crew-list { grid-template-columns: 1fr !important; }
 .share button { border: 3px solid var(--pn-edge) !important; border-radius: 12px !important; background: linear-gradient(180deg, var(--go), var(--go-2)) !important; color: var(--go-ink) !important; box-shadow: inset 0 2px 0 rgba(255,255,255,.3), 0 4px 0 var(--pn-edge) !important; font-weight: 400 !important; font-size: 16px; }
 .lb-foot { background: linear-gradient(180deg, rgba(42,30,21,0), var(--pn-bot) 30%) !important; }
+/* the action button greys out when there's nothing to grab */
+#btn-action.idle { filter: grayscale(1) brightness(.75); opacity: .55; }
+#btn-action.idle #action-label::after { content: ""; }

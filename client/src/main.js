@@ -703,6 +703,9 @@ function renderPrompt(s, me) {
     'WRAP/GRAB': ['Wrap', 'hold · tap grabs'], 'HOLD 🔧': ['Take apart', 'hold'] };
   const [w, sub] = WORD[action] || [action, ''];
   if ($('action-label').textContent !== w) setText('action-label', w);
+  // nothing in reach (a plant, a built-in bookshelf, an empty corner): the button greys out, so it's clear what can be picked up
+  const idle = action === 'ACTION' && !myDuel && !me.carry && !me.dolly && !me.flatDolly;
+  if ($('btn-action').classList.contains('idle') !== idle) $('btn-action').classList.toggle('idle', idle);
   const taskP = me.task ? (s.items.find(i => i.id === me.task.id)?.task?.p || 0) : 0;
   setText('action-sub', me.task ? `keep holding · ${Math.round(taskP * 100)}%` : sub);
   $('btn-action').style.setProperty('--hold', me.task ? `${Math.round(taskP * 360)}deg` : '0deg'); // a ring fills round the button

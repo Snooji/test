@@ -333,9 +333,7 @@ function loadedPiece(type, wrapped, dims) {
   }
   const g = new THREE.Group();
   const m = v.mesh(plainMat); g.add(m);
-  const l = sprite(t.label.toUpperCase(), { fg: '#fff', stroke: '#000', font: 'bold 40px system-ui' }, [1.6, 0.4]);
-  l.position.y = (dims.h || 1) * CELL + 0.1; l.material.depthTest = true; g.add(l);
-  return g;
+  return g; // no floating name: the action button says what you can do
 }
 
 /** Two-wheel hand truck. Local +z is the nose (where the boxes sit, away from the mover); the red frame, the wheels and
@@ -382,11 +380,6 @@ export function makeItem(type, { wrapped = false, assembled = false, loaded = fa
     const flat = t.needsDisassemble && !assembled;
     const w = t.w * 0.9, h = flat ? 0.3 : 0.8, d = Math.max(0.8, t.d * 0.9);
     g.add(new Vox().box(0, h / 2, 0, w, h, d, wrapped && t.furniture ? QUILT : boxColour(type, w, h, d)).mesh());
-    if (type === 'fragile' || type === 'heavy') {
-      const l = sprite(type === 'fragile' ? '🍷 FRAGILE' : '⚠ HEAVY', { fg: type === 'fragile' ? '#ff4d5e' : '#ffd166', stroke: '#1b1340', font: 'bold 34px system-ui' }, [0.95, 0.24]);
-      l.position.y = 1.0; l.material.depthTest = true; g.add(l);
-    }
-    if (flat) { const l = sprite('FLAT-PACK ' + t.label.toUpperCase(), { fg: '#fff', stroke: '#000', font: 'bold 30px system-ui', w: 320 }, [1.8, 0.36]); l.position.y = 0.6; g.add(l); }
     return g;
   }
   const W = (hex) => wrapped ? QUILT : hex;
@@ -787,7 +780,7 @@ export function buildTruck(scene) {
   ramp.position.set(r.x1, fy, 0); ramp.rotation.z = Math.atan2(fy, run); g.add(ramp);
   scene.ramp = ramp; scene.rampHome = { x: r.x1, y: fy, rot: Math.atan2(fy, run), len: RL };
   const zone = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0), new THREE.MeshBasicMaterial({ color: 0x55ffcc, transparent: true, opacity: 0.12 }));
-  zone.rotation.x = -Math.PI / 2; zone.position.set((r.x0 + r.x1) / 2, 0.04, 0); g.add(zone);
+  zone.rotation.x = -Math.PI / 2; zone.position.set((r.x0 + r.x1) / 2, 0.04, 0); zone.visible = false; g.add(zone); // no highlight on the ground
   scene.rampZone = zone;
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.8), new THREE.MeshBasicMaterial({ map: labelTexture('LOAD ZONE ▶', { fg: '#55ffcc', font: 'bold 40px system-ui', w: 400, h: 96 }), transparent: true }));
   sign.rotation.x = -Math.PI / 2; sign.position.set((r.x0 + r.x1) / 2 - 0.3, 0.06, r.z1 + 0.7); g.add(sign);

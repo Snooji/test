@@ -501,9 +501,6 @@ export class GameScene {
       else if (o.rotation.z) o.rotation.z = 0;
       if (it.type === 'flatdolly') {
         o.visible = it.state !== 'gone' && it.state !== 'parked'; // resetting / parked at the truck
-        if (!o.userData.tag) { o.userData.tag = sprite('🛞 FURNITURE DOLLY', { fg: '#ffd166', stroke: '#171310', font: 'bold 34px system-ui', w: 400 }, [2.4, 0.5]); o.userData.tag.position.y = 1.5; o.add(o.userData.tag); }
-        o.userData.tag.visible = it.state === 'floor';
-        if (it.state === 'floor') o.userData.tag.position.y = 1.5 + Math.sin(t * 3) * 0.12;
         if (!o.userData.warn) { o.userData.warn = sprite('⚠️ WOBBLING', { fg: '#ffd166', stroke: '#171310', font: 'bold 40px system-ui' }, [2.0, 0.5]); o.userData.warn.position.y = 1.9; o.add(o.userData.warn); }
         o.userData.warn.visible = (it.wobble || 0) > 0.35; // ease off or a box slides off
         if (o.userData.warn.visible) o.userData.warn.material.opacity = 0.5 + Math.abs(Math.sin(t * (6 + it.wobble * 10))) * 0.5;
@@ -731,7 +728,6 @@ export class GameScene {
         this.ghost.visible = true;
       }
     }
-    this.rampZone.material.opacity = me?.carry ? 0.2 + Math.sin(t * 4) * 0.1 : 0.1;
 
     // drive-off: shutter down, then the truck pulls away with the load
     if (this.drive) {
