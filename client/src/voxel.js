@@ -314,10 +314,13 @@ function cardboardBox(type, w, h, d) {
   const art = type === 'fragile' ? [BROKEN_GLASS, 0xd0312d] : type === 'heavy' ? [ANVIL, 0x231c16] : [THIS_WAY_UP, 0x231c16];
   {
     const [mask, col] = art, rows = mask.length, cols = mask[0].length;
-    const P = Math.min(w * 0.7 / cols, h * 0.62 / rows), dv = new Vox(P);                     // big and clear, like a printed sticker
-    const front = Math.round((d / 2) / P), mid = Math.round((h * 0.44) / P);                 // centred a little low, clear of the tape
+    const P = Math.min(Math.min(w, d) * 0.7 / cols, h * 0.62 / rows), dv = new Vox(P);                     // big and clear, like a printed sticker
+    const fz = Math.round((d / 2) / P), fx = Math.round((w / 2) / P), mid = Math.round((h * 0.44) / P); // centred a little low, clear of the tape
     mask.forEach((row, r) => [...row].forEach((ch, c) => {
-      if (ch === 'X') dv.set(c - Math.floor(cols / 2), mid + Math.floor(rows / 2) - r, front, col);
+      if (ch !== 'X') return;
+      const i = c - Math.floor(cols / 2), y = mid + Math.floor(rows / 2) - r;
+      // all four sides, each mirrored so it reads the right way round from outside (the lid keeps just its tape)
+      dv.set(i, y, fz, col); dv.set(-i, y, -fz, col); dv.set(fx, y, -i, col); dv.set(-fx, y, i, col);
     }));
     dv.into(b, 0, 0, 0, P);
   }
