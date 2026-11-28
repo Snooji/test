@@ -3,7 +3,7 @@
 import { ITEM_TYPES } from '../../shared/logic.js';
 import { FLOOR_DZ, mulberry32 } from '../../shared/level.js';
 import { TRUCK } from '../../shared/world.js';
-import { roomQuotas, mixBag, SAB, HOLD, pileValueFactor } from '../../shared/sabotage.js';
+import { roomQuotas, mixBag, SAB, HOLD, pileValueFactor, sabotageOutcome } from '../../shared/sabotage.js';
 import { inRamp } from '../../shared/world.js';
 import { dealRoles, jobsFor } from './roles.js';
 import { pickSabotage, blocked, applySabotage, pickRepair, applyRepair } from './actions.js';
@@ -355,7 +355,44 @@ export class SabotageGame {
     if (fb) { this.room.items.delete(fb.id); p.carry = null; }
     this.packing.delete(p.id);
   }
-  checkEnd() { return null; }
+  /** nothing left to load: every room packed, no piles, no cargo outside the truck (broken things are gone) */
+  houseEmpty() {
+    for (const n of this.quota.values()) if (n > 0) return false;
+    for (const it of this.room.items.values()) {
+      if (it.type === 'pile') return false;
+      if (!ITEM_TYPES[it.type].tool && it.state !== 'loaded') return false;
+    }
+    return true;
+  }
+  /** the drive-off safety: the truck's own check (strapped pieces don't topple), and damaged furniture counts against it */
+  driveSafety() {
+    const loaded = [...this.room.items.values()].filter(i => i.state === 'loaded' && !ITEM_TYPES[i.type].tool);
+    const base = this.liveSafety(), total = this.room.grid.items.size;
+    const damaged = loaded.filter(i => i.damaged).length;
+    return Math.max(0, Math.round(base - (100 * damaged) / Math.max(1, total || loaded.length)));
+  }
+  checkEnd() {
+    const movers = this.room.movers();
+    const sabs = movers.filter(p => p.saboteur), live = (p) => this.room.isActive(p) && !p.ghost;
+    const houseEmpty = this.houseEmpty();
+    const out = sabotageOutcome({
+      houseValue: this.houseValue, lostValue: this.lostValue,
+      saboteursAlive: sabs.filter(live).length, crewAlive: movers.filter(p => !p.saboteur && live(p)).length,
+      saboteursOut: sabs.length > 0 && !sabs.some(live), houseEmpty, safety: houseEmpty ? this.driveSafety() : 100,
+    });
+    if (out) { this.driving = houseEmpty && !out.reason.includes('caught') && !out.reason.includes('outnumber') && !out.reason.includes('broken'); this.finalSafety = houseEmpty ? this.driveSafety() : null; }
+    return out;
+  }
+  /** what the end screen shows */
+  results() {
+    const ps = this.room.players, label = { weaken: 'weakened the flat boxes', cutTape: 'cut the tape on a box', mislabel: 'switched a box\'s label', loosen: 'loosened a dolly wheel', snag: 'snagged the pads on a piece', stashPads: 'stashed the moving pads', lightsOut: 'turned the lights out', pullTruck: 'pulled a piece out of the truck' };
+    return {
+      lostValue: Math.round(this.lostValue), houseValue: this.houseValue, lossLine: Math.round(SAB.LOSS_LINE * 100), lostPct: Math.round(100 * this.lostValue / Math.max(1, this.houseValue)),
+      safety: this.finalSafety ?? this.driveSafety(), safetyLine: SAB.SAFETY_LINE,
+      saboteurs: [...ps.values()].filter(p => p.saboteur).map(p => ({ id: p.id, name: p.name, char: p.char })),
+      log: this.history.map(h => ({ at: h.at, text: `${ps.get(h.by)?.name || 'A saboteur'} ${label[h.action] || h.action}` })),
+    };
+  }
   snapshot() {
     const roles = {};
     for (const p of this.room.players.values()) if (p.role) roles[p.id] = p.role === 'saboteur' ? 'mover' : p.role; // never who the saboteurs are

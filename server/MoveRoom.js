@@ -1706,7 +1706,7 @@ export class MoveRoom extends Room {
   /** Competitive rounds end with the truck driving off; a sloppy load costs whoever placed the wobbly pieces. */
   endRound(reason, forcedWinnerId = null, winners = null) {
     if (this.phase === 'driveoff' || this.phase === 'results') return;
-    const drive = this.game === 'classic' && !this.tutorialMode && !forcedWinnerId && this.grid.items.size > 0;
+    const drive = (this.game === 'classic' && !this.tutorialMode && !forcedWinnerId && this.grid.items.size > 0) || !!this.sab?.driving; // sabotage: the truck leaves when the house is empty
     if (!drive) return this.finishRound(reason, forcedWinnerId, winners);
     for (const p of this.players.values()) { if (p.carry) this.releaseCarry(p); p.loadMode = false; p.task = null; }
     const check = driveOffCheck(this.grid);
@@ -1761,6 +1761,7 @@ export class MoveRoom extends Room {
     const sab = [...this.players.values()].find(p => p.saboteur);
     let winner = (forcedWinnerId && players.find(p => p.id === forcedWinnerId)) || players.find(p => !p.out) || null;
     if (winners === 'saboteur' && sab) winner = players.find(p => p.id === sab.id) || winner;
+    if (this.sab && winners === 'crew') winner = players.find(p => !this.players.get(p.id)?.saboteur) || winner;
     if (winners === 'crew') winner = players.find(p => sab ? p.id !== sab.id : true) || winner;
     const teams = this.teamScores()?.sort((a, b) => b.score - a.score) || null;
     const tie = teams && teams.length > 1 && teams[0].score === teams[1].score;
@@ -1779,7 +1780,7 @@ export class MoveRoom extends Room {
     ].map(([k, title]) => { const p = best(k); return p ? { id: p.id, name: p.name, title, value: p[k] } : null; }).filter(Boolean);
     this.results = { reason, awards, players, winnerId: winner?.id || null, teamTotal, unresolved, loadedCount: loaded.length, totalItems: this.items.size, broken: this.breaks.length, difficulty: this.bots.size ? this.difficulty : null, tally: this.tally || null,
       driveoff: this.driveoff ? { safety: this.driveoff.safety, damaged: this.driveoff.damaged.map(d => ({ name: d.name, reason: d.reason, by: d.by })), lost: this.driveoff.lost } : null,
-      teams, winTeam: teamWinner, game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
+      teams, winTeam: teamWinner, sabotage: this.sab ? this.sab.results() : null, game: this.game, winners, saboteurId: sab?.id || null, saboteurName: sab?.name || null, crewScore: this.game === 'sabotage' ? this.crewScore() : null };
     for (const p of this.players.values()) { p.carry = null; p.loadMode = false; p.task = null; }
     this.event({ kind: 'end' });
     this.recordResults();
@@ -1797,7 +1798,7 @@ export class MoveRoom extends Room {
     for (const p of this.players.values()) {
       if (p.bot || p.spectator || !p.email) continue;
       if (!this.tookPart(p)) continue; // AFK: standing around all round doesn't count as a move (unlocks are earned)
-      const won = r.teams ? !!r.winTeam && p.team === r.winTeam : r.game === 'sabotage' ? (r.winners === 'saboteur' ? p.id === r.saboteurId : p.id !== r.saboteurId && r.winners === 'crew') : r.winnerId === p.id;
+      const won = r.sabotage ? (r.winners === 'saboteur' ? !!p.saboteur : r.winners === 'crew' && !p.saboteur) : r.teams ? !!r.winTeam && p.team === r.winTeam : r.game === 'sabotage' ? (r.winners === 'saboteur' ? p.id === r.saboteurId : p.id !== r.saboteurId && r.winners === 'crew') : r.winnerId === p.id;
       store.recordGame(p.email, { won, loaded: p.loaded }).catch(() => {});
       if (this.level?.daily) store.addScore({ day: this.level.daily, email: p.email, name: p.name, score: p.score, detail: `${this.level.name} · ${this.mode === 'load' ? 'Full load' : this.mode}` }).catch(() => {});
     }
