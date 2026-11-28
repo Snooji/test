@@ -267,16 +267,18 @@ function boxColour(type, w, h, d) {
 
 // ---------- moving boxes: plain cardboard, tape across the top; fragile = a broken wine glass, heavy = an anvil, standard = nothing ----------
 // box marks, printed on the front like real moving-box stickers: ↑↑ this way up (standard), a cracked glass (fragile), an anvil (heavy)
-const THIS_WAY_UP = [ // printed in charcoal, 11×9 pixels
-  '..X.....X..',
-  '.XXX...XXX.',
-  'XXXXX.XXXXX',
-  '..X.....X..',
-  '..X.....X..',
-  '..X.....X..',
-  '..X.....X..',
-  '...........',
-  'XXXXXXXXXXX',
+const THIS_WAY_UP = [ // printed in charcoal, 15×11 pixels: two tall-headed arrows over a line
+  '...X.......X...',
+  '..XXX.....XXX..',
+  '.XXXXX...XXXXX.',
+  'XXXXXXX.XXXXXXX',
+  '...X.......X...',
+  '...X.......X...',
+  '...X.......X...',
+  '...X.......X...',
+  '...X.......X...',
+  '...............',
+  'XXXXXXXXXXXXXXX',
 ];
 const BROKEN_GLASS = [ // printed in red, 11×11 pixels: a filled wine glass with a crack down the bowl
   'XXXXX.XXXXX',
@@ -312,17 +314,26 @@ function cardboardBox(type, w, h, d) {
   });
   v.into(b);
   const art = type === 'fragile' ? [BROKEN_GLASS, 0xd0312d] : type === 'heavy' ? [ANVIL, 0x231c16] : [THIS_WAY_UP, 0x231c16];
-  {
+  { // printed flat on all four sides (a paper-thin layer on the face, not blocks sticking out), each the right way round from outside
     const [mask, col] = art, rows = mask.length, cols = mask[0].length;
-    const P = Math.min(Math.min(w, d) * 0.7 / cols, h * 0.62 / rows), dv = new Vox(P);                     // big and clear, like a printed sticker
-    const fz = Math.round((d / 2) / P), fx = Math.round((w / 2) / P), mid = Math.round((h * 0.44) / P); // centred a little low, clear of the tape
-    mask.forEach((row, r) => [...row].forEach((ch, c) => {
-      if (ch !== 'X') return;
-      const i = c - Math.floor(cols / 2), y = mid + Math.floor(rows / 2) - r;
-      // all four sides, each mirrored so it reads the right way round from outside (the lid keeps just its tape)
-      dv.set(i, y, fz, col); dv.set(-i, y, -fz, col); dv.set(fx, y, -i, col); dv.set(-fx, y, i, col);
-    }));
-    dv.into(b, 0, 0, 0, P);
+    // the real faces of the box as built (block sizes can round it a little off-centre)
+    let X0 = Infinity, X1 = -Infinity, Z0 = Infinity, Z1 = -Infinity;
+    for (let k = 0; k < b.pos.length; k += 3) { X0 = Math.min(X0, b.pos[k]); X1 = Math.max(X1, b.pos[k]); Z0 = Math.min(Z0, b.pos[k + 2]); Z1 = Math.max(Z1, b.pos[k + 2]); }
+    const cx = (X0 + X1) / 2, cz = (Z0 + Z1) / 2;
+    const P = Math.min(Math.min(X1 - X0, Z1 - Z0) * 0.7 / cols, h * 0.62 / rows), T = 0.006, yTop = h * 0.44 + rows * P / 2; // centred a little low, clear of the tape
+    mask.forEach((row, r) => {
+      const y1 = yTop - r * P, y0 = y1 - P;
+      for (let c = 0; c < cols; c++) {
+        if (row[c] !== 'X') continue;
+        let e = c; while (e + 1 < cols && row[e + 1] === 'X') e++;                     // one strip per run of pixels
+        const u0 = (c - cols / 2) * P, u1 = (e + 1 - cols / 2) * P;
+        b.box(cx + u0, y0, Z1, cx + u1, y1, Z1 + T, col, 1);                             // front
+        b.box(cx - u1, y0, Z0 - T, cx - u0, y1, Z0, col, 1);                             // back
+        b.box(X1, y0, cz - u1, X1 + T, y1, cz - u0, col, 1);                             // right side
+        b.box(X0 - T, y0, cz + u0, X0, y1, cz + u1, col, 1);                             // left side
+        c = e;
+      }
+    });
   }
   const g = new THREE.Group(), m = new THREE.Mesh(b.geometry(), voxMat); m.castShadow = m.receiveShadow = true; g.add(m);
   return g;
