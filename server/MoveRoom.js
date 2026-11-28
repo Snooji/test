@@ -980,7 +980,8 @@ export class MoveRoom extends Room {
   /** A full load (4 boxes) wobbles when pushed flat out for too long or swung round a corner; at the limit the top box
    *  slides off. Easing off settles it. Fragile boxes break on the first fall, standard on the second, heavy on the third. */
   flatWobble(p, fd, dt, ox, oz, of) {
-    if ((fd.stack?.length || 0) < FLAT_MAX_BOXES) { fd.wobble = Math.max(0, (fd.wobble || 0) - dt * 0.5); return; }
+    const loaded = (fd.stack?.length || 0) >= FLAT_MAX_BOXES || (this.sab && fd.piece); // sabotage: a piece of furniture can slide off too
+    if (!loaded) { fd.wobble = Math.max(0, (fd.wobble || 0) - dt * 0.5); return; }
     const moved = Math.hypot(p.x - ox, p.z - oz) / Math.max(dt, 1e-3);
     let turn = Math.abs(p.face - of); if (turn > Math.PI) turn = 2 * Math.PI - turn;
     const turnRate = turn / Math.max(dt, 1e-3), push = Math.hypot(p.in.mx, p.in.mz);
@@ -989,7 +990,7 @@ export class MoveRoom extends Room {
     if (moved > 0.4 && turnRate > 4) w += turn * 0.22;                                      // a sharp swing round a corner
     if (moved <= 0.4 || (push < 0.6 && turnRate < 2)) w -= dt * 0.35;                       // taking it steady settles it
     fd.wobble = Math.max(0, w);
-    if (fd.wobble >= 1) { fd.wobble = 0.5; this.spillFromFlat(p, fd); }
+    if (fd.wobble >= 1) { fd.wobble = 0.5; if (this.sab && fd.piece) this.sab.pieceFalls(p, fd); else this.spillFromFlat(p, fd); }
   }
   spillFromFlat(p, fd) {
     const id = fd.stack.pop(), box = id && this.items.get(id);

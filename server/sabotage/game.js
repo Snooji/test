@@ -3,7 +3,8 @@
 import { ITEM_TYPES } from '../../shared/logic.js';
 import { FLOOR_DZ, mulberry32 } from '../../shared/level.js';
 import { TRUCK } from '../../shared/world.js';
-import { roomQuotas, mixBag, SAB } from '../../shared/sabotage.js';
+import { roomQuotas, mixBag, SAB, pileValueFactor } from '../../shared/sabotage.js';
+import { inRamp } from '../../shared/world.js';
 
 const BOXES = new Set(['standard', 'heavy', 'fragile']);
 
@@ -16,6 +17,8 @@ export class SabotageGame {
     this.log = [];            // work log: { at, text }
     this.packing = new Map(); // packerId -> { roomIndex, t, partnerId }
     this.seq = 0;
+    this.houseValue = 0;      // everything the house holds, furniture + every box it will be packed into
+    this.lostValue = 0;       // broken, damaged or spoiled: the saboteurs' score
   }
 
   get level() { return this.room.level; }
@@ -40,6 +43,53 @@ export class SabotageGame {
     const rooms = this.level.rooms.map((r, i) => [r, i]).filter(([r]) => !r.storey);
     const [br] = rooms.find(([r]) => r.role === 'garage') || rooms.find(([r]) => r.role === 'laundry') || rooms.find(([r]) => !['hall', 'passage', 'stairs'].includes(r.role)) || rooms[0];
     prop('breaker', 'breaker', br.x0 + 0.6, (br.z0 + br.z1) / 2);
+    for (const it of items.values()) if (!ITEM_TYPES[it.type].tool) this.houseValue += ITEM_TYPES[it.type].pts;
+    for (const bag of this.bags.values()) for (const t of bag) this.houseValue += ITEM_TYPES[t].pts;
+  }
+
+  worth(it) { return ITEM_TYPES[it.type].pts * (it.value ?? 1); }
+  lose(amount) { this.lostValue = +(this.lostValue + amount).toFixed(3); }
+
+  /** the nearest spot a mover can reach (never inside a wall or on the ramp) */
+  walkable(x, z) {
+    const ok = (a, b) => !this.level.hitsWall(a, b, 0.45) && !inRamp(a, b);
+    if (ok(x, z)) return { x, z };
+    for (let r = 0.25; r <= 4; r += 0.25) for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+      if (ok(px, pz)) return { x: +px.toFixed(2), z: +pz.toFixed(2) };
+    }
+    return { x: 6, z: 0 }; // the yard by the truck
+  }
+
+  /** Something broke. Sabotage keeps it broken: a fragile box (or a broken piece) is lost; a standard or heavy box bursts
+   *  into a pile that can be repacked. Returns true so the room doesn't respawn it. */
+  onBreak(item) {
+    this.room.items.delete(item.id);
+    if (item.type === 'standard' || item.type === 'heavy') {
+      const at = this.walkable(item.x, item.z);
+      this.newItem('pile', at.x, at.z, { contents: item.type, value: item.value ?? 1, bornAt: this.room.elapsed || 0, room: item.room });
+      this.room.event({ kind: 'toast', text: `💥 A ${ITEM_TYPES[item.type].label.toLowerCase()} burst! Repack the pile quickly to save what's inside.`, cls: 'crunch' });
+    } else this.lose(this.worth(item));
+    return true;
+  }
+
+  /** a piece of furniture got knocked about: worth half from now on, and it counts against the drive-off */
+  damage(item, why) {
+    if (item.damaged) return;
+    const before = this.worth(item);
+    item.damaged = why; item.value = (item.value ?? 1) * SAB.DAMAGED_VALUE;
+    this.lose(before - this.worth(item));
+  }
+
+  /** the furniture dolly wobbled too much with a piece on it: the piece slides off and is damaged */
+  pieceFalls(p, fd) {
+    const piece = this.room.items.get(fd.piece);
+    fd.piece = null;
+    if (!piece) return;
+    const at = this.walkable(fd.x + Math.cos(p.face) * 1.2, fd.z - Math.sin(p.face) * 1.2);
+    Object.assign(piece, { state: 'floor', flatId: null, x: at.x, z: at.z, carriers: [] });
+    this.damage(piece, 'fell off the dolly');
+    this.room.event({ kind: 'toast', text: `😬 The ${ITEM_TYPES[piece.type].label.toLowerCase()} slid off the furniture dolly. Damaged!`, cls: 'crunch' });
   }
 
   tick(_dt) {
@@ -87,6 +137,8 @@ export class SabotageGame {
   }
 
   pack(p, dt) {
+    const pile = [...this.room.items.values()].find(i => i.type === 'pile' && this.near(p, i, 1.3));
+    if (pile) return this.repack(p, pile, dt);
     const ri = this.roomAt(p.x, p.z), r = this.level.rooms[ri];
     if (ri < 0 || !this.total.has(ri)) { this.hint(p, '📦 Pack boxes inside a room, not in a hallway.'); return true; }
     if (!(this.quota.get(ri) > 0)) { this.hint(p, `✅ The ${r.name.toLowerCase()} is all packed. Take this box to another room.`); return true; }
@@ -111,10 +163,30 @@ export class SabotageGame {
     return true;
   }
 
+  partnerOf(p) { return [...this.room.players.values()].find(o => o !== p && this.room.isActive(o) && !o.carry && o.in.hold && Math.hypot(o.x - p.x, o.z - p.z) <= SAB.PAIR_RADIUS) || null; }
+
+  /** repack a burst box's pile into a new box (marked fragile); the sooner, the more of it is saved */
+  repack(p, pile, dt) {
+    const job = this.packing.get(p.id)?.pileId === pile.id ? this.packing.get(p.id) : { pileId: pile.id, t: 0, partnerId: null };
+    const partner = this.partnerOf(p);
+    job.partnerId = partner?.id || null;
+    job.t += dt / (partner ? SAB.REPACK_PAIR : SAB.REPACK_SOLO);
+    job.seen = this.room.elapsed;
+    this.packing.set(p.id, job);
+    p.task = { id: p.carry, kind: 'pack', p: +Math.min(1, job.t).toFixed(2) };
+    if (job.t < 1 - 1e-6) return true;
+    const fb = this.carrying(p, 'flatbox');
+    this.room.items.delete(fb.id); this.room.items.delete(pile.id); p.carry = null; this.packing.delete(p.id);
+    const contents = ITEM_TYPES[pile.contents].pts * (pile.value ?? 1), f = pileValueFactor((this.room.elapsed || 0) - pile.bornAt);
+    this.lose(contents * (1 - f));
+    this.newItem('fragile', pile.x, pile.z, { value: (contents * f) / ITEM_TYPES.fragile.pts, repacked: pile.contents, shownType: 'fragile', room: pile.room, lastHandlers: [p.id, partner?.id].filter(Boolean) });
+    this.note(`${partner ? `${p.name} + ${partner.name}` : p.name} repacked a burst box (${Math.round(f * 100)}% saved)`);
+    return true;
+  }
+
   onSabotage(_p) {}
   onMeetingStart() {}
   onMeetingEnd() {}
-  onBreak(_item, _how) { return false; }
   onLeave(p) {
     const fb = this.carrying(p, 'flatbox');
     if (fb) { this.room.items.delete(fb.id); p.carry = null; }
