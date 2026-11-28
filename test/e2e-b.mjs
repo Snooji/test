@@ -53,7 +53,7 @@ await d.click('#btn-daily');
 await d.waitForFunction(() => !!window.__sm.snap?.daily);
 log('daily lobby note:', await d.textContent('#quick-note'));
 if ((await d.locator('.suit.locked').count()) < 3) errors.push('locked suits not shown');
-await d.click('#twists button[data-twist="zerog"]').catch(() => {}); // disabled on daily: should be a no-op
+await d.$eval('#twists button[data-twist="zerog"]', b => b.click()).catch(() => {}); // disabled on daily: should be a no-op
 await d.screenshot({ path: `${out}/b05-daily-lobby.png` });
 await d.click('#btn-start');
 await d.waitForFunction(() => window.__sm.snap?.phase === 'playing', null, { timeout: 8000 });

@@ -20,7 +20,7 @@ if (!/^[0-9A-Z]{1,7}$/.test(code || '')) errors.push('no house code shown: ' + c
 await p.fill('#code-input', 'moon-42'); await p.click('#code-form button');
 await p.waitForFunction(() => window.__sm.snap?.level?.code === 'MOON42', null, { timeout: 4000 }).catch(() => errors.push('typed house code not used'));
 const seedA = await p.evaluate(() => window.__sm.snap.level.seed);
-await p.click('#floors button[data-floors="2"]');
+await p.$eval('#floors button[data-floors="2"]', b => b.click());
 await p.waitForFunction(() => window.__sm.snap?.level?.floors === 2, null, { timeout: 4000 }).catch(() => errors.push('floors pick not applied'));
 if (await p.evaluate(() => window.__sm.snap.level.code) !== 'MOON42') errors.push('changing floors lost the house code');
 if (!/Pick floors|picks/.test(await p.textContent('#setup-note'))) errors.push('no setup note');
@@ -34,6 +34,7 @@ await wait(800);
 if (await p.evaluate(() => window.__sm.scene.arrow.visible)) errors.push('arrow showing while turned off');
 // rebind Rotate to F; W is refused
 await p.click('#hud-menu');
+await p.click('.gm-tabs button[data-pane="keys"]'); // keys live on their own tab now
 await p.click('.gm-change[data-act="rotate"]');
 await p.keyboard.press('w');
 if (!/for moving/.test(await p.textContent('#gm-keynote'))) errors.push('W was not refused');

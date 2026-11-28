@@ -41,7 +41,7 @@ await b.screenshot({ path: `${out}/03-lobby-phone.png` });
 if (!(await a.isDisabled('#btn-start'))) errors.push('start should be locked until Bo is ready');
 await b.click('#btn-ready-lobby');
 await a.waitForFunction(() => window.__sm.snap.players.every(p => p.id === window.__sm.snap.hostId || p.ready));
-await a.click('#modes button[data-mode="3min"]');
+await a.$eval('#modes button[data-mode="3min"]', b => b.click());
 await a.click('#btn-start');
 await a.screenshot({ path: `${out}/04-start.png` });
 const aId = await a.evaluate(() => window.__sm.myId);

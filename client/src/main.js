@@ -243,6 +243,12 @@ function netBox(text, canWait) {
   $('netbox').classList.toggle('waiting', !!canWait);
   show(el, true);
 }
+// pause menu tabs: one page at a time, so the menu fits the screen
+document.querySelector('.gm-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-pane]'); if (!b) return;
+  for (const t of document.querySelectorAll('.gm-tabs button')) t.classList.toggle('on', t === b);
+  for (const p of document.querySelectorAll('.gm-pane')) p.classList.toggle('hidden', p.dataset.pane !== b.dataset.pane);
+});
 $('netbox-menu').addEventListener('click', () => {
   const r = room; room = null; snap = null; lastPhase = null; reconnecting = false;
   netBox(null);
@@ -372,6 +378,32 @@ function onPhase(phase, prev) {
 }
 
 // ---------- lobby ----------
+/** Lobby choices as ◀ value ▶ steppers. The original buttons stay (hidden) and keep doing the work: an arrow clicks the
+ *  next or previous button that's allowed, so every rule about who can change what still applies. */
+const STEPPED = ['games', 'modes', 'teams', 'crew', 'floors', 'twists', 'lobby-diff'];
+function stepperize() {
+  for (const id of STEPPED) {
+    const g = $(id); if (!g || g.dataset.stepper) continue;
+    g.dataset.stepper = '1'; g.classList.add('stepped');
+    const st = document.createElement('div');
+    st.className = 'stepper'; st.dataset.for = id;
+    st.innerHTML = `<button type="button" class="st-prev" aria-label="Previous">◀</button><span class="st-val" aria-live="polite"></span><button type="button" class="st-next" aria-label="Next">▶</button>`;
+    g.after(st);
+    st.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b || b.disabled) return;
+      const all = [...g.querySelectorAll('button')], cur = all.findIndex(x => x.classList.contains('on')), dir = b.classList.contains('st-next') ? 1 : -1;
+      for (let k = 1; k <= all.length; k++) { const n = all[(cur + dir * k + all.length * 2) % all.length]; if (!n.disabled) { n.click(); break; } }
+    });
+  }
+  for (const st of document.querySelectorAll('.stepper')) {
+    const g = $(st.dataset.for), all = [...g.querySelectorAll('button')], on = all.find(x => x.classList.contains('on'));
+    st.querySelector('.st-val').textContent = on ? on.textContent : '—';
+    const can = all.filter(x => !x.disabled).length > (on && !on.disabled ? 1 : 0);
+    for (const a of st.querySelectorAll('button')) a.disabled = !can;
+    st.classList.toggle('locked', !can);
+  }
+}
+
 function renderLobby(s, me) {
   if (s.level?.tutorial && s.hostId === myId && !autoStartSent) { autoStartSent = true; room.send('start'); return; } // training starts right away
   $('lobby-code').textContent = room.roomId;
@@ -418,7 +450,7 @@ function renderLobby(s, me) {
   // the crew as a list; status is words, not icons
   const row = (p) => {
     const st = p.id === s.hostId ? 'Crew chief' : p.bot ? 'AI mover' : p.spectator ? 'Watching' : p.ready ? 'Ready' : 'Not ready yet';
-    return `<li class="${p.id === myId ? 'me' : ''}"><span class="cl-pic">${portrait(p.char)}</span><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}</b><span class="cl-st ${p.ready || p.id === s.hostId ? 'ok' : ''}">${st}</span></li>`;
+    return `<li class="${p.id === myId ? 'me' : ''}"><span class="cl-pic">${portrait(p.char)}</span><b>${esc(p.name)}${p.id === myId ? ' <small>(you)</small>' : ''}</b><span class="cl-st ${p.ready || p.id === s.hostId || p.bot ? 'ok' : ''} ${p.id === s.hostId ? 'host' : ''}">${st}</span></li>`;
   };
   if (s.teamN) { // a column per team, with a button to switch to it
     const cols = Array.from({ length: s.teamN }, (_, i) => i + 1).map(t => {
@@ -451,6 +483,7 @@ function renderLobby(s, me) {
     : movers.length === 1 ? 'Add AI movers, or share the invite so friends can join.' : 'Everyone ready? Hit start!';
   $('btn-start').disabled = host && (waitingOn.length > 0 || (s.game === 'sabotage' && movers.length < 3));
   if (me && !me.spectator) prefChar = me.char;
+  stepperize();
 }
 // voxel look: a swipeable carousel of the whole crew; some movers unlock as you play
 function renderCrewCarousel(s) {
@@ -677,17 +710,30 @@ function renderPrompt(s, me) {
 }
 
 // ---------- events ----------
-function toast(text, cls = '') {
+/** Little box labels at the top of the screen. At most two at once (an important one bumps an ordinary one), the same
+ *  message never twice in a row, and a tip (a private hint from the server) only once per round. */
+const toastSeen = new Map(); let toastRound = null;
+function toast(text, cls = '', opts = {}) {
+  const now = performance.now(), key = String(text).replace(/\d+/g, '#');
+  if (snap?.level?.seed !== toastRound) { toastRound = snap?.level?.seed; toastSeen.clear(); }
+  const last = toastSeen.get(key);
+  if (last !== undefined && (opts.tip || now - last < 8000)) return; // seen it: tips once a round, anything else not within 8 s
+  toastSeen.set(key, now);
+  const box = $('toasts'), important = !!cls;
+  if (box.children.length >= 2) {
+    const plain = [...box.children].reverse().find(c => !c.classList.contains('crunch') && !c.classList.contains('help'));
+    if (!important && !plain) return;
+    (plain || box.lastChild).remove();
+  }
   const el = document.createElement('div');
   el.className = 'toast ' + cls;
   el.textContent = text;
-  $('toasts').prepend(el);
-  while ($('toasts').children.length > 3) $('toasts').lastChild.remove();
-  setTimeout(() => el.remove(), cls ? 5000 : 3200);
+  box.prepend(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 250); }, important ? 4500 : 2800);
 }
 function onEvent(e) {
   if (e.kind === 'restart') { serverRestarting = true; netBox('🔧 The game is updating to a new version. This round can’t continue. Back in about a minute!', false); return; }
-  if (e.kind === 'toast') { if (!(e.private && snap?.tutorial)) toast(e.text); }
+  if (e.kind === 'toast') { if (!(e.private && snap?.tutorial)) toast(e.text, e.cls || '', { tip: !!e.private }); }
   else if (e.kind === 'emote') { scene.emote(e.id, e.e); if (e.e.startsWith('+')) sfx('coin'); else sfx('blip'); if (e.id === myId) buzz(e.e.startsWith('+') ? 25 : 12); }
   else if (e.kind === 'crunch') {
     toast(e.text, 'crunch'); scene.shake(); sfx('crunch'); scene.crunchFx(); buzz(200);

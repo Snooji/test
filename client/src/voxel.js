@@ -463,7 +463,14 @@ function drawFixture(b, p) {
   switch (p.type) {
     case 'fridge': put(0, 0, 0, w, 1.95, d, W); put(0, 1.25, d, w * 0.92, 0.02, 0.02, 0xdedad2); put(w * 0.36, 1.35, d, 0.05, 0.4, 0.04, STEEL); put(w * 0.36, 0.6, d, 0.05, 0.4, 0.04, STEEL); break;
     case 'stove': put(0, 0, 0, w, 0.9, d, W); put(0, 0.9, 0, w, 0.04, d, DARK); for (const su of [-0.2, 0.2]) for (const sv of [0.2, 0.5]) put(su, 0.94, sv, 0.24, 0.02, 0.2, 0x4a4a52); put(0, 0.25, d, w * 0.8, 0.4, 0.02, 0x3a3a42); put(0, 0.9, 0, w, 0.35, 0.06, W); break;
-    case 'tub': put(0, 0, 0, w, 0.55, d, W); put(0, 0.45, 0.08, w - 0.16, 0.1, d - 0.16, 0x9fd3dc); put(-w / 2 + 0.15, 0.55, 0.05, 0.08, 0.25, 0.08, STEEL); break;
+    case 'tub': { // a hollow tub: base, four rim walls, and the water a little below the rim (no faces at the same height)
+      const t = 0.09;
+      put(0, 0, 0, w, 0.3, d, W);
+      put(0, 0.3, 0, w, 0.25, t, W); put(0, 0.3, d - t, w, 0.25, t, W);
+      put(-w / 2 + t / 2, 0.3, t, t, 0.25, d - 2 * t, W); put(w / 2 - t / 2, 0.3, t, t, 0.25, d - 2 * t, W);
+      put(0, 0.3, t, w - 2 * t, 0.17, d - 2 * t, 0x9fd3dc);
+      put(-w / 2 + 0.15, 0.55, 0.05, 0.08, 0.25, 0.08, STEEL); break;
+    }
     case 'toilet': put(0, 0, 0, w * 0.8, 0.75, 0.2, W); put(0, 0, 0.2, w * 0.7, 0.4, d - 0.2, W); put(0, 0.4, 0.18, w * 0.75, 0.05, d - 0.16, 0xe4e0d8); break;
     case 'sink': put(0, 0, 0.1, 0.2, 0.75, 0.2, W); put(0, 0.75, 0, w, 0.12, d, W); put(0, 0.86, 0.08, w - 0.2, 0.02, d - 0.18, 0x9fd3dc); put(0, 0.87, 0, 0.06, 0.18, 0.08, STEEL); put(0, 1.05, 0, w * 0.8, 0.75, 0.03, 0xbfd7d6); break;
     case 'washer': case 'dryer': put(0, 0, 0, w, 0.9, d, W); put(0, 0.42, d, 0.44, 0.44, 0.02, p.type === 'washer' ? 0x7fb6c8 : 0x9a9aa4); put(0, 0.8, d - 0.02, w * 0.8, 0.06, 0.03, 0xdcd8cf); break;
@@ -748,6 +755,18 @@ export function buildTruck(scene) {
     });
   }
   const bulkhead = part(pb => pb.box(x1, fy, -(wid / 2 + 0.3), x1 + 0.2, fy + GRID.H * CELL + 0.3, wid / 2 + 0.3, body, 0.4));
+  // the closed box body for the drive: full-height sides and a roof (hidden while loading so you can see in)
+  const TOP = fy + GRID.H * CELL + 0.3;
+  const shell = part(pb => {
+    for (const sz of [-1, 1]) {
+      const zc = sz * (wid / 2 + 0.2);
+      pb.box(x0 - 0.05, fy, zc - 0.1, x1, TOP, zc + 0.1, body, 0.4);                                 // side panel
+      pb.box(x0 - 0.05, fy + 1.2, zc - 0.12, x1, fy + 1.45, zc + 0.12, accent, 0.4);                  // orange stripe
+      pb.box(x0 - 0.05, TOP - 0.35, zc - 0.12, x1, TOP - 0.2, zc + 0.12, accent, 0.4);                // top trim
+    }
+    pb.box(x0 - 0.05, TOP, -(wid / 2 + 0.3), x1 + 0.2, TOP + 0.15, wid / 2 + 0.3, 0xe6dcc8, 0.4);    // roof
+  });
+  shell.visible = false;
   // the cab is a hover-truck model (see /credits.html), tinted Starside purple; it hovers, so glowing pads instead of tyres
   const cab = new THREE.Group(); cab.position.set((x1 + 0.2 + TRUCK.cabX1) / 2, 0.25, 0);
   attachModel(cab, '/models/env/cab.glb', { tint: 0xf2e6d4, rot: 1, fit: [TRUCK.cabX1 - x1 - 0.2, wid + 0.6, 2.75] });
@@ -757,7 +776,7 @@ export function buildTruck(scene) {
   g.add(new THREE.Mesh(pads.geometry(), glowMat));
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), new THREE.MeshBasicMaterial({ map: labelTexture('★ STARSIDE MOVERS', { fg: '#fff', font: 'bold 34px system-ui', w: 420, h: 100 }), transparent: true }));
   logo.rotation.x = -Math.PI / 2; logo.rotation.z = Math.PI / 2; logo.position.set((x1 + TRUCK.cabX1) / 2 + 0.1, 2.92, 0); g.add(logo);
-  scene.truckParts = { sides, front: [bulkhead, cab, logo] };
+  scene.truckParts = { sides, front: [bulkhead, cab, logo], shell };
   // a U-Haul style ramp: narrow, thin, ribbed aluminium with side lips, hinged at the truck so it can slide away under the floor
   const r = TRUCK.ramp, run = r.x1 - r.x0, RL = Math.hypot(run, fy), RW = 1.5, rb = new Batch(), AL = 0xb9bcc0, RIB = 0xd8dadc, LIP = 0x8e9196;
   rb.box(-RL, -0.05, -RW / 2, 0, 0, RW / 2, AL, 0.3);                                                  // the deck, 5 cm thick

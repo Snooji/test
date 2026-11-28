@@ -9,9 +9,9 @@ await p.goto(base); await p.fill('#gate-name', 'Teamy'); await p.fill('#gate-ema
 await p.waitForSelector('#home:not(.hidden)');
 await p.click('#btn-solo');
 await p.waitForFunction(() => window.__sm.snap?.players?.length >= 2);
-await p.click('#crew button[data-crew="6"]');
+await p.$eval('#crew button[data-crew="6"]', b => b.click());
 await p.waitForFunction(() => window.__sm.snap.players.filter(x => !x.spectator).length === 6, null, { timeout: 5000 }).catch(() => errors.push('crew of 6 did not fill'));
-await p.click('#teams button[data-teams="3"]');
+await p.$eval('#teams button[data-teams="3"]', b => b.click());
 await p.waitForFunction(() => window.__sm.snap.teamN === 3, null, { timeout: 4000 }).catch(() => errors.push('3 teams did not turn on'));
 await p.waitForSelector('.tcol', { timeout: 4000 }).catch(() => errors.push('no team columns in the lobby'));
 log('team columns:', await p.locator('.tcol').count());

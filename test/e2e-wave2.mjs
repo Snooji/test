@@ -18,7 +18,7 @@ const a = await player('Ada', 'qa-ada@example.com');
 await a.click('#home-diff button[data-level="hard"]');
 await a.click('#btn-solo');
 await a.waitForFunction(() => window.__sm.snap?.players?.filter(p => p.bot).length === 3);
-await a.click('#modes button[data-mode="load"]');
+await a.$eval('#modes button[data-mode="load"]', b => b.click());
 await a.waitForFunction(() => window.__sm.snap?.level?.exact === true);
 log('full load house:', (await snap(a)).level.name, '| desc:', await a.textContent('#game-desc'));
 await a.screenshot({ path: `${out}/w01-fullload-lobby.png` });
@@ -28,11 +28,12 @@ await a.evaluate(() => window.__sm.send('debug_give', { type: 'lamp' }));
 await a.waitForFunction(() => window.__sm.snap.players.find(p => p.id === window.__sm.myId)?.loadMode, null, { timeout: 5000 });
 await wait(800);
 await a.screenshot({ path: `${out}/w02-lamp-ghost.png` });
-for (let i = 0; i < 3; i++) { await a.keyboard.press('r'); await wait(250); }
+// the aim may start on any orientation (the starting aim picks one that follows the packing rules): each R must turn it
+const rots = [(await me(a)).cursor.rot];
+for (let i = 0; i < 3; i++) { await a.keyboard.press('r'); await wait(250); rots.push((await me(a)).cursor.rot); }
 await a.screenshot({ path: `${out}/w03-lamp-rotated.png` });
-const rot = (await me(a)).cursor.rot;
-log('lamp rotation index after 3 turns:', rot);
-if (rot !== 3) errors.push('R did not cycle lamp orientations');
+log('lamp rotation indexes:', rots.join(' → '));
+if (rots.some((r, i) => i && r === rots[i - 1])) errors.push('R did not cycle lamp orientations');
 await a.keyboard.press('e'); await wait(800);
 let m = await me(a);
 log('after drop: carry', m.carry, 'score', m.score);
@@ -69,7 +70,7 @@ await a.close?.();
 const b = await player('Bo', 'qa-bo@example.com');
 await b.click('#btn-solo');
 await b.waitForFunction(() => window.__sm.snap?.players?.filter(p => p.bot).length === 3);
-await b.click('#games button[data-game="sabotage"]');
+await b.$eval('#games button[data-game="sabotage"]', b => b.click());
 await b.waitForFunction(() => window.__sm.snap?.game === 'sabotage');
 await b.screenshot({ path: `${out}/w06-sabotage-lobby.png` });
 await b.click('#btn-start');

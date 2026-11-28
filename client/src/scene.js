@@ -163,12 +163,14 @@ export class GameScene {
     this.drive = { t: 0, damaged: new Set(damagedIds), burst: false };
     for (const v of this.items.values()) v.obj.userData.baseX = v.obj.position.x;
     this.shutter.visible = true;
+    if (this.truckParts) { this.truckParts.shell.visible = true; for (const m of [...Object.values(this.truckParts.sides), ...this.truckParts.front]) m.visible = true; } // a closed box truck for the drive
   }
   resetDrive() {
     if (!this.drive && this.truckGroup.position.x === 0) return;
     this.drive = null;
     this.truckGroup.position.x = 0;
     this.shutter.visible = false; this.shutter.scale.y = 0.001;
+    if (this.truckParts) this.truckParts.shell.visible = false;
     if (this.ramp && this.rampHome) { this.ramp.position.set(this.rampHome.x, this.rampHome.y, 0); this.ramp.rotation.z = this.rampHome.rot; this.ramp.visible = true; }
   }
 
